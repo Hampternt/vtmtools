@@ -41,9 +41,9 @@
     margin-bottom: 0.5rem;
   }
   .slider-label {
-    width: 90px;
+    width: 5.625rem;
     font-size: 0.85rem;
-    color: #a09070;
+    color: var(--text-label);
   }
   .steps {
     display: flex;
@@ -51,11 +51,11 @@
     align-items: center;
   }
   .step {
-    width: 14px;
-    height: 14px;
+    width: 0.875rem;
+    height: 0.875rem;
     border-radius: 50%;
-    border: 2px solid #3a1a1a;
-    background: #1a0d0d;
+    border: 2px solid var(--border-surface);
+    background: var(--bg-input);
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s;
     padding: 0;
@@ -65,13 +65,13 @@
     border-color: #8a1515;
   }
   .step.active {
-    background: #cc2222;
+    background: var(--accent);
     border-color: #ee3333;
     box-shadow: 0 0 6px #cc222266;
   }
   .slider-value {
     font-size: 0.8rem;
-    color: #cc2222;
-    width: 90px;
+    color: var(--accent);
+    width: 5.625rem;
   }
 </style>
