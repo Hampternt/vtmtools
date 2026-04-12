@@ -38,7 +38,7 @@
     const rt = resonanceType.toLowerCase();
     invoke<DyscrasiaEntry[]>('list_dyscrasias', { resonanceType: rt }).then(list => {
       entries = list;
-    });
+    }).catch(e => console.error('list_dyscrasias failed:', e));
   });
 
   $effect(() => {
@@ -48,10 +48,14 @@
   });
 
   async function reroll() {
-    const rolled = await invoke<DyscrasiaEntry | null>('roll_random_dyscrasia', { resonanceType: resonanceType.toLowerCase() });
-    if (rolled) {
-      rolledId   = rolled.id;
-      selectedId = rolled.id;
+    try {
+      const rolled = await invoke<DyscrasiaEntry | null>('roll_random_dyscrasia', { resonanceType: resonanceType.toLowerCase() });
+      if (rolled) {
+        rolledId   = rolled.id;
+        selectedId = rolled.id;
+      }
+    } catch (e) {
+      console.error('reroll failed:', e);
     }
   }
 
@@ -62,8 +66,8 @@
   }
 
   function cardState(entry: DyscrasiaEntry): 'rolled' | 'selected' | null {
-    if (entry.id === rolledId && entry.id === selectedId) return 'rolled';
-    if (entry.id === selectedId) return 'selected';
+    if (entry.id === rolledId) return 'rolled';    // always show rolled (red)
+    if (entry.id === selectedId) return 'selected'; // different selected card (gold)
     return null;
   }
 </script>
