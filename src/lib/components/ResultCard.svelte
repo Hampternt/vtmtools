@@ -86,8 +86,8 @@
   .card-footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--border-surface); padding-top: 0.75rem; }
   .export-btn {
     padding: 0.3rem 0.8rem;
-    background: #1a1a0d;
-    border: 1px solid #6a5a20;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border-surface);
     color: var(--accent-amber);
     cursor: pointer;
     border-radius: 3px;
