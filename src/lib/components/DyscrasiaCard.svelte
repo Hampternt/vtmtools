@@ -106,7 +106,6 @@
     flex-direction: column;
     gap: 0.4rem;
     break-inside: avoid;
-    margin-bottom: 0.75rem;
     width: 100%;
     position: relative;
     transition: border-color 0.15s, box-shadow 0.15s;

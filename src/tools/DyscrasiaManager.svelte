@@ -246,7 +246,7 @@
     column-gap: 0.75rem;
   }
   /* transition wrapper divs must not break across columns */
-  .masonry > div { break-inside: avoid; }
+  .masonry > div { break-inside: avoid; display: flow-root; padding-bottom: 0.75rem; width: 100%; }
 
   .empty {
     color: var(--text-ghost);

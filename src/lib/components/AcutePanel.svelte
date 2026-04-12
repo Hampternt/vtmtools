@@ -193,7 +193,7 @@
   .load-error { font-size: 0.72rem; color: var(--accent); padding: 0.5rem 0; }
 
   .masonry { column-width: 11.25rem; column-gap: 0.6rem; }
-  .masonry > div { break-inside: avoid; }
+  .masonry > div { break-inside: avoid; display: flow-root; padding-bottom: 0.75rem; width: 100%; }
 
   .panel-footer {
     display: flex;
