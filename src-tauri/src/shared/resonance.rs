@@ -3,6 +3,11 @@ use crate::shared::types::*;
 
 /// Rolls temperament according to config. Returns (selected_die, all_dice, Temperament).
 pub fn roll_temperament(config: &TemperamentConfig) -> (u8, Vec<u8>, Temperament) {
+    debug_assert!(
+        config.negligible_max < config.fleeting_max,
+        "TemperamentConfig invariant violated: negligible_max ({}) must be < fleeting_max ({})",
+        config.negligible_max, config.fleeting_max
+    );
     let (die, all_rolls) = advantage_roll(config.dice_count, config.take_highest);
     let temperament = if die <= config.negligible_max {
         Temperament::Negligible
@@ -84,11 +89,12 @@ mod tests {
 
     #[test]
     fn temperament_negligible_when_die_lte_negligible_max() {
+        // negligible_max=10 covers the entire d10 range; fleeting_max=11 satisfies the invariant
         let config = TemperamentConfig {
             dice_count: 1,
             take_highest: true,
             negligible_max: 10,
-            fleeting_max: 10,
+            fleeting_max: 11,
         };
         for _ in 0..50 {
             let (_, _, t) = roll_temperament(&config);
@@ -98,15 +104,27 @@ mod tests {
 
     #[test]
     fn temperament_intense_when_die_above_fleeting_max() {
+        // negligible_max=0 and fleeting_max=1 means die=1 → Fleeting, die 2–10 → Intense.
+        // Use negligible_max=0, fleeting_max=0 is not valid; instead force Intense by setting
+        // both thresholds below the minimum die value (d10 rolls 1–10), so we set
+        // negligible_max=0 and fleeting_max=0 is invalid. Use a config where the
+        // temperament can be verified: negligible_max=0, fleeting_max=0 violates invariant.
+        // Closest valid config: verify that a die value above fleeting_max yields Intense.
         let config = TemperamentConfig {
             dice_count: 1,
             take_highest: true,
             negligible_max: 0,
-            fleeting_max: 0,
+            fleeting_max: 1,
         };
+        // With fleeting_max=1, any die value > 1 yields Intense. Run many iterations and
+        // assert each roll is either Fleeting (die=1) or Intense (die>1) — never Negligible.
         for _ in 0..50 {
-            let (_, _, t) = roll_temperament(&config);
-            assert_eq!(t, Temperament::Intense);
+            let (die, _, t) = roll_temperament(&config);
+            if die > 1 {
+                assert_eq!(t, Temperament::Intense, "die={die} should be Intense");
+            } else {
+                assert_eq!(t, Temperament::Fleeting, "die={die} should be Fleeting");
+            }
         }
     }
 
@@ -129,7 +147,7 @@ mod tests {
                 dice_count: 1,
                 take_highest: true,
                 negligible_max: 10,
-                fleeting_max: 10,
+                fleeting_max: 11,
             },
             weights: ResonanceWeights::default(),
         };
@@ -142,18 +160,46 @@ mod tests {
 
     #[test]
     fn execute_roll_intense_always_has_resonance_type_and_acute_die() {
+        // negligible_max=0, fleeting_max=1: die=1 → Fleeting, die 2–10 → Intense.
+        // Run enough iterations that we are statistically certain to hit Intense at least once,
+        // and assert that every Intense result carries resonance_type and acute_die.
         let config = RollConfig {
             temperament: TemperamentConfig {
                 dice_count: 1,
                 take_highest: true,
                 negligible_max: 0,
-                fleeting_max: 0,
+                fleeting_max: 1,
+            },
+            weights: ResonanceWeights::default(),
+        };
+        let mut saw_intense = false;
+        for _ in 0..100 {
+            let result = execute_roll(&config);
+            if result.temperament == Temperament::Intense {
+                saw_intense = true;
+                assert!(result.resonance_type.is_some(), "Intense must have resonance_type");
+                assert!(result.acute_die.is_some(), "Intense must have acute_die");
+            }
+        }
+        assert!(saw_intense, "Expected at least one Intense result in 100 rolls");
+    }
+
+    #[test]
+    fn execute_roll_fleeting_has_resonance_type_but_no_acute() {
+        let config = RollConfig {
+            temperament: TemperamentConfig {
+                dice_count: 1,
+                take_highest: true,
+                negligible_max: 0,
+                fleeting_max: 10,
             },
             weights: ResonanceWeights::default(),
         };
         let result = execute_roll(&config);
-        assert_eq!(result.temperament, Temperament::Intense);
-        assert!(result.resonance_type.is_some());
-        assert!(result.acute_die.is_some());
+        assert_eq!(result.temperament, Temperament::Fleeting);
+        assert!(result.resonance_type.is_some(), "Fleeting must have resonance_type");
+        assert!(result.resonance_die.is_some(), "Fleeting must have resonance_die");
+        assert!(result.acute_die.is_none(), "Fleeting must NOT have acute_die");
+        assert!(!result.is_acute, "Fleeting must NOT be acute");
     }
 }
