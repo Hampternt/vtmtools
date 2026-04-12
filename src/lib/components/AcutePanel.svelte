@@ -22,8 +22,12 @@
   let rawSearch = $state('');
   let searchQuery = $state('');
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  let loadError = $state('');
 
-  const selectedEntry = $derived(entries.find(e => e.id === selectedId) ?? null);
+  const selectedEntry = $derived(
+    entries.find(e => e.id === selectedId) ??
+    (selectedId === initialDyscrasia?.id ? initialDyscrasia : null)
+  );
 
   const filteredEntries = $derived(
     entries.filter(e => {
@@ -38,7 +42,7 @@
     const rt = resonanceType.toLowerCase();
     invoke<DyscrasiaEntry[]>('list_dyscrasias', { resonanceType: rt }).then(list => {
       entries = list;
-    }).catch(e => console.error('list_dyscrasias failed:', e));
+    }).catch(e => { console.error('list_dyscrasias failed:', e); loadError = String(e); });
   });
 
   $effect(() => {
@@ -88,6 +92,10 @@
       <button class="reroll-btn" onclick={reroll}>⟳ Re-roll</button>
     </div>
   </div>
+
+  {#if loadError}
+    <p class="load-error">{loadError}</p>
+  {/if}
 
   <div class="masonry">
     {#each filteredEntries as entry (entry.id)}
@@ -181,6 +189,8 @@
   }
   .reroll-btn:hover { border-color: var(--accent); color: var(--text-primary); box-shadow: 0 0 6px #cc222233; }
   .reroll-btn:active { transform: scale(0.93); }
+
+  .load-error { font-size: 0.72rem; color: var(--accent); padding: 0.5rem 0; }
 
   .masonry { column-width: 180px; column-gap: 0.6rem; }
   .masonry > div { break-inside: avoid; }
