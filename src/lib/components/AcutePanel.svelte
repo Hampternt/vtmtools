@@ -79,7 +79,7 @@
 <div class="acute-panel">
   <div class="panel-header">
     <span class="panel-title">
-      Dyscrasias — <span class="type-label">{resonanceType}</span>
+      Dyscrasias — <span class="type-label">{resonanceType.charAt(0).toUpperCase() + resonanceType.slice(1)}</span>
     </span>
     <div class="panel-controls">
       <input
@@ -169,7 +169,7 @@
     padding: 0.3rem 0.6rem;
     color: var(--text-primary);
     font-size: 0.72rem;
-    width: 140px;
+    width: 8.75rem;
     outline: none;
     transition: border-color 0.15s;
   }
@@ -192,7 +192,7 @@
 
   .load-error { font-size: 0.72rem; color: var(--accent); padding: 0.5rem 0; }
 
-  .masonry { column-width: 180px; column-gap: 0.6rem; }
+  .masonry { column-width: 11.25rem; column-gap: 0.6rem; }
   .masonry > div { break-inside: avoid; }
 
   .panel-footer {

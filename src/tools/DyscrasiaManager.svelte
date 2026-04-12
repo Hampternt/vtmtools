@@ -242,7 +242,7 @@
   .error-text { color: var(--accent); font-size: 0.8rem; padding: 1rem 0; }
 
   .masonry {
-    column-width: 200px;
+    column-width: 12.5rem;
     column-gap: 0.75rem;
   }
   /* transition wrapper divs must not break across columns */

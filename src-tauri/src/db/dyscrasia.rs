@@ -102,12 +102,16 @@ pub async fn delete_dyscrasia(
     pool: tauri::State<'_, crate::DbState>,
     id: i64,
 ) -> Result<(), String> {
-    sqlx::query("DELETE FROM dyscrasias WHERE id = ? AND is_custom = 1")
+    let result = sqlx::query("DELETE FROM dyscrasias WHERE id = ? AND is_custom = 1")
         .bind(id)
         .execute(&*pool.0)
         .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    if result.rows_affected() == 0 {
+        return Err("Dyscrasia not found or cannot be deleted".to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]
