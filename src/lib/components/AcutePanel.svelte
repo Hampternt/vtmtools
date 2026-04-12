@@ -35,10 +35,9 @@
   );
 
   $effect(() => {
-    untrack(() => {
-      invoke<DyscrasiaEntry[]>('list_dyscrasias', { resonanceType: resonanceType.toLowerCase() }).then(list => {
-        entries = list;
-      });
+    const rt = resonanceType.toLowerCase();
+    invoke<DyscrasiaEntry[]>('list_dyscrasias', { resonanceType: rt }).then(list => {
+      entries = list;
     });
   });
 
