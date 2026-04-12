@@ -36,3 +36,9 @@ export interface ResonanceRollResult {
   isAcute: boolean;
   dyscrasia: DyscrasiaEntry | null;
 }
+
+export interface HistoryEntry {
+  id: number;
+  timestamp: Date;
+  result: ResonanceRollResult;
+}
