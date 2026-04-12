@@ -16,6 +16,12 @@ export const tools: Tool[] = [
     icon: '🩸',
     component: () => import('./tools/Resonance.svelte'),
   },
+  {
+    id: 'dyscrasias',
+    label: 'Dyscrasias',
+    icon: '📋',
+    component: () => import('./tools/DyscrasiaManager.svelte'),
+  },
   // Future tools go here, e.g.:
   // { id: 'combat', label: 'Combat Tracker', icon: '⚔️', component: () => import('./tools/Combat.svelte') },
 ];
