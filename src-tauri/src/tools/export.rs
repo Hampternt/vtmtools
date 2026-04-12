@@ -1,8 +1,7 @@
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::path::PathBuf;
 use tauri::Manager;
 
-/// Formats a JSON value to a Markdown string. Pure function — no DB access.
 pub fn format_to_md(json: &Value) -> String {
     let mut md = String::new();
     md.push_str("# VTM Roll Result\n\n");
@@ -41,18 +40,17 @@ pub async fn export_result_to_md(
     result: Value,
     dyscrasia: Option<Value>,
 ) -> Result<String, String> {
-    let mut combined = serde_json::json!({});
+    let now = chrono::Local::now();
+
+    let mut map = Map::new();
     if let Some(obj) = result.as_object() {
-        for (k, v) in obj {
-            combined[k] = v.clone();
-        }
+        map.extend(obj.clone());
     }
     if let Some(d) = dyscrasia {
-        combined["dyscrasia"] = d;
+        map.insert("dyscrasia".to_string(), d);
     }
-    combined["exported_at"] = Value::String(
-        chrono::Local::now().to_rfc2822()
-    );
+    map.insert("exported_at".to_string(), Value::String(now.to_rfc2822()));
+    let combined = Value::Object(map);
 
     let md = format_to_md(&combined);
 
@@ -61,16 +59,13 @@ pub async fn export_result_to_md(
         .document_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join("vtmtools");
-    std::fs::create_dir_all(&export_dir).map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(&export_dir).await.map_err(|e| e.to_string())?;
 
-    let filename = format!(
-        "resonance_{}.md",
-        chrono::Local::now().format("%Y%m%d_%H%M%S")
-    );
+    let filename = format!("resonance_{}.md", now.format("%Y%m%d_%H%M%S"));
     let path = export_dir.join(&filename);
-    std::fs::write(&path, &md).map_err(|e| e.to_string())?;
+    tokio::fs::write(&path, &md).await.map_err(|e| e.to_string())?;
 
-    Ok(path.to_string_lossy().to_string())
+    Ok(path.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
