@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { untrack } from 'svelte';
   import { scale, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import DyscrasiaCard from '$lib/components/DyscrasiaCard.svelte';
@@ -18,6 +19,7 @@
 
   let allEntries: DyscrasiaEntry[] = $state([]);
   let loading = $state(true);
+  let loadError = $state('');
   let activeTypes: Set<string> = $state(new Set(['all']));
   let rawSearch = $state('');
   let searchQuery = $state('');
@@ -39,11 +41,17 @@
 
   async function loadAll() {
     loading = true;
-    const results = await Promise.all(
-      TYPES.map(t => invoke<DyscrasiaEntry[]>('list_dyscrasias', { resonanceType: t }))
-    );
-    allEntries = results.flat();
-    loading = false;
+    loadError = '';
+    try {
+      const results = await Promise.all(
+        TYPES.map(t => invoke<DyscrasiaEntry[]>('list_dyscrasias', { resonanceType: t }))
+      );
+      allEntries = results.flat();
+    } catch (e) {
+      loadError = String(e);
+    } finally {
+      loading = false;
+    }
   }
 
   function toggleType(type: string) {
@@ -72,10 +80,18 @@
   }
 
   function handleDelete(id: number) {
-    invoke<void>('delete_dyscrasia', { id }).then(() => loadAll());
+    invoke<void>('delete_dyscrasia', { id })
+      .then(() => loadAll())
+      .catch(e => { loadError = String(e); });
   }
 
-  $effect(() => { loadAll(); });
+  $effect(() => { untrack(() => loadAll()); });
+
+  $effect(() => {
+    return () => {
+      if (searchTimer) clearTimeout(searchTimer);
+    };
+  });
 </script>
 
 <div class="page">
@@ -121,6 +137,8 @@
 
   {#if loading}
     <p class="loading-text">Loading…</p>
+  {:else if loadError}
+    <p class="error-text">{loadError}</p>
   {:else}
     <div class="masonry">
       {#if showAddForm}
@@ -217,10 +235,11 @@
   }
   .chip:hover { border-color: var(--border-surface); color: var(--text-primary); }
   .chip:active { transform: scale(0.87); }
-  .chip.active { border-color: var(--text-label); color: var(--text-primary); background: #1a1006; }
+  .chip.active { border-color: var(--text-label); color: var(--text-primary); background: var(--bg-raised); }
 
   .results-label { font-size: 0.68rem; color: var(--text-ghost); margin-bottom: 0.75rem; }
   .loading-text  { color: var(--text-ghost); font-size: 0.8rem; }
+  .error-text { color: var(--accent); font-size: 0.8rem; padding: 1rem 0; }
 
   .masonry {
     column-width: 200px;
