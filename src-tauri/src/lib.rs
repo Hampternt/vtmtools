@@ -37,7 +37,7 @@ pub fn run() {
             db::dyscrasia::update_dyscrasia,
             db::dyscrasia::delete_dyscrasia,
             db::dyscrasia::roll_random_dyscrasia,
-            // tools::export::export_result_to_md is added in Task 11
+            tools::export::export_result_to_md,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
