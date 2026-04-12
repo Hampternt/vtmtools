@@ -1,5 +1,5 @@
 use rand::Rng;
-use crate::shared::types::{ResonanceType, ResonanceWeights, SliderLevel};
+use crate::shared::types::{ResonanceType, ResonanceWeights};
 
 /// Rolls a single d10. Returns 1–10 (0 on the die = 10).
 pub fn roll_d10() -> u8 {
@@ -26,11 +26,12 @@ pub fn advantage_roll(count: u8, take_highest: bool) -> (u8, Vec<u8>) {
 /// then results are normalised. "Guaranteed" bypasses normalisation entirely.
 pub fn weighted_resonance_pick(weights: &ResonanceWeights) -> ResonanceType {
     // Base probabilities (must sum to 1.0)
+    // Equal by default — all neutral means truly equal odds; sliders skew from there.
     let base = [
-        (ResonanceType::Phlegmatic, 0.30_f64),
-        (ResonanceType::Melancholy, 0.30_f64),
-        (ResonanceType::Choleric,   0.20_f64),
-        (ResonanceType::Sanguine,   0.20_f64),
+        (ResonanceType::Phlegmatic, 0.25_f64),
+        (ResonanceType::Melancholy, 0.25_f64),
+        (ResonanceType::Choleric,   0.25_f64),
+        (ResonanceType::Sanguine,   0.25_f64),
     ];
 
     let multipliers = [
