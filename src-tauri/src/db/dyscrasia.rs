@@ -83,14 +83,18 @@ pub async fn update_dyscrasia(
     description: String,
     bonus: String,
 ) -> Result<(), String> {
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE dyscrasias SET name = ?, description = ?, bonus = ? WHERE id = ? AND is_custom = 1"
     )
     .bind(&name).bind(&description).bind(&bonus).bind(id)
     .execute(&*pool.0)
     .await
-    .map(|_| ())
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    if result.rows_affected() == 0 {
+        return Err("Dyscrasia not found or cannot be edited".to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]

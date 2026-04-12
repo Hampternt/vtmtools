@@ -13,9 +13,9 @@
     onsave: (saved: DyscrasiaEntry) => void;
   } = $props();
 
-  const TYPES = ['Phlegmatic', 'Melancholy', 'Choleric', 'Sanguine'] as const;
+  const TYPES = ['phlegmatic', 'melancholy', 'choleric', 'sanguine'] as const;
 
-  let resonanceType = $state(untrack(() => entry?.resonanceType ?? 'Phlegmatic'));
+  let resonanceType = $state(untrack(() => entry?.resonanceType?.toLowerCase() ?? 'phlegmatic'));
   let name         = $state(untrack(() => entry?.name ?? ''));
   let description  = $state(untrack(() => entry?.description ?? ''));
   let bonus        = $state(untrack(() => entry?.bonus ?? ''));
@@ -63,7 +63,7 @@
     <label for="rtype">Resonance Type</label>
     <select id="rtype" bind:value={resonanceType} disabled={!!entry}>
       {#each TYPES as t}
-        <option value={t}>{t}</option>
+        <option value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
       {/each}
     </select>
   </div>
