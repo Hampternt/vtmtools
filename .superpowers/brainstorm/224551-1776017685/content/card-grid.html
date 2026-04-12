@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dyscrasia Manager — Card Grid</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; color: #d4c5a9; font-family: 'Segoe UI', system-ui, sans-serif; padding: 1.5rem; min-height: 100vh; }
+  h1 { font-size: 1rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: #a09070; margin-bottom: 1rem; }
+
+  .search-row { display: flex; gap: 0.6rem; margin-bottom: 0.9rem; align-items: center; }
+  .search-input { flex: 1; background: #1a0d0d; border: 1px solid #3a1a1a; border-radius: 5px; padding: 0.5rem 0.75rem; color: #d4c5a9; font-size: 0.82rem; outline: none; transition: border-color 0.15s; }
+  .search-input:focus { border-color: #cc2222; }
+  .search-input::placeholder { color: #585050; }
+  .add-btn { background: #1a0505; border: 1px solid #cc2222; color: #cc2222; border-radius: 5px; padding: 0.5rem 0.9rem; font-size: 0.78rem; cursor: pointer; white-space: nowrap; transition: box-shadow 0.15s; }
+  .add-btn:hover { box-shadow: 0 0 8px #cc222266; }
+
+  .filter-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.1rem; }
+  .chip { padding: 0.28rem 0.65rem; border-radius: 20px; font-size: 0.72rem; border: 1px solid #2a1010; color: #a09070; background: #120808; cursor: pointer; transition: all 0.15s; user-select: none; }
+  .chip:hover { border-color: #6a5a3a; color: #d4c5a9; }
+  .chip.active { background: #1a1006; border-color: #a09070; color: #d4c5a9; }
+  .chip[data-type="Phlegmatic"].active { border-color: #5080c0; color: #a0c0f0; background: #0a0f1a; }
+  .chip[data-type="Melancholy"].active { border-color: #7050a0; color: #c0a0e0; background: #0f0a18; }
+  .chip[data-type="Choleric"].active   { border-color: #cc2222; color: #f09090; background: #1a0505; }
+  .chip[data-type="Sanguine"].active   { border-color: #cc9922; color: #f0cc70; background: #1a1206; }
+  .chip-count { display: inline-block; background: #2a1010; border-radius: 10px; padding: 0 0.3rem; font-size: 0.62rem; margin-left: 0.2rem; color: #686868; }
+
+  .results-label { font-size: 0.68rem; color: #585050; margin-bottom: 0.6rem; }
+  .results-count-em { color: #a09070; }
+
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0.75rem; }
+  .card { background: #120808; border: 1px solid #2a1010; border-radius: 8px; padding: 0.9rem; display: flex; flex-direction: column; gap: 0.4rem; transition: border-color 0.15s, box-shadow 0.15s; }
+  .card:hover { border-color: #3a1a1a; box-shadow: 0 2px 12px #0008; }
+
+  .card-type { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.09em; font-weight: 600; }
+  .card-type.Phlegmatic { color: #7090c0; }
+  .card-type.Melancholy { color: #9070b0; }
+  .card-type.Choleric   { color: #cc4444; }
+  .card-type.Sanguine   { color: #cc9922; }
+
+  .card-name { font-size: 0.88rem; font-weight: 600; color: #d4c5a9; line-height: 1.2; }
+  .card-desc { font-size: 0.72rem; color: #6a5a3a; line-height: 1.4; flex: 1; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 0.3rem; padding-top: 0.4rem; border-top: 1px solid #1e0e0e; }
+  .card-bonus { font-size: 0.64rem; color: #a09070; }
+  .card-actions { display: flex; gap: 0.3rem; }
+  .card-action-btn { font-size: 0.6rem; padding: 0.15rem 0.35rem; border-radius: 3px; border: 1px solid; cursor: pointer; background: none; }
+  .card-action-btn.edit { border-color: #4a3a1a; color: #cc9922; }
+  .card-action-btn.edit:hover { background: #1a1206; }
+  .card-action-btn.del  { border-color: #3a1010; color: #cc4444; }
+  .card-action-btn.del:hover  { background: #1a0505; }
+  .card-builtin-badge { font-size: 0.55rem; color: #585050; border: 1px solid #2a1a1a; border-radius: 3px; padding: 0.1rem 0.3rem; }
+
+  .empty { grid-column: 1 / -1; text-align: center; color: #585050; padding: 3rem; font-size: 0.8rem; }
+</style>
+</head>
+<body>
+
+<h1>📋 Dyscrasias</h1>
+
+<div class="search-row">
+  <input class="search-input" id="search" placeholder="🔍  Search by name or description…" oninput="filterCards()">
+  <button class="add-btn">+ Add Custom</button>
+</div>
+
+<div class="filter-row" id="filter-row">
+  <div class="chip all active" data-type="all" onclick="toggleChip(this)">All <span class="chip-count" id="count-all">10</span></div>
+  <div class="chip" data-type="Phlegmatic" onclick="toggleChip(this)">Phlegmatic <span class="chip-count">2</span></div>
+  <div class="chip" data-type="Melancholy" onclick="toggleChip(this)">Melancholy <span class="chip-count">3</span></div>
+  <div class="chip" data-type="Choleric"   onclick="toggleChip(this)">Choleric <span class="chip-count">3</span></div>
+  <div class="chip" data-type="Sanguine"   onclick="toggleChip(this)">Sanguine <span class="chip-count">2</span></div>
+</div>
+
+<div class="results-label">Showing <em class="results-count-em" id="results-count">10</em> dyscrasias</div>
+
+<div class="card-grid" id="card-grid"></div>
+
+<script>
+const dyscrasias = [
+  { resonanceType:"Phlegmatic", name:"Unshakeable Calm",   description:"The vampire's blood carries an almost preternatural stillness. Those who drink feel panic fade, replaced by cool resolve.", bonus:"+2 dice to Fortitude-related rolls", isCustom:false },
+  { resonanceType:"Phlegmatic", name:"Still Waters",        description:"A deep quietude flows through this blood, heightening perception without distorting it. Secrets surface unbidden.", bonus:"+2 dice to Auspex-related discipline rolls", isCustom:false },
+  { resonanceType:"Melancholy", name:"Haunted",             description:"The mortal's grief infused the blood with echoes of death. Something stirs in the dark when this vampire feeds.", bonus:"+2 dice to Oblivion-related discipline rolls", isCustom:false },
+  { resonanceType:"Melancholy", name:"Hollow",              description:"A profound emptiness — this mortal had given up something essential. Their vacancy becomes a veil the vampire can wear.", bonus:"+2 dice to Obfuscate-related discipline rolls", isCustom:false },
+  { resonanceType:"Melancholy", name:"Last Light",          description:"A mortal at the threshold of death. Their blood tastes of finality, of things left unsaid.", bonus:"+2 dice to Auspex when sensing death", isCustom:true },
+  { resonanceType:"Choleric",   name:"Berserker's Blood",   description:"Rage crystallized into vitae. The vampire feels their limbs surge with terrible, uncomplicated force.", bonus:"+2 dice to Potence-related discipline rolls", isCustom:false },
+  { resonanceType:"Choleric",   name:"Hair-Trigger",        description:"A mortal wound too tight, living on adrenaline. Their blood hums with barely-contained velocity.", bonus:"+2 dice to Celerity-related discipline rolls", isCustom:false },
+  { resonanceType:"Choleric",   name:"Warlord's Vintage",   description:"A soldier who knew nothing but war — blood carrying the weight of endless campaigns, sharpening instincts to a killing edge.", bonus:"+1 die to all Physical discipline rolls", isCustom:true },
+  { resonanceType:"Sanguine",   name:"True Believer",       description:"Devotion so pure it altered the blood itself. Others feel the pull of conviction when this vampire speaks.", bonus:"+2 dice to Presence-related discipline rolls", isCustom:false },
+  { resonanceType:"Sanguine",   name:"Ecstatic",            description:"Joy turned to fever in the blood. The vampire rides its warmth like a drug, and something ancient stirs.", bonus:"+2 dice to Blood Sorcery-related discipline rolls", isCustom:false },
+];
+
+let activeTypes = new Set(['all']);
+
+function toggleChip(el) {
+  const type = el.dataset.type;
+  const allChip = document.querySelector('.chip.all');
+  if (type === 'all') {
+    activeTypes = new Set(['all']);
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+  } else {
+    if (activeTypes.has('all')) { activeTypes.delete('all'); allChip.classList.remove('active'); }
+    if (activeTypes.has(type)) { activeTypes.delete(type); el.classList.remove('active'); }
+    else { activeTypes.add(type); el.classList.add('active'); }
+    if (activeTypes.size === 0) { activeTypes.add('all'); allChip.classList.add('active'); }
+  }
+  filterCards();
+}
+
+function makeEl(tag, cls, text) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+function filterCards() {
+  const query = document.getElementById('search').value.toLowerCase();
+  const grid = document.getElementById('card-grid');
+  while (grid.firstChild) grid.removeChild(grid.firstChild);
+
+  const filtered = dyscrasias.filter(d => {
+    const typeMatch = activeTypes.has('all') || activeTypes.has(d.resonanceType);
+    const textMatch = !query ||
+      d.name.toLowerCase().includes(query) ||
+      d.description.toLowerCase().includes(query) ||
+      d.bonus.toLowerCase().includes(query);
+    return typeMatch && textMatch;
+  });
+
+  document.getElementById('results-count').textContent = filtered.length;
+
+  if (filtered.length === 0) {
+    const empty = makeEl('div', 'empty', 'No dyscrasias match your search.');
+    grid.appendChild(empty);
+    return;
+  }
+
+  filtered.forEach(d => {
+    const card = makeEl('div', 'card');
+
+    const typeBadge = makeEl('div', 'card-type ' + d.resonanceType, d.resonanceType);
+    const name = makeEl('div', 'card-name', d.name);
+    const desc = makeEl('div', 'card-desc', d.description);
+
+    const footer = makeEl('div', 'card-footer');
+    const bonus = makeEl('div', 'card-bonus', d.bonus);
+    footer.appendChild(bonus);
+
+    if (d.isCustom) {
+      const actions = makeEl('div', 'card-actions');
+      const editBtn = makeEl('button', 'card-action-btn edit', '✎ Edit');
+      const delBtn  = makeEl('button', 'card-action-btn del',  '✕');
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+      footer.appendChild(actions);
+    } else {
+      footer.appendChild(makeEl('span', 'card-builtin-badge', 'built-in'));
+    }
+
+    card.appendChild(typeBadge);
+    card.appendChild(name);
+    card.appendChild(desc);
+    card.appendChild(footer);
+    grid.appendChild(card);
+  });
+}
+
+filterCards();
+</script>
+</body>
+</html>
