@@ -33,14 +33,16 @@
   });
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
   class="card"
   class:rolled={cardstate === 'rolled'}
   class:selected={cardstate === 'selected'}
   class:clickable={mode === 'acute'}
   onclick={mode === 'acute' ? onselect : undefined}
+  onkeydown={mode === 'acute' ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onselect?.(); } } : undefined}
   role={mode === 'acute' ? 'button' : undefined}
-  tabindex={mode === 'acute' ? 0 : -1}
+  tabindex={mode === 'acute' ? 0 : undefined}
 >
   {#if cardstate === 'rolled'}
     <span class="state-badge">rolled</span>
@@ -49,7 +51,15 @@
   {/if}
 
   {#if mode === 'manager'}
-    <div class="type-badge type-{entry.resonanceType.toLowerCase()}">{entry.resonanceType}</div>
+    <div
+      class="type-badge"
+      class:type-phlegmatic={entry.resonanceType.toLowerCase() === 'phlegmatic'}
+      class:type-melancholy={entry.resonanceType.toLowerCase() === 'melancholy'}
+      class:type-choleric={entry.resonanceType.toLowerCase() === 'choleric'}
+      class:type-sanguine={entry.resonanceType.toLowerCase() === 'sanguine'}
+    >
+      {entry.resonanceType}
+    </div>
   {/if}
 
   <div class="name">{entry.name}</div>
