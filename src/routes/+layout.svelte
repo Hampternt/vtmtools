@@ -1,8 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { Snippet } from 'svelte';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import { tools } from '../tools';
   import type { Component } from 'svelte';
+
+  const { children }: { children?: Snippet } = $props();
 
   let activeTool = $state(tools[0].id);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -27,6 +30,7 @@
     {:else}
       <p class="loading">Loading…</p>
     {/if}
+    {#if children}{@render children()}{/if}
   </main>
 </div>
 
