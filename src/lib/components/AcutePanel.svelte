@@ -1,8 +1,6 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { untrack } from 'svelte';
-  import { scale, fade } from 'svelte/transition';
-  import { cubicOut } from 'svelte/easing';
   import DyscrasiaCard from '$lib/components/DyscrasiaCard.svelte';
   import type { DyscrasiaEntry } from '../../types';
 
@@ -99,17 +97,12 @@
 
   <div class="masonry">
     {#each filteredEntries as entry (entry.id)}
-      <div
-        in:scale={{ start: 0.88, duration: 200, easing: cubicOut }}
-        out:fade={{ duration: 150 }}
-      >
-        <DyscrasiaCard
-          {entry}
-          mode="acute"
-          cardstate={cardState(entry)}
-          onselect={() => { selectedId = entry.id; }}
-        />
-      </div>
+      <DyscrasiaCard
+        {entry}
+        mode="acute"
+        cardstate={cardState(entry)}
+        onselect={() => { selectedId = entry.id; }}
+      />
     {/each}
   </div>
 
@@ -192,8 +185,12 @@
 
   .load-error { font-size: 0.72rem; color: var(--accent); padding: 0.5rem 0; }
 
-  .masonry { column-width: 11.25rem; column-gap: 0.6rem; }
-  .masonry > div { break-inside: avoid; display: flow-root; padding-bottom: 0.75rem; width: 100%; }
+  .masonry {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr));
+    gap: 0.6rem;
+    align-items: start;
+  }
 
   .panel-footer {
     display: flex;
