@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import type { DyscrasiaEntry } from '../../types';
 
   const {
     entry,
     mode,
     cardstate = null,
+    transitionDelay = 0,
     onselect,
     onedit,
     ondelete,
@@ -12,14 +14,26 @@
     entry: DyscrasiaEntry;
     mode: 'manager' | 'acute';
     cardstate?: 'rolled' | 'selected' | null;
+    transitionDelay?: number;
     onselect?: () => void;
     onedit?: () => void;
     ondelete?: () => void;
   } = $props();
 
+  let cardEl: HTMLElement | undefined = $state(undefined);
   let descEl: HTMLElement | undefined = $state(undefined);
   let overflowsDesc = $state(false);
   let isExpanded = $state(false);
+
+  onMount(() => {
+    cardEl?.animate(
+      [
+        { opacity: '0', transform: 'scale(0.88)' },
+        { opacity: '1', transform: 'scale(1)'   },
+      ],
+      { duration: 220, delay: transitionDelay, easing: 'cubic-bezier(0.33, 1, 0.68, 1)', fill: 'backwards' }
+    );
+  });
 
   $effect(() => {
     if (!descEl) return;
@@ -39,6 +53,7 @@
   class:rolled={cardstate === 'rolled'}
   class:selected={cardstate === 'selected'}
   class:clickable={mode === 'acute'}
+  bind:this={cardEl}
   onclick={mode === 'acute' ? onselect : undefined}
   onkeydown={mode === 'acute' ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onselect?.(); } } : undefined}
   role={mode === 'acute' ? 'button' : undefined}
@@ -53,10 +68,10 @@
   {#if mode === 'manager'}
     <div
       class="type-badge"
-      class:type-phlegmatic={entry.resonanceType.toLowerCase() === 'phlegmatic'}
-      class:type-melancholy={entry.resonanceType.toLowerCase() === 'melancholy'}
-      class:type-choleric={entry.resonanceType.toLowerCase() === 'choleric'}
-      class:type-sanguine={entry.resonanceType.toLowerCase() === 'sanguine'}
+      class:type-phlegmatic={entry.resonanceType === 'phlegmatic'}
+      class:type-melancholy={entry.resonanceType === 'melancholy'}
+      class:type-choleric={entry.resonanceType === 'choleric'}
+      class:type-sanguine={entry.resonanceType === 'sanguine'}
     >
       {entry.resonanceType}
     </div>
@@ -106,7 +121,9 @@
     flex-direction: column;
     gap: 0.4rem;
     break-inside: avoid;
+    box-sizing: border-box;
     width: 100%;
+    margin-bottom: 0.75rem;
     position: relative;
     transition: border-color 0.15s, box-shadow 0.15s;
   }
