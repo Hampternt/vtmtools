@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { untrack } from 'svelte';
+  import { flip } from 'svelte/animate';
   import { scale, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import DyscrasiaCard from '$lib/components/DyscrasiaCard.svelte';
@@ -153,31 +154,29 @@
         </div>
       {/if}
 
-      {#each filteredEntries as entry, i (entry.id)}
-        {#if editingId === entry.id}
-          <div
-            in:scale={{ start: 0.9, duration: 200, easing: cubicOut }}
-            out:fade={{ duration: 150 }}
-          >
-            <DyscrasiaForm
-              {entry}
-              oncancel={() => { editingId = null; }}
-              onsave={handleSave}
-            />
-          </div>
-        {:else}
-          <div
-            in:scale={{ start: 0.88, duration: 220, delay: i * 30, easing: cubicOut }}
-            out:fade={{ duration: 180 }}
-          >
+      {#each filteredEntries as entry (entry.id)}
+        <div animate:flip={{ duration: 300, easing: cubicOut }}>
+          {#if editingId === entry.id}
+            <div
+              in:scale={{ start: 0.9, duration: 200, easing: cubicOut }}
+              out:fade={{ duration: 150 }}
+            >
+              <DyscrasiaForm
+                {entry}
+                oncancel={() => { editingId = null; }}
+                onsave={handleSave}
+              />
+            </div>
+          {:else}
             <DyscrasiaCard
               {entry}
               mode="manager"
+              transitionDelay={0}
               onedit={() => { editingId = entry.id; showAddForm = false; }}
               ondelete={() => handleDelete(entry.id)}
             />
-          </div>
-        {/if}
+          {/if}
+        </div>
       {/each}
 
       {#if filteredEntries.length === 0 && !showAddForm}
@@ -242,11 +241,11 @@
   .error-text { color: var(--accent); font-size: 0.8rem; padding: 1rem 0; }
 
   .masonry {
-    column-width: 12.5rem;
-    column-gap: 0.75rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
+    gap: 0.75rem;
+    align-items: start;
   }
-  /* transition wrapper divs must not break across columns */
-  .masonry > div { break-inside: avoid; display: flow-root; padding-bottom: 0.75rem; width: 100%; }
 
   .empty {
     color: var(--text-ghost);
