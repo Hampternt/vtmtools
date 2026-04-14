@@ -22,6 +22,12 @@ export const tools: Tool[] = [
     icon: '📋',
     component: () => import('./tools/DyscrasiaManager.svelte'),
   },
+  {
+    id: 'campaign',
+    label: 'Campaign',
+    icon: '🗺️',
+    component: () => import('./tools/Campaign.svelte'),
+  },
   // Future tools go here, e.g.:
   // { id: 'combat', label: 'Combat Tracker', icon: '⚔️', component: () => import('./tools/Combat.svelte') },
 ];
