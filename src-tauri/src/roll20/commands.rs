@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use tauri::State;
 
 use crate::roll20::types::{Character, OutboundMsg, Roll20Conn};
@@ -27,7 +26,8 @@ pub async fn get_roll20_status(
 pub async fn refresh_roll20_data(
     conn: State<'_, Roll20Conn>,
 ) -> Result<(), String> {
-    if let Some(tx) = conn.0.outbound_tx.lock().await.as_ref() {
+    let tx = conn.0.outbound_tx.lock().await.clone();
+    if let Some(tx) = tx {
         let msg = serde_json::to_string(&OutboundMsg::Refresh)
             .map_err(|e| e.to_string())?;
         tx.send(msg).await.map_err(|e| e.to_string())?;
@@ -42,7 +42,8 @@ pub async fn send_roll20_chat(
     message: String,
     conn: State<'_, Roll20Conn>,
 ) -> Result<(), String> {
-    if let Some(tx) = conn.0.outbound_tx.lock().await.as_ref() {
+    let tx = conn.0.outbound_tx.lock().await.clone();
+    if let Some(tx) = tx {
         let msg = serde_json::to_string(&OutboundMsg::SendChat { message })
             .map_err(|e| e.to_string())?;
         tx.send(msg).await.map_err(|e| e.to_string())?;
