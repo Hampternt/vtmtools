@@ -25,6 +25,13 @@
   let expandedRaw   = $state<Set<string>>(new Set());
   let expandedAttrs = $state<Set<string>>(new Set());
   let expandedInfo  = $state<Set<string>>(new Set());
+  let urlCopied     = $state(false);
+
+  function copyExtensionsUrl() {
+    navigator.clipboard.writeText('chrome://extensions');
+    urlCopied = true;
+    setTimeout(() => { urlCopied = false; }, 1500);
+  }
 
   $effect(() => {
     invoke<boolean>('get_roll20_status').then(s => { connected = s; });
@@ -122,12 +129,56 @@
   </div>
 
   {#if !connected}
-    <div class="disconnected-banner">
-      <p class="banner-title">No Roll20 session detected</p>
-      <p class="banner-body">
-        Open your Roll20 game in Chrome with the vtmtools extension enabled.
-        This panel connects automatically.
-      </p>
+    <div class="setup-guide">
+      <p class="guide-title">Browser extension not connected</p>
+      <p class="guide-sub">Install the Roll20 bridge extension once, then open your game and this panel connects automatically.</p>
+
+      <ol class="steps">
+        <li class="step">
+          <div class="step-body">
+            <span class="step-heading">Download the extension</span>
+            <span class="step-text">Go to the vtmtools <strong>Releases</strong> page on GitHub and download <code>vtmtools-extension.zip</code>.</span>
+          </div>
+        </li>
+        <li class="step">
+          <div class="step-body">
+            <span class="step-heading">Extract the zip</span>
+            <span class="step-text">Right-click the downloaded file and choose <em>Extract All</em> (Windows) or double-click it (Mac/Linux). Remember where you put the folder.</span>
+          </div>
+        </li>
+        <li class="step">
+          <div class="step-body">
+            <span class="step-heading">Open Chrome extensions</span>
+            <span class="step-text">In Chrome, click the address bar, type this, and press Enter:</span>
+            <div class="url-row">
+              <code class="url-block">chrome://extensions</code>
+              <button class="btn-copy" onclick={copyExtensionsUrl}>
+                {urlCopied ? 'copied!' : 'copy'}
+              </button>
+            </div>
+          </div>
+        </li>
+        <li class="step">
+          <div class="step-body">
+            <span class="step-heading">Turn on Developer Mode</span>
+            <span class="step-text">In the top-right corner of that page, flip the <em>Developer mode</em> toggle on. A new row of buttons will appear.</span>
+          </div>
+        </li>
+        <li class="step">
+          <div class="step-body">
+            <span class="step-heading">Load the extension</span>
+            <span class="step-text">Click <em>Load unpacked</em>, then select the folder you extracted in step 2.</span>
+          </div>
+        </li>
+        <li class="step">
+          <div class="step-body">
+            <span class="step-heading">Open your Roll20 game</span>
+            <span class="step-text">Navigate to your game on Roll20. Once the editor loads, this panel will connect on its own.</span>
+          </div>
+        </li>
+      </ol>
+
+      <p class="guide-note">You only need to do this once. After that, just open Roll20 and vtmtools connects automatically.</p>
     </div>
   {:else if characters.length === 0}
     <div class="disconnected-banner">
@@ -432,19 +483,129 @@
   .btn-refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--text-primary); }
   .btn-refresh:disabled { opacity: 0.4; cursor: default; }
 
-  /* ── Disconnected banner ──────────────────────────────────────────────── */
-  .disconnected-banner {
+  /* ── Setup guide (shown when disconnected) ────────────────────────────── */
+  .setup-guide {
     display: flex;
     flex-direction: column;
+    gap: 1rem;
+    max-width: 480px;
+    padding: 1.5rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-card);
+    border-radius: 8px;
+  }
+  .guide-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+  }
+  .guide-sub {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    counter-reset: step-counter;
+    border: 1px solid var(--border-faint);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .step {
+    counter-increment: step-counter;
+    display: flex;
+    gap: 0.85rem;
+    padding: 0.75rem 0.9rem;
+    border-bottom: 1px solid var(--border-faint);
+  }
+  .step:last-child { border-bottom: none; }
+  .step::before {
+    content: counter(step-counter);
+    flex-shrink: 0;
+    width: 1.4rem;
+    height: 1.4rem;
+    border-radius: 50%;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border-surface);
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--text-ghost);
+    display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
-    padding: 3rem 1rem;
-    color: var(--text-ghost);
-    text-align: center;
+    margin-top: 0.05rem;
   }
-  .banner-title { font-size: 0.95rem; color: var(--text-muted); }
-  .banner-body  { font-size: 0.82rem; line-height: 1.6; max-width: 280px; }
+  .step-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+  .step-heading {
+    font-size: 0.83rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .step-text {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .step-text code {
+    font-family: monospace;
+    font-size: 0.78rem;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border-faint);
+    border-radius: 3px;
+    padding: 0.05rem 0.3rem;
+    color: var(--text-secondary);
+  }
+  .step-text strong { color: var(--text-secondary); font-weight: 600; }
+  .step-text em     { color: var(--accent-amber); font-style: normal; }
+
+  .url-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.2rem;
+  }
+  .url-block {
+    font-family: monospace;
+    font-size: 0.8rem;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border-surface);
+    border-radius: 4px;
+    padding: 0.25rem 0.55rem;
+    color: var(--accent);
+    letter-spacing: 0.01em;
+  }
+  .btn-copy {
+    font-size: 0.7rem;
+    color: var(--text-ghost);
+    background: none;
+    border: 1px solid var(--border-faint);
+    border-radius: 4px;
+    padding: 0.15rem 0.45rem;
+    cursor: pointer;
+    transition: color 0.1s, border-color 0.1s;
+    flex-shrink: 0;
+  }
+  .btn-copy:hover { color: var(--text-muted); border-color: var(--border-surface); }
+
+  .guide-note {
+    font-size: 0.75rem;
+    color: var(--text-ghost);
+    line-height: 1.5;
+    margin: 0;
+  }
 
   /* ── Character grid ───────────────────────────────────────────────────── */
   .char-grid {
