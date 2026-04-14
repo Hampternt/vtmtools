@@ -26,5 +26,7 @@ serde_json = "1"
 rand = "0.8"
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "migrate"] }
 tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 
