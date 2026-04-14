@@ -314,6 +314,7 @@ Replace `src/tools/Resonance.svelte` entirely with:
   async function roll() {
     rolling = true;
     result = null;
+    applyState = 'idle';
     try {
       result = await invoke<ResonanceRollResult>('roll_resonance', { config });
       if (result) {
@@ -670,6 +671,10 @@ Replace `src/tools/Resonance.svelte` entirely with:
   }
   .roll-btn:hover:not(:disabled) { background: #5a0808; box-shadow: 0 0 16px #cc222244; }
   .roll-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ResultCard has its own margin-top: 1.5rem which double-stacks with
+     steps-panel gap. Zero it out so the result sits flush in the flow. */
+  .steps-panel > :global(.result-card) { margin-top: 0; }
 
   /* ── Apply button ── */
   .apply-row { display: flex; justify-content: flex-end; }
