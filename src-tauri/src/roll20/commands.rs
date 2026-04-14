@@ -50,3 +50,25 @@ pub async fn send_roll20_chat(
     }
     Ok(())
 }
+
+/// Writes a single attribute on a Roll20 character sheet via the extension.
+/// No-op if no extension is connected.
+#[tauri::command]
+pub async fn set_roll20_attribute(
+    character_id: String,
+    name: String,
+    value: String,
+    conn: State<'_, Roll20Conn>,
+) -> Result<(), String> {
+    let tx = conn.0.outbound_tx.lock().await.clone();
+    if let Some(tx) = tx {
+        let msg = serde_json::to_string(&OutboundMsg::SetAttribute {
+            character_id,
+            name,
+            value,
+        })
+        .map_err(|e| e.to_string())?;
+        tx.send(msg).await.map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
