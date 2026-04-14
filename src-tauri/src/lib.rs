@@ -52,6 +52,7 @@ pub fn run() {
             roll20::commands::get_roll20_status,
             roll20::commands::refresh_roll20_data,
             roll20::commands::send_roll20_chat,
+            roll20::commands::set_roll20_attribute,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
