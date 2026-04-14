@@ -9,14 +9,15 @@
   // `health_max` attribute. So healthMax and willpowerMax point to the
   // same attribute name as health/willpower — attrMax() reads .max from it.
   const ATTR = {
-    hunger:        'hunger',
-    health:        'health',
-    healthMax:     'health',       // attrMax reads .max field of this attr
-    healthAgg:     'health_agg',   // aggravated damage; 0 if not present
-    willpower:     'willpower',
-    willpowerMax:  'willpower',    // attrMax reads .max field of this attr
-    humanity:      'humanity',
-    bloodPotency:  'blood_potency',
+    hunger:       'hunger',
+    health:       'health',            // .max = total health boxes
+    healthMax:    'health',            // attrMax reads .max field
+    healthSup:    'health_superficial',
+    healthAgg:    'health_aggravated',
+    willpower:    'willpower',         // .current = remaining WP pool
+    willpowerMax: 'willpower',         // attrMax reads .max field
+    humanity:     'humanity',
+    bloodPotency: 'blood_potency',
   } as const;
 
   // ── State ───────────────────────────────────────────────────────────────
@@ -124,8 +125,9 @@
     <div class="char-grid">
       {#each characters as char (char.id)}
         {@const healthMax   = attrMax(char.attributes, ATTR.healthMax, 5)}
-        {@const health      = attr(char.attributes, ATTR.health)}
+        {@const healthSup   = attr(char.attributes, ATTR.healthSup)}
         {@const healthAgg   = attr(char.attributes, ATTR.healthAgg)}
+        {@const healthOk    = Math.max(0, healthMax - healthSup - healthAgg)}
         {@const wpMax       = attrMax(char.attributes, ATTR.willpowerMax, 5)}
         {@const willpower   = attrCurrentOrMax(char.attributes, ATTR.willpower, wpMax)}
         {@const hunger      = attr(char.attributes, ATTR.hunger)}
@@ -151,15 +153,15 @@
               </div>
             </div>
 
-            <!-- Health (boxes; aggravated shown as striped) -->
+            <!-- Health: [healthy][superficial][aggravated] left→right -->
             <div class="stat-row">
               <span class="stat-label">Health</span>
               <div class="track">
                 {#each Array.from({ length: healthMax }, (_, i) => i) as i}
                   <div
                     class="box"
-                    class:filled={i < health - healthAgg}
-                    class:aggravated={i >= health - healthAgg && i < health}
+                    class:filled={i >= healthOk && i < healthOk + healthSup}
+                    class:aggravated={i >= healthOk + healthSup}
                   ></div>
                 {/each}
               </div>
