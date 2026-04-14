@@ -1,8 +1,25 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import type { Roll20Character } from '../types';
+  import type { Roll20Character, Roll20Attribute } from '../types';
 
+  // ── Attribute name constants ────────────────────────────────────────────
+  // The Roll20 Jumpgate VTM 5e sheet stores the max value as the `.max`
+  // field on the same attribute (e.g. health.max = 5), not as a separate
+  // `health_max` attribute. So healthMax and willpowerMax point to the
+  // same attribute name as health/willpower — attrMax() reads .max from it.
+  const ATTR = {
+    hunger:        'hunger',
+    health:        'health',
+    healthMax:     'health',       // attrMax reads .max field of this attr
+    healthAgg:     'health_agg',   // aggravated damage; 0 if not present
+    willpower:     'willpower',
+    willpowerMax:  'willpower',    // attrMax reads .max field of this attr
+    humanity:      'humanity',
+    bloodPotency:  'blood_potency',
+  } as const;
+
+  // ── State ───────────────────────────────────────────────────────────────
   let connected = $state(false);
   let characters = $state<Roll20Character[]>([]);
   let lastSync = $state<Date | null>(null);
@@ -23,6 +40,36 @@
 
     return () => { unlisteners.forEach(p => p.then(u => u())); };
   });
+
+  // ── Helpers ─────────────────────────────────────────────────────────────
+
+  // Returns the integer value of attribute.current, or 0 if missing/empty.
+  // Use for damage-style attrs (health): empty current = 0 damage = healthy.
+  function attr(attributes: Roll20Attribute[], name: string): number {
+    const a = attributes.find(a => a.name === name);
+    return a ? (parseInt(a.current, 10) || 0) : 0;
+  }
+
+  // Reads the .max field of the named attribute. Falls back to `fallback`
+  // if the attribute is missing or its max is unset/unparseable.
+  function attrMax(attributes: Roll20Attribute[], name: string, fallback: number): number {
+    const a = attributes.find(a => a.name === name);
+    if (a && a.max) return parseInt(a.max, 10) || fallback;
+    return fallback;
+  }
+
+  // Returns current value; if current is empty/unset, returns `max` instead.
+  // Use for pool-style attrs (willpower): empty current = not yet set = full.
+  function attrCurrentOrMax(attributes: Roll20Attribute[], name: string, max: number): number {
+    const a = attributes.find(a => a.name === name);
+    if (!a || a.current === '') return max;
+    return parseInt(a.current, 10) || 0;
+  }
+
+  // Returns an array of booleans for rendering dot tracks.
+  function dots(filled: number, total: number): boolean[] {
+    return Array.from({ length: total }, (_, i) => i < filled);
+  }
 
   function toggleRaw(id: string) {
     const next = new Set(expandedRaw);
@@ -76,12 +123,73 @@
     <!-- Character grid -->
     <div class="char-grid">
       {#each characters as char (char.id)}
+        {@const healthMax   = attrMax(char.attributes, ATTR.healthMax, 5)}
+        {@const health      = attr(char.attributes, ATTR.health)}
+        {@const healthAgg   = attr(char.attributes, ATTR.healthAgg)}
+        {@const wpMax       = attrMax(char.attributes, ATTR.willpowerMax, 5)}
+        {@const willpower   = attrCurrentOrMax(char.attributes, ATTR.willpower, wpMax)}
+        {@const hunger      = attr(char.attributes, ATTR.hunger)}
+        {@const humanity    = attr(char.attributes, ATTR.humanity)}
+        {@const bp          = attr(char.attributes, ATTR.bloodPotency)}
+
         <div class="char-card">
           <div class="card-header">
             <span class="char-name">{char.name}</span>
             <span class="badge" class:pc={isPC(char)} class:npc={!isPC(char)}>
               {isPC(char) ? 'PC' : 'NPC'}
             </span>
+          </div>
+
+          <div class="card-body">
+            <!-- Hunger (0–5 dots, crimson) -->
+            <div class="stat-row">
+              <span class="stat-label">Hunger</span>
+              <div class="track">
+                {#each dots(hunger, 5) as filled}
+                  <div class="dot" class:hunger={filled}></div>
+                {/each}
+              </div>
+            </div>
+
+            <!-- Health (boxes; aggravated shown as striped) -->
+            <div class="stat-row">
+              <span class="stat-label">Health</span>
+              <div class="track">
+                {#each Array.from({ length: healthMax }, (_, i) => i) as i}
+                  <div
+                    class="box"
+                    class:filled={i < health - healthAgg}
+                    class:aggravated={i >= health - healthAgg && i < health}
+                  ></div>
+                {/each}
+              </div>
+            </div>
+
+            <!-- Willpower (boxes, indigo) -->
+            <div class="stat-row">
+              <span class="stat-label">Willpower</span>
+              <div class="track">
+                {#each Array.from({ length: wpMax }, (_, i) => i) as i}
+                  <div class="box willpower" class:filled={i < willpower}></div>
+                {/each}
+              </div>
+            </div>
+
+            <!-- Humanity (0–10 dots, indigo) -->
+            <div class="stat-row">
+              <span class="stat-label">Humanity</span>
+              <div class="track">
+                {#each dots(humanity, 10) as filled}
+                  <div class="dot" class:humanity={filled}></div>
+                {/each}
+              </div>
+            </div>
+
+            <!-- Blood Potency (single number, amber) -->
+            <div class="stat-row">
+              <span class="stat-label">Blood Potency</span>
+              <span class="bp-value">{bp}</span>
+            </div>
           </div>
 
           <div class="card-footer">
@@ -92,10 +200,10 @@
 
           {#if expandedRaw.has(char.id)}
             <div class="raw-panel">
-              {#each char.attributes as attr}
+              {#each char.attributes as a}
                 <div class="raw-row">
-                  <span class="raw-name">{attr.name}</span>
-                  <span class="raw-val">{attr.current}{attr.max ? ' / ' + attr.max : ''}</span>
+                  <span class="raw-name">{a.name}</span>
+                  <span class="raw-val">{a.current}{a.max ? ' / ' + a.max : ''}</span>
                 </div>
               {/each}
               {#if char.attributes.length === 0}
@@ -222,10 +330,89 @@
   .badge.pc { background: #2a1515; color: var(--accent); border: 1px solid #3a1e1e; }
   .badge.npc { background: #151528; color: #7986cb; border: 1px solid #1e1e3a; }
 
+  /* Stat rows */
+  .card-body {
+    padding: 0.65rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+  .stat-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .stat-label {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-ghost);
+    font-weight: 600;
+  }
+  .track {
+    display: flex;
+    gap: 3px;
+    flex-wrap: wrap;
+  }
+
+  /* Dots (Hunger, Humanity) */
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid var(--border-surface);
+    background: transparent;
+  }
+  .dot.hunger {
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+  .dot.humanity {
+    background: #7986cb;
+    border-color: #7986cb;
+  }
+
+  /* Boxes (Health, Willpower) */
+  .box {
+    width: 11px;
+    height: 11px;
+    border: 1px solid var(--border-surface);
+    border-radius: 2px;
+    background: transparent;
+  }
+  .box.filled {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .box.willpower.filled {
+    background: #7986cb;
+    border-color: #7986cb;
+  }
+  .box.aggravated {
+    border-color: var(--border-surface);
+    background-image: repeating-linear-gradient(
+      45deg,
+      var(--accent) 0,
+      var(--accent) 1px,
+      transparent 0,
+      transparent 50%
+    );
+    background-size: 4px 4px;
+  }
+
+  /* Blood Potency */
+  .bp-value {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--accent-amber);
+  }
+
   .card-footer {
     padding: 0.3rem 0.9rem;
     display: flex;
     justify-content: flex-end;
+    border-top: 1px solid var(--border-faint);
   }
   .raw-toggle {
     font-size: 0.65rem;
