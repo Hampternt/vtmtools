@@ -34,6 +34,11 @@ pub enum InboundMsg {
 pub enum OutboundMsg {
     Refresh,
     SendChat { message: String },
+    SetAttribute {
+        character_id: String,
+        name: String,
+        value: String,
+    },
 }
 
 /// Shared in-memory state for the Roll20 connection.
