@@ -1,6 +1,7 @@
 mod shared;
 mod tools;
 mod db;
+mod roll20;
 
 use sqlx::SqlitePool;
 use std::sync::Arc;
