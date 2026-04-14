@@ -16,6 +16,8 @@
     healthAgg:    'health_aggravated',
     willpower:    'willpower',         // .current = remaining WP pool
     willpowerMax: 'willpower',         // attrMax reads .max field
+    willpowerSup: 'willpower_superficial',
+    willpowerAgg: 'willpower_aggravated',
     humanity:     'humanity',
     bloodPotency: 'blood_potency',
   } as const;
@@ -129,7 +131,9 @@
         {@const healthAgg   = attr(char.attributes, ATTR.healthAgg)}
         {@const healthOk    = Math.max(0, healthMax - healthSup - healthAgg)}
         {@const wpMax       = attrMax(char.attributes, ATTR.willpowerMax, 5)}
-        {@const willpower   = attrCurrentOrMax(char.attributes, ATTR.willpower, wpMax)}
+        {@const wpSup       = attr(char.attributes, ATTR.willpowerSup)}
+        {@const wpAgg       = attr(char.attributes, ATTR.willpowerAgg)}
+        {@const wpOk        = Math.max(0, wpMax - wpSup - wpAgg)}
         {@const hunger      = attr(char.attributes, ATTR.hunger)}
         {@const humanity    = attr(char.attributes, ATTR.humanity)}
         {@const bp          = attr(char.attributes, ATTR.bloodPotency)}
@@ -167,12 +171,17 @@
               </div>
             </div>
 
-            <!-- Willpower (boxes, indigo) -->
+            <!-- Willpower: [remaining][superficial][aggravated] left→right -->
             <div class="stat-row">
               <span class="stat-label">Willpower</span>
               <div class="track">
                 {#each Array.from({ length: wpMax }, (_, i) => i) as i}
-                  <div class="box willpower" class:filled={i < willpower}></div>
+                  <div
+                    class="box willpower"
+                    class:filled={i < wpOk}
+                    class:superficial={i >= wpOk && i < wpOk + wpSup}
+                    class:aggravated={i >= wpOk + wpSup}
+                  ></div>
                 {/each}
               </div>
             </div>
@@ -390,6 +399,20 @@
   .box.willpower.filled {
     background: #7986cb;
     border-color: #7986cb;
+  }
+  .box.willpower.superficial {
+    background: #7986cb40;
+    border-color: #7986cb;
+  }
+  .box.willpower.aggravated {
+    background-image: repeating-linear-gradient(
+      45deg,
+      #7986cb 0,
+      #7986cb 1px,
+      transparent 0,
+      transparent 50%
+    );
+    background-size: 4px 4px;
   }
   .box.aggravated {
     border-color: var(--border-surface);
