@@ -117,12 +117,18 @@ function watchModel(model) {
   // Character-level changes (name, bio, etc.)
   model.on('change', () => scheduleCharacterUpdate(model));
 
+  const attribs = model.attribs;
+  if (!attribs) return;
+
   // Attribute changes arrive via Firebase child_added/child_changed events,
-  // which Backbone exposes as add/change on model.attribs. Each attribute
-  // fires separately, so we debounce via scheduleCharacterUpdate.
-  if (model.attribs) {
-    model.attribs.on('add change remove', () => scheduleCharacterUpdate(model));
-  }
+  // which Backbone exposes as add/change on attribs. Each attribute fires
+  // separately, so we debounce via scheduleCharacterUpdate.
+  attribs.on('add change remove', () => scheduleCharacterUpdate(model));
+
+  // Roll20 Jumpgate lazily activates the Firebase attrib subscription only
+  // when a character sheet is opened. Call fetch() ourselves to trigger that
+  // subscription without needing to open the sheet UI.
+  attribs.fetch();
 }
 
 function setupBackboneListeners() {
