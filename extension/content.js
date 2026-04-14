@@ -5,6 +5,20 @@ let ws = null;
 let reconnectDelay = 1000;      // starts at 1s, doubles up to 30s
 let reconnectTimer = null;
 
+// Per-character debounce: collapses a burst of Firebase attrib add/change
+// events into a single sendCharacterUpdate call per character.
+const pendingUpdates = new Map();
+
+function scheduleCharacterUpdate(model) {
+  if (pendingUpdates.has(model.id)) {
+    clearTimeout(pendingUpdates.get(model.id));
+  }
+  pendingUpdates.set(model.id, setTimeout(() => {
+    pendingUpdates.delete(model.id);
+    sendCharacterUpdate(model);
+  }, 200));
+}
+
 // ── WebSocket lifecycle ──────────────────────────────────────────────────────
 
 function connect() {
@@ -99,19 +113,29 @@ function sendChat(message) {
 
 // ── Backbone change listeners ────────────────────────────────────────────────
 
+function watchModel(model) {
+  // Character-level changes (name, bio, etc.)
+  model.on('change', () => scheduleCharacterUpdate(model));
+
+  // Attribute changes arrive via Firebase child_added/child_changed events,
+  // which Backbone exposes as add/change on model.attribs. Each attribute
+  // fires separately, so we debounce via scheduleCharacterUpdate.
+  if (model.attribs) {
+    model.attribs.on('add change remove', () => scheduleCharacterUpdate(model));
+  }
+}
+
 function setupBackboneListeners() {
   const characters = window.Campaign?.characters;
   if (!characters) return;
 
-  // Listen for changes on existing character models.
-  characters.models.forEach(model => {
-    model.on('change', () => sendCharacterUpdate(model));
-  });
+  // Attach listeners to any characters already in the collection.
+  characters.models.forEach(watchModel);
 
   // Listen for newly added characters (e.g. if GM adds one mid-session).
   characters.on('add', (model) => {
-    model.on('change', () => sendCharacterUpdate(model));
-    sendCharacterUpdate(model);
+    watchModel(model);
+    scheduleCharacterUpdate(model);
   });
 
   console.log(
@@ -131,14 +155,6 @@ function waitForCampaign(retries = 0) {
     setupBackboneListeners();
   } else if (retries < 120) {
     // Retry up to 120 times × 500ms = 60 seconds
-    if (retries === 20) {
-      // After 10s, log what we can see to help debug
-      console.log('[vtmtools] Still waiting... Campaign:',
-        window.Campaign ? 'exists' : 'undefined',
-        '| characters:', chars ? 'exists' : 'undefined',
-        '| models:', chars?.models !== undefined ? JSON.stringify(chars.models) : 'undefined'
-      );
-    }
     setTimeout(() => waitForCampaign(retries + 1), 500);
   } else {
     console.warn('[vtmtools] Roll20 Campaign never became available after 60s.',
