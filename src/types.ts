@@ -42,3 +42,16 @@ export interface HistoryEntry {
   timestamp: Date;
   result: ResonanceRollResult;
 }
+
+export interface Roll20Attribute {
+  name: string;
+  current: string;
+  max: string;
+}
+
+export interface Roll20Character {
+  id: string;
+  name: string;
+  controlled_by: string;
+  attributes: Roll20Attribute[];
+}
