@@ -299,7 +299,8 @@
   /* Character grid */
   .char-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 340px));
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    max-width: 1100px;
     gap: 0.75rem;
     align-items: start;
   }
