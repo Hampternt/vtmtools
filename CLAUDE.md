@@ -51,6 +51,12 @@ All Tauri commands that do I/O must be `async` and use `tokio::fs`, not `std::fs
 
 SQLite, stored in the Tauri app data directory (`app.path().app_data_dir()`). Migrations are in `src-tauri/migrations/`. Schema currently has one table: `dyscrasias` (id, resonance_type, name, description, bonus, is_custom).
 
+`seed.rs` deletes all `is_custom = 0` rows and reinserts canonical entries on every app start (not "only if empty"). This is intentional — it keeps built-in data fresh when the seed changes. Do not revert to the count-check guard.
+
+`resonance_type` CHECK constraint uses `'Melancholy'` (not `'Melancholic'`). Source material uses both spellings; the DB enforces the former.
+
+In `DyscrasiaCard`: `description` = full effect text shown in the card body; `bonus` = short one-line mechanical tag shown in the card footer.
+
 ### VTM 5e Dice Mechanics
 
 - **Temperament roll**: 1–5d10 pool, take best or worst die. Result bucketed into Negligible / Fleeting / Intense by configurable thresholds (default: ≤5 Negligible, ≤8 Fleeting, 9–10 Intense).
