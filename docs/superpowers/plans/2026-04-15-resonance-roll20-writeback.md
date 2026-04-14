@@ -254,7 +254,7 @@ Replace `src/tools/Resonance.svelte` entirely with:
   let characters     = $state<Roll20Character[]>([]);
   let selectedCharId = $state<string | null>(null);
   let selectorOpen   = $state(false);
-  let applying       = $state(false);
+  let applyState     = $state<'idle' | 'applying' | 'applied'>('idle');
 
   const selectedChar = $derived(characters.find(c => c.id === selectedCharId) ?? null);
 
@@ -335,15 +335,17 @@ Replace `src/tools/Resonance.svelte` entirely with:
 
   async function applyToCharacter() {
     if (!result?.resonanceType || !selectedCharId) return;
-    applying = true;
+    applyState = 'applying';
     try {
       await invoke('set_roll20_attribute', {
         characterId: selectedCharId,
         name: 'resonance',
         value: result.resonanceType,
       });
-    } finally {
-      applying = false;
+      applyState = 'applied';
+      setTimeout(() => { applyState = 'idle'; }, 1800);
+    } catch {
+      applyState = 'idle';
     }
   }
 
@@ -365,7 +367,7 @@ Replace `src/tools/Resonance.svelte` entirely with:
         <h3>Target character</h3>
 
         {#if !connected}
-          <div class="r20-status r20-disconnected">
+          <div class="r20-status r20-disconnected" style="opacity: 0.45">
             <span class="r20-dot"></span>
             <span>Not connected to Roll20</span>
           </div>
@@ -383,6 +385,7 @@ Replace `src/tools/Resonance.svelte` entirely with:
               <button
                 class="char-card"
                 class:char-card--selected={char.id === selectedCharId}
+                data-res={res || null}
                 onclick={() => selectChar(char.id)}
               >
                 <span class="char-name">{char.name}</span>
@@ -446,8 +449,15 @@ Replace `src/tools/Resonance.svelte` entirely with:
         <ResultCard {result} />
         {#if selectedCharId && result.resonanceType}
           <div class="apply-row">
-            <button class="apply-btn" onclick={applyToCharacter} disabled={applying}>
-              {applying ? 'Applying…' : `✓ Apply to ${selectedChar?.name ?? 'character'}`}
+            <button
+              class="apply-btn"
+              class:applied={applyState === 'applied'}
+              onclick={applyToCharacter}
+              disabled={applyState !== 'idle'}
+            >
+              {applyState === 'applying' ? 'Applying…'
+               : applyState === 'applied' ? '✓ Applied'
+               : `✓ Apply to ${selectedChar?.name ?? 'character'}`}
             </button>
           </div>
         {/if}
@@ -573,16 +583,26 @@ Replace `src/tools/Resonance.svelte` entirely with:
   .char-card {
     background: var(--bg-raised);
     border: 1px solid var(--border-surface);
+    border-left: 3px solid var(--border-surface);
     border-radius: 5px;
     padding: 0.4rem 0.65rem;
     display: flex; flex-direction: column; gap: 0.1rem;
     cursor: pointer; text-align: left;
-    transition: border-color 0.15s, background 0.15s;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.2s;
     font-family: inherit;
     box-sizing: border-box;
   }
   .char-card:hover { border-color: var(--border-active); }
-  .char-card--selected { border-color: var(--accent); background: var(--bg-active); }
+  .char-card--selected {
+    border-color: var(--accent);
+    background: var(--bg-active);
+    box-shadow: 0 0 10px #cc222225, inset 0 0 12px #cc222210;
+  }
+  /* Resonance-colored left accent bar */
+  .char-card[data-res="Phlegmatic"] { border-left-color: #3d6b88; }
+  .char-card[data-res="Melancholy"] { border-left-color: #6a3d80; }
+  .char-card[data-res="Choleric"]   { border-left-color: var(--accent-amber); }
+  .char-card[data-res="Sanguine"]   { border-left-color: var(--accent); }
   .char-name { font-size: 0.8rem; color: var(--text-primary); font-weight: bold; }
   .char-clan { font-size: 0.7rem; color: var(--text-secondary); }
   .char-res  { font-size: 0.65rem; color: var(--accent); }
@@ -609,7 +629,7 @@ Replace `src/tools/Resonance.svelte` entirely with:
 
   .selector-backdrop {
     position: fixed; inset: 0; z-index: 10;
-    background: transparent; border: none; cursor: default;
+    background: rgba(0, 0, 0, 0.4); border: none; cursor: default;
   }
   .selector-dropdown {
     position: absolute; top: calc(100% + 0.3rem); left: 0; right: 0;
@@ -655,12 +675,23 @@ Replace `src/tools/Resonance.svelte` entirely with:
   .apply-row { display: flex; justify-content: flex-end; }
   .apply-btn {
     padding: 0.45rem 1.2rem;
-    background: #0f2a0f; border: 1.5px solid #2a6a2a;
-    color: #6acc6a; font-size: 0.85rem; font-family: 'Georgia', serif;
-    cursor: pointer; border-radius: 4px; transition: background 0.15s;
+    background: var(--bg-sunken);
+    border: 1.5px solid var(--border-surface);
+    color: var(--accent-amber);
+    font-size: 0.85rem; font-family: 'Georgia', serif;
+    cursor: pointer; border-radius: 4px;
+    transition: background 0.15s, border-color 0.15s, color 0.3s;
   }
-  .apply-btn:hover:not(:disabled) { background: #163a16; }
+  .apply-btn:hover:not(:disabled) {
+    border-color: var(--accent-amber);
+    background: var(--bg-raised);
+  }
   .apply-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .apply-btn.applied {
+    border-color: #4caf50;
+    color: #4caf50;
+    background: #0f2a0f;
+  }
 
   /* ── History panel ── */
   .history-panel {
@@ -756,3 +787,11 @@ git commit -m "feat(resonance): add Roll20 character selector and resonance writ
 - `OutboundMsg::SetAttribute { character_id, name, value }` — field names are snake_case in Rust, serialise to `character_id`/`name`/`value` in JSON, matched by `msg.character_id`/`msg.name`/`msg.value` in `content.js`.
 - `Roll20Character`, `Roll20Attribute` — imported from `../types` which already defines both interfaces.
 - `attrText` — defined in Task 5 script, called only in Task 5 template. No cross-task dependency issues.
+- `applyState` — tri-state `'idle' | 'applying' | 'applied'` used consistently in script, template button text, `class:applied` binding, and `disabled={applyState !== 'idle'}`.
+
+**Design refinements applied:**
+- Resonance-colored left accent bar on char cards via `data-res` attribute + CSS attribute selectors. Colors reuse the res-seg palette (`#3d6b88`, `#6a3d80`, `--accent-amber`, `--accent`).
+- Selected card glow (`box-shadow: 0 0 10px ... inset 0 0 12px ...`) matches ResultCard's acute text-shadow intensity.
+- Apply button uses `--accent-amber` (matching Export button palette), with green `#4caf50` flash only for the brief `applied` confirmation state.
+- Dropdown backdrop dims page (`rgba(0,0,0,0.4)`) matching approved brainstorming mockup.
+- Disconnected status dimmed to `opacity: 0.45` matching Campaign's disabled btn style.
