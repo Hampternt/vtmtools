@@ -31,7 +31,7 @@ This is a **Tauri 2 + SvelteKit + TypeScript** desktop app. The frontend is a SP
 
 - **`tools.ts`** — registry of all tools. Adding a new tool means adding one entry here; the sidebar and lazy-loading are automatic.
 - **`routes/+layout.svelte`** — shell layout: sidebar + lazy-loaded tool component. Active tool component is loaded on selection.
-- **`src/tools/*.svelte`** — one file per tool (e.g. `Resonance.svelte`). Each tool is an independent page-level component.
+- **`src/tools/*.svelte`** — one file per tool (e.g. `Resonance.svelte`). Each tool is an independent page-level component. `Campaign.svelte` is the Roll20 viewer: it listens to `roll20://` events and uses a hardcoded `ATTR` constants map to resolve sheet attribute names from Roll20 Jumpgate character sheets.
 - **`src/lib/components/`** — shared UI components used by tools.
 - **`src/types.ts`** — all shared TypeScript interfaces (kept thin; mirrors Rust structs).
 - **`src/store/toolEvents.ts`** — Svelte writable store for cross-tool event broadcasting (`publishEvent` / `toolEvents`).
@@ -40,12 +40,30 @@ Svelte 5 runes are used throughout (`$state`, `$derived`, `$props`, `$effect`). 
 
 ### Backend (`src-tauri/src/`)
 
-- **`lib.rs`** — app entry point: sets up SQLite pool, runs migrations, seeds dyscrasias, registers all Tauri commands.
+- **`lib.rs`** — app entry point: sets up SQLite pool, runs migrations, seeds dyscrasias, registers all Tauri commands, and spawns the Roll20 WebSocket server.
 - **`db/`** — SQLite access via `sqlx`. `dyscrasia.rs` has all CRUD + random-roll commands. `seed.rs` populates built-in dyscrasias on first run.
 - **`shared/`** — dice logic (`dice.rs`), resonance probability types (`resonance.rs`), and shared serde types (`types.rs`).
 - **`tools/`** — one module per tool. `resonance.rs` implements `roll_resonance`. `export.rs` implements `export_result_to_md` (writes Markdown to `~/Documents/vtmtools/`).
 
 All Tauri commands that do I/O must be `async` and use `tokio::fs`, not `std::fs`.
+
+### Roll20 Integration (`src-tauri/src/roll20/`)
+
+A WebSocket server bridges the Tauri app to a browser extension running inside Roll20.
+
+- **`mod.rs`** — `start_ws_server()`: binds `127.0.0.1:7423`, accepts one connection at a time, emits Tauri events to the frontend.
+- **`types.rs`** — shared state (`Roll20State`): `characters` (HashMap), `connected` (bool), `outbound_tx` (mpsc channel).
+- **`commands.rs`** — Tauri commands: `get_roll20_characters`, `get_roll20_status`, `refresh_roll20_data`, `send_roll20_chat`.
+
+Tauri events emitted to the frontend:
+
+| Event | Payload | When |
+|---|---|---|
+| `roll20://connected` | none | Extension connects |
+| `roll20://disconnected` | none | Extension disconnects |
+| `roll20://characters-updated` | `Vec<Character>` | Characters refreshed |
+
+The browser extension connects to port **7423**. Only one extension session is active at a time; state is held in `Arc<Roll20State>` shared between the WS loop and Tauri command handlers.
 
 ### Database
 
