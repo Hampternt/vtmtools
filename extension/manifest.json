@@ -18,7 +18,8 @@
     {
       "matches": ["https://app.roll20.net/editor/*"],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "world": "MAIN"
     }
   ]
 }
