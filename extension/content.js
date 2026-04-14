@@ -134,14 +134,27 @@ function setupBackboneListeners() {
 // immediately when the content script runs. Poll until it's ready.
 
 function waitForCampaign(retries = 0) {
-  if (window.Campaign?.characters?.models) {
+  const chars = window.Campaign?.characters;
+  if (chars?.models) {
+    console.log('[vtmtools] Campaign ready, models:', chars.models.length);
     connect();
     setupBackboneListeners();
-  } else if (retries < 30) {
-    // Retry up to 30 times × 500ms = 15 seconds
+  } else if (retries < 120) {
+    // Retry up to 120 times × 500ms = 60 seconds
+    if (retries === 20) {
+      // After 10s, log what we can see to help debug
+      console.log('[vtmtools] Still waiting... Campaign:',
+        window.Campaign ? 'exists' : 'undefined',
+        '| characters:', chars ? 'exists' : 'undefined',
+        '| models:', chars?.models !== undefined ? JSON.stringify(chars.models) : 'undefined'
+      );
+    }
     setTimeout(() => waitForCampaign(retries + 1), 500);
   } else {
-    console.warn('[vtmtools] Roll20 Campaign never became available');
+    console.warn('[vtmtools] Roll20 Campaign never became available after 60s.',
+      'Campaign:', window.Campaign ? 'exists' : 'undefined',
+      '| characters:', window.Campaign?.characters ? 'exists' : 'undefined'
+    );
   }
 }
 
