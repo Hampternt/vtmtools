@@ -299,7 +299,7 @@
   /* Character grid */
   .char-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(280px, 340px));
     gap: 0.75rem;
     align-items: start;
   }
@@ -315,7 +315,7 @@
 
   .card-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.5rem;
     padding: 0.7rem 0.9rem;
     border-bottom: 1px solid var(--border-faint);
@@ -325,9 +325,12 @@
     font-size: 0.88rem;
     font-weight: 600;
     color: var(--text-primary);
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
     overflow: hidden;
-    text-overflow: ellipsis;
+    word-break: break-word;
   }
   .badge {
     font-size: 0.62rem;
