@@ -54,47 +54,37 @@ function sendToApp(payload) {
 
 // ── Roll20 data reading ──────────────────────────────────────────────────────
 
-async function fetchAttributes(charId) {
-  try {
-    const res = await fetch(`/character/${charId}/attributes`, {
-      credentials: 'same-origin',
-    });
-    if (!res.ok) return [];
-    return await res.json();
-  } catch (e) {
-    console.warn(`[vtmtools] Failed to fetch attributes for ${charId}:`, e);
-    return [];
-  }
-}
-
-async function buildCharacter(model) {
-  const rawAttrs = await fetchAttributes(model.id);
+function buildCharacter(model) {
+  // model.attribs is a Backbone collection kept in sync with Firebase.
+  // Using it directly avoids the legacy REST endpoint which only supports
+  // numeric IDs and returns 404 for Jumpgate (Firebase push ID) games.
+  const attribs = model.attribs?.models ?? [];
   return {
     id: model.id,
     name: model.get('name') ?? 'Unknown',
     controlled_by: model.get('controlledby') ?? '',
-    attributes: rawAttrs.map(a => ({
-      name: a.name,
-      current: String(a.current ?? ''),
-      max: String(a.max ?? ''),
+    attributes: attribs.map(a => ({
+      name: a.get('name'),
+      current: String(a.get('current') ?? ''),
+      max: String(a.get('max') ?? ''),
     })),
   };
 }
 
-async function readAllCharacters() {
+function readAllCharacters() {
   const models = window.Campaign?.characters?.models;
   if (!models || models.length === 0) {
     console.log('[vtmtools] No characters found in Campaign yet');
     return;
   }
 
-  const characters = await Promise.all(models.map(buildCharacter));
+  const characters = models.map(buildCharacter);
   sendToApp({ type: 'characters', characters });
   console.log(`[vtmtools] Sent ${characters.length} characters to app`);
 }
 
-async function sendCharacterUpdate(model) {
-  const character = await buildCharacter(model);
+function sendCharacterUpdate(model) {
+  const character = buildCharacter(model);
   sendToApp({ type: 'character_update', character });
 }
 
