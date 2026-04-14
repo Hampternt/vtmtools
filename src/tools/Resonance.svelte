@@ -34,7 +34,7 @@
   let characters     = $state<Roll20Character[]>([]);
   let selectedCharId = $state<string | null>(null);
   let selectorOpen   = $state(false);
-  let applyState     = $state<'idle' | 'applying' | 'applied'>('idle');
+  let applyState     = $state<'idle' | 'applying' | 'applied' | 'error'>('idle');
 
   const selectedChar = $derived(characters.find(c => c.id === selectedCharId) ?? null);
 
@@ -45,7 +45,12 @@
     const unlisteners = [
       listen<void>('roll20://connected',    () => { connected = true; }),
       listen<void>('roll20://disconnected', () => { connected = false; selectedCharId = null; }),
-      listen<Roll20Character[]>('roll20://characters-updated', (e) => { characters = e.payload; }),
+      listen<Roll20Character[]>('roll20://characters-updated', (e) => {
+        characters = e.payload;
+        if (selectedCharId && !e.payload.some(c => c.id === selectedCharId)) {
+          selectedCharId = null;
+        }
+      }),
     ];
     return () => { unlisteners.forEach(p => p.then(u => u())); };
   });
@@ -126,7 +131,8 @@
       applyState = 'applied';
       setTimeout(() => { applyState = 'idle'; }, 1800);
     } catch {
-      applyState = 'idle';
+      applyState = 'error';
+      setTimeout(() => { applyState = 'idle'; }, 1800);
     }
   }
 
@@ -144,11 +150,11 @@
     <div class="steps-panel">
 
       <!-- ── Target character ── -->
-      <section class="step target-step">
+      <section class="step">
         <h3>Target character</h3>
 
         {#if !connected}
-          <div class="r20-status r20-disconnected" style="opacity: 0.45">
+          <div class="r20-status r20-disconnected">
             <span class="r20-dot"></span>
             <span>Not connected to Roll20</span>
           </div>
@@ -233,11 +239,13 @@
             <button
               class="apply-btn"
               class:applied={applyState === 'applied'}
+              class:error={applyState === 'error'}
               onclick={applyToCharacter}
               disabled={applyState !== 'idle'}
             >
               {applyState === 'applying' ? 'Applying…'
                : applyState === 'applied' ? '✓ Applied'
+               : applyState === 'error' ? '✗ Failed — retry'
                : `✓ Apply to ${selectedChar?.name ?? 'character'}`}
             </button>
           </div>
@@ -343,7 +351,7 @@
     font-size: 0.8rem; display: flex; align-items: center;
     gap: 0.4rem; padding: 0.35rem 0; margin-bottom: 0.75rem;
   }
-  .r20-disconnected { color: var(--text-muted); }
+  .r20-disconnected { color: var(--text-muted); opacity: 0.45; }
   .r20-empty        { color: var(--text-secondary); }
   .r20-dot {
     width: 0.45rem; height: 0.45rem; border-radius: 50%;
@@ -476,6 +484,10 @@
     border-color: #4caf50;
     color: #4caf50;
     background: #0f2a0f;
+  }
+  .apply-btn.error {
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   /* ── History panel ── */
