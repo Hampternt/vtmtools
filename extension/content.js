@@ -39,6 +39,8 @@ function connect() {
         readAllCharacters();
       } else if (msg.type === 'send_chat' && msg.message) {
         sendChat(msg.message);
+      } else if (msg.type === 'set_attribute' && msg.character_id && msg.name) {
+        setCharacterAttribute(msg.character_id, msg.name, msg.value ?? '');
       }
     } catch (e) {
       console.warn('[vtmtools] Failed to parse message from app:', e);
@@ -109,6 +111,21 @@ function sendChat(message) {
   } else {
     console.warn('[vtmtools] d20.textchat.doChatInput not available');
   }
+}
+
+function setCharacterAttribute(characterId, attrName, value) {
+  const model = window.Campaign.characters.get(characterId);
+  if (!model) {
+    console.warn('[vtmtools] setCharacterAttribute: character not found:', characterId);
+    return;
+  }
+  const existing = model.attribs.find(a => a.get('name') === attrName);
+  if (existing) {
+    existing.save({ current: value });
+  } else {
+    model.attribs.create({ name: attrName, current: value, max: '' });
+  }
+  console.log(`[vtmtools] Set ${attrName}="${value}" on character ${characterId}`);
 }
 
 // ── Backbone change listeners ────────────────────────────────────────────────
