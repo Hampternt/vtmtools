@@ -27,6 +27,11 @@
   let expandedInfo  = $state<Set<string>>(new Set());
   let urlCopied     = $state(false);
 
+  type Density = 'auto' | 's' | 'm' | 'l';
+  let density = $state<Density>('auto');
+  let resolvedDensity = $state<'s' | 'm' | 'l'>('m');
+  let gridEl: HTMLDivElement | undefined = $state(undefined);
+
   function copyExtensionsUrl() {
     navigator.clipboard.writeText('chrome://extensions');
     urlCopied = true;
@@ -47,6 +52,33 @@
     ];
 
     return () => { unlisteners.forEach(p => p.then(u => u())); };
+  });
+
+  $effect(() => {
+    if (density !== 'auto') {
+      resolvedDensity = density;
+      return;
+    }
+    if (!gridEl) return;
+
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w < 500) resolvedDensity = 's';
+      else if (w < 800) resolvedDensity = 'm';
+      else resolvedDensity = 'l';
+    });
+    ro.observe(gridEl);
+    return () => ro.disconnect();
+  });
+
+  const densityVars = $derived(() => {
+    const d = resolvedDensity;
+    const vals = {
+      s: { minCol: '16rem', pad: '0.4rem', trackH: '1.4rem', conscienceCap: '1.5rem', dropSize: '1.2rem', conscienceGlow: 'none' },
+      m: { minCol: '20rem', pad: '0.6rem', trackH: '1.8rem', conscienceCap: '2.5rem', dropSize: '1.6rem', conscienceGlow: '0 0 0.3rem color-mix(in srgb, var(--accent) 30%, transparent)' },
+      l: { minCol: '28rem', pad: '0.8rem', trackH: '2.4rem', conscienceCap: '4rem', dropSize: '2rem', conscienceGlow: '0 0 0.5rem color-mix(in srgb, var(--accent) 50%, transparent)' },
+    }[d];
+    return `--col-min:${vals.minCol};--card-pad:${vals.pad};--track-h:${vals.trackH};--conscience-cap:${vals.conscienceCap};--drop-size:${vals.dropSize};--conscience-glow:${vals.conscienceGlow}`;
   });
 
   // ── Helpers ─────────────────────────────────────────────────────────────
@@ -236,66 +268,61 @@
             <span class="badge" class:pc={isPC(char)} class:npc={!isPC(char)}>
               {isPC(char) ? 'PC' : 'NPC'}
             </span>
-          </div>
-
-          <!-- ── Quick-stats bar: Hunger | BP | Humanity ─────────────────── -->
-          <div class="quick-stats">
-            <div class="qs-cell">
-              <span class="qs-label">Hunger</span>
-              <div class="track">
+            <div class="header-stats">
+              <div class="hunger-drops">
                 {#each dots(hunger, 5) as filled}
-                  <div class="dot" class:hunger={filled}></div>
+                  <svg class="blood-drop" class:filled viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C12 2 4 14 4 20a8 8 0 0 0 16 0c0-6-8-18-8-18z" />
+                  </svg>
                 {/each}
               </div>
-            </div>
-            <div class="qs-cell qs-center">
-              <span class="qs-label">BP</span>
-              <span class="bp-value">{bp}</span>
-            </div>
-            <div class="qs-cell qs-right">
-              <span class="qs-label">Humanity</span>
-              <div class="track track-right">
-                {#each dots(humanity, 10) as filled}
-                  <div class="dot" class:humanity={filled}></div>
-                {/each}
+              <div class="bp-pill">
+                <span class="qs-label">BP</span>
+                <span class="bp-value">{bp}</span>
               </div>
             </div>
           </div>
 
-          <!-- ── Tracks row: Health | Willpower | Stains ─────────────────── -->
-          <div class="tracks-row">
-            <div class="track-cell">
-              <span class="stat-label">Health</span>
-              <div class="track">
-                {#each Array.from({ length: healthMax }, (_, i) => i) as i}
-                  <div
-                    class="box"
-                    class:filled={i >= healthOk && i < healthOk + healthSup}
-                    class:aggravated={i >= healthOk + healthSup}
-                  ></div>
-                {/each}
-              </div>
+          <!-- ── Conscience ──────────────────────────────────────────────── -->
+          <div class="conscience-row">
+            <div class="conscience-track">
+              {#each 'CONSCIENCE'.split('') as letter, i}
+                {@const pos = i + 1}
+                {@const isFilled = pos <= humanity}
+                {@const isStained = pos > 10 - stains}
+                <span
+                  class="conscience-letter"
+                  class:filled={isFilled}
+                  class:stained={isStained && !isFilled}
+                >{letter}</span>
+              {/each}
             </div>
-            <div class="track-cell">
-              <span class="stat-label">Willpower</span>
-              <div class="track">
-                {#each Array.from({ length: wpMax }, (_, i) => i) as i}
-                  <div
-                    class="box willpower"
-                    class:filled={i < wpOk}
-                    class:superficial={i >= wpOk && i < wpOk + wpSup}
-                    class:aggravated={i >= wpOk + wpSup}
-                  ></div>
-                {/each}
-              </div>
+          </div>
+
+          <!-- ── Health track ────────────────────────────────────────────── -->
+          <div class="track-row">
+            <div class="track-boxes">
+              {#each Array.from({ length: healthMax }, (_, i) => i) as i}
+                <div
+                  class="box"
+                  class:superficial={i >= healthOk && i < healthOk + healthSup}
+                  class:aggravated={i >= healthOk + healthSup}
+                ></div>
+              {/each}
             </div>
-            <div class="track-cell">
-              <span class="stat-label">Stains</span>
-              <div class="track">
-                {#each dots(stains, 10) as filled}
-                  <div class="dot" class:stain={filled}></div>
-                {/each}
-              </div>
+          </div>
+
+          <!-- ── Willpower track ─────────────────────────────────────────── -->
+          <div class="track-row">
+            <div class="track-boxes">
+              {#each Array.from({ length: wpMax }, (_, i) => i) as i}
+                <div
+                  class="box willpower"
+                  class:filled={i < wpOk}
+                  class:superficial={i >= wpOk && i < wpOk + wpSup}
+                  class:aggravated={i >= wpOk + wpSup}
+                ></div>
+              {/each}
             </div>
           </div>
 
@@ -629,6 +656,7 @@
   .card-header {
     display: flex;
     align-items: flex-start;
+    flex-wrap: wrap;
     gap: 0.5rem;
     padding: 0.75rem 0.9rem 0.65rem;
     border-bottom: 1px solid var(--border-faint);
@@ -671,26 +699,32 @@
   .badge.pc  { background: #2a1515; color: var(--accent);  border: 1px solid #3a1e1e; }
   .badge.npc { background: #151528; color: #7986cb; border: 1px solid #1e1e3a; }
 
-  /* ── Quick-stats bar (Hunger | BP | Humanity) ─────────────────────────── */
-  .quick-stats {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    border-bottom: 1px solid var(--border-faint);
-  }
-  .qs-cell {
+  /* ── Header stats sub-row (hunger + BP) ──────────────────────────────── */
+  .header-stats {
+    width: 100%;
     display: flex;
-    flex-direction: column;
-    gap: 0.28rem;
-    padding: 0.6rem 0.9rem;
-  }
-  .qs-center {
     align-items: center;
-    border-left: 1px solid var(--border-faint);
-    border-right: 1px solid var(--border-faint);
-    padding-left: 0.75rem;
-    padding-right: 0.75rem;
+    justify-content: space-between;
+    padding-top: 0.25rem;
   }
-  .qs-right { align-items: flex-end; }
+  .bp-pill {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  /* ── Conscience row ──────────────────────────────────────────────────── */
+  .conscience-row {
+    container-type: inline-size;
+    min-height: 3rem;
+    display: flex;
+    align-items: stretch;
+    padding: 0 0.5rem;
+    border-bottom: 1px solid var(--border-faint);
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+
   .qs-label {
     font-size: 0.65rem;
     text-transform: uppercase;
@@ -699,80 +733,120 @@
     font-weight: 600;
   }
 
-  /* ── Shared track + dot/box primitives ───────────────────────────────── */
-  .track {
+  /* ── Hunger blood drops ──────────────────────────────────────────────── */
+  .hunger-drops {
     display: flex;
-    gap: 3px;
-    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
   }
-  .track-right { justify-content: flex-end; }
+  .blood-drop {
+    width: 1.6rem;
+    height: 2.1rem;
+    fill: none;
+    stroke: var(--border-surface);
+    stroke-width: 1.5;
+    transition: fill 0.2s, stroke 0.2s, filter 0.2s;
+  }
+  .blood-drop.filled {
+    fill: var(--accent);
+    stroke: var(--accent);
+    filter: drop-shadow(0 0 0.25rem color-mix(in srgb, var(--accent) 60%, transparent));
+  }
 
-  .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    border: 1px solid var(--border-surface);
-    background: transparent;
-    flex-shrink: 0;
+  /* ── Conscience word-track (Humanity + Stains) ───────────────────────── */
+  .conscience-track {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    align-items: stretch;
+    gap: 0;
   }
-  .dot.hunger {
-    background: var(--accent);
-    border-color: var(--accent);
-    box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 50%, transparent);
+  .conscience-letter {
+    flex: 1 1 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Last Rites', cursive;
+    font-size: min(9cqi, 4rem);
+    font-weight: 400;
+    color: var(--text-ghost);
+    line-height: 0.7;
+    overflow: hidden;
+    transition: color 0.2s, text-shadow 0.2s;
+    position: relative;
   }
-  .dot.humanity { background: #7986cb; border-color: #7986cb; }
-  .dot.stain    { background: #e07b00; border-color: #e07b00; }
+  .conscience-letter.filled {
+    color: var(--accent);
+    text-shadow: 0 0 0.5rem color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+  .conscience-letter.stained {
+    color: #e07b00;
+  }
+  .conscience-letter.stained::after {
+    content: '';
+    position: absolute;
+    left: 5%;
+    right: 5%;
+    top: 50%;
+    height: 1px;
+    background: #e07b00;
+    transform: rotate(-12deg);
+  }
 
+  /* ── Health / Willpower boxes ────────────────────────────────────────── */
+  .track-boxes {
+    display: flex;
+    gap: 0.1rem;
+  }
   .box {
-    width: 11px;
-    height: 11px;
+    flex: 1;
+    min-width: 0;
+    height: 2.4rem;
     border: 1px solid var(--border-surface);
-    border-radius: 2px;
+    border-radius: 0.2rem;
     background: transparent;
-    flex-shrink: 0;
+    box-sizing: border-box;
   }
   .box.filled           { background: var(--accent);  border-color: var(--accent); }
   .box.willpower.filled { background: #7986cb; border-color: #7986cb; }
-  .box.willpower.superficial {
-    background: #7986cb40;
-    border-color: #7986cb;
-  }
-  .box.willpower.aggravated {
-    background-image: repeating-linear-gradient(
-      45deg, #7986cb 0, #7986cb 1px, transparent 0, transparent 50%
-    );
-    background-size: 4px 4px;
-  }
-  .box.aggravated {
+  /* Superficial = slash through the box */
+  .box.superficial {
     border-color: var(--border-surface);
     background-image: repeating-linear-gradient(
       45deg, var(--accent) 0, var(--accent) 1px, transparent 0, transparent 50%
     );
-    background-size: 4px 4px;
+    background-size: 0.3rem 0.3rem;
+  }
+  .box.willpower.superficial {
+    background-image: repeating-linear-gradient(
+      45deg, #7986cb 0, #7986cb 1px, transparent 0, transparent 50%
+    );
+    background-size: 0.3rem 0.3rem;
+    border-color: #7986cb;
+  }
+  /* Aggravated = fully filled */
+  .box.aggravated {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .box.willpower.aggravated {
+    background: #4a2848;
+    border-color: #5c3458;
   }
 
   /* Blood Potency */
   .bp-value {
-    font-size: 1.3rem;
+    font-size: 1.5rem;
     font-weight: 700;
     color: var(--accent-amber);
     line-height: 1;
   }
 
-  /* ── Tracks row: Health | Willpower | Stains side by side ────────────── */
-  .tracks-row {
-    display: flex;
-    gap: 0.5rem;
-    padding: 0.65rem 0.9rem;
+  /* ── Track row (one per track) ────────────────────────────────────────── */
+  .track-row {
     border-bottom: 1px solid var(--border-faint);
   }
-  .track-cell {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.22rem;
-  }
+
 
   /* ── Shared stat-row label ────────────────────────────────────────────── */
   .stat-label {
