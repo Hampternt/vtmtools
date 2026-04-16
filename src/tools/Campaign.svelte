@@ -157,6 +157,15 @@
       <span class="sync-time">last sync {timeSince(lastSync)}</span>
     {/if}
     <div class="spacer"></div>
+    <div class="density-toggle">
+      {#each [['auto', 'Auto'], ['s', 'S'], ['m', 'M'], ['l', 'L']] as [val, label]}
+        <button
+          class="density-btn"
+          class:active={density === val}
+          onclick={() => { density = val as Density; }}
+        >{label}</button>
+      {/each}
+    </div>
     <button class="btn-refresh" onclick={refresh} disabled={!connected}>↺ Refresh</button>
   </div>
 
@@ -509,6 +518,31 @@
   }
   .btn-refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--text-primary); }
   .btn-refresh:disabled { opacity: 0.4; cursor: default; }
+
+  /* ── Density toggle ──────────────────────────────────────────────────── */
+  .density-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border-faint);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .density-btn {
+    background: var(--bg-card);
+    color: var(--text-ghost);
+    border: none;
+    border-right: 1px solid var(--border-faint);
+    padding: 0.2rem 0.55rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .density-btn:last-child { border-right: none; }
+  .density-btn:hover { color: var(--text-secondary); }
+  .density-btn.active {
+    background: var(--bg-active);
+    color: var(--accent);
+  }
 
   /* ── Setup guide (shown when disconnected) ────────────────────────────── */
   .setup-guide {
