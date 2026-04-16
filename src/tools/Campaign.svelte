@@ -832,7 +832,7 @@
   .box {
     flex: 1;
     min-width: 0;
-    height: 2.4rem;
+    height: var(--track-h, 1.8rem);
     border: 1px solid var(--border-surface);
     border-radius: 0.2rem;
     background: transparent;
@@ -875,6 +875,7 @@
 
   /* ── Track row (one per track) ────────────────────────────────────────── */
   .track-row {
+    padding: 0.2rem var(--card-pad, 0.6rem);
     border-bottom: 1px solid var(--border-faint);
   }
 
