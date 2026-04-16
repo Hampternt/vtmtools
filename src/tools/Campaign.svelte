@@ -867,7 +867,7 @@
 
   /* Blood Potency */
   .bp-value {
-    font-size: 1.5rem;
+    font-size: calc(var(--drop-size, 1.6rem) * 0.9375);
     font-weight: 700;
     color: var(--accent-amber);
     line-height: 1;
