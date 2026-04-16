@@ -71,7 +71,7 @@
     return () => ro.disconnect();
   });
 
-  const densityVars = $derived(() => {
+  const densityVars = $derived.by(() => {
     const d = resolvedDensity;
     const vals = {
       s: { minCol: '16rem', pad: '0.4rem', trackH: '1.4rem', conscienceCap: '1.5rem', dropSize: '1.2rem', conscienceGlow: 'none' },
@@ -227,7 +227,7 @@
       <p class="banner-body">The extension is connected but no character data has arrived yet. Try clicking Refresh.</p>
     </div>
   {:else}
-    <div class="char-grid" bind:this={gridEl} style={densityVars()}>
+    <div class="char-grid" bind:this={gridEl} style={densityVars}>
       {#each characters as char (char.id)}
         {@const healthMax    = attrMax(char.attributes, ATTR.healthMax, 5)}
         {@const healthSup    = attr(char.attributes, ATTR.healthSup)}
