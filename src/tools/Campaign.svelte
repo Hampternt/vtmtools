@@ -227,7 +227,7 @@
       <p class="banner-body">The extension is connected but no character data has arrived yet. Try clicking Refresh.</p>
     </div>
   {:else}
-    <div class="char-grid">
+    <div class="char-grid" bind:this={gridEl} style={densityVars()}>
       {#each characters as char (char.id)}
         {@const healthMax    = attrMax(char.attributes, ATTR.healthMax, 5)}
         {@const healthSup    = attr(char.attributes, ATTR.healthSup)}
@@ -671,7 +671,7 @@
   /* ── Character grid ───────────────────────────────────────────────────── */
   .char-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(var(--col-min, 20rem), 1fr));
     max-width: 1100px;
     gap: 0.75rem;
     align-items: start;
