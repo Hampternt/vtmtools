@@ -1,0 +1,279 @@
+{
+  "elements": [
+    {
+      "label": "GM Roll Config",
+      "type": "Data Source",
+      "description": "The settings the Storyteller configures before making a resonance roll. Temperament settings (dice count, highest/lowest, thresholds) and resonance weights (per-type likelihood sliders). Ephemeral — resets on app restart.",
+      "tags": ["input", "ephemeral"],
+      "Direction": "Input",
+      "Storage": "In-memory",
+      "Layer": "Frontend"
+    },
+    {
+      "label": "Dice Engine",
+      "type": "Data Source",
+      "description": "The random number generation backend. Takes a GM Roll Config and produces raw roll results. Handles temperament rolls (d10 pool, advantage/disadvantage), weighted resonance type picks, and acute checks (9–10 on a d10).",
+      "tags": ["internal", "backend"],
+      "Direction": "Internal",
+      "Storage": "None",
+      "Layer": "Backend"
+    },
+    {
+      "label": "Resonance Roll Result",
+      "type": "Data Source",
+      "description": "The complete outcome of a single resonance roll. Carries all temperament dice, the selected die, temperament tier, resonance type, acute check, and an optional attached dyscrasia. The main product of the Resonance Roller that flows outward to exports, Roll20, and the event bus.",
+      "tags": ["output", "internal"],
+      "Direction": "Output / Internal",
+      "Storage": "In-memory",
+      "Layer": "Backend → Frontend"
+    },
+    {
+      "label": "Dyscrasia Store",
+      "type": "Data Source",
+      "description": "SQLite database table holding all dyscrasia entries — built-in V5 sourcebook entries (re-seeded on every startup) and user-created custom entries. Each entry has a resonance type, name, description, bonus, and custom flag.",
+      "tags": ["input", "output", "persistent"],
+      "Direction": "Both",
+      "Storage": "SQLite",
+      "Layer": "Backend"
+    },
+    {
+      "label": "Roll20 Live Feed",
+      "type": "Data Source",
+      "description": "Live character data streaming from a Roll20 game session via the browser extension. Carries character ID, name, controlled-by, and all sheet attributes. Data arrives as debounced whole-character snapshots (200ms batching of per-attribute Firebase events).",
+      "tags": ["input", "live", "external"],
+      "Direction": "Input",
+      "Storage": "In-memory",
+      "Layer": "Extension → Backend"
+    },
+    {
+      "label": "Roll20 Writeback",
+      "type": "Data Source",
+      "description": "Data pushed from the desktop app back into Roll20 character sheets. Supports three operations: Set Attribute (write a single value), Send Chat (inject a chat message), and Refresh (request fresh character snapshots).",
+      "tags": ["output", "external"],
+      "Direction": "Output",
+      "Storage": "None",
+      "Layer": "Backend → Extension"
+    },
+    {
+      "label": "Markdown Export",
+      "type": "Data Source",
+      "description": "Resonance roll results saved as timestamped Markdown files to ~/Documents/vtmtools/. Each file contains the full roll result, any attached dyscrasia, and an export timestamp.",
+      "tags": ["output", "persistent"],
+      "Direction": "Output",
+      "Storage": "Filesystem",
+      "Layer": "Backend"
+    },
+    {
+      "label": "Tool Event Bus",
+      "type": "Infrastructure",
+      "description": "Svelte store that lets tools broadcast events to each other without direct coupling. Currently carries resonance_result events (temperament, resonance type, acute status, dyscrasia name). Designed as the decoupling layer for future cross-tool features.",
+      "tags": ["internal", "bus"],
+      "Direction": "Internal",
+      "Storage": "In-memory",
+      "Layer": "Frontend"
+    },
+    {
+      "label": "Tauri Event Bridge",
+      "type": "Infrastructure",
+      "description": "Event channel carrying real-time updates from the Rust backend to the Svelte frontend using Tauri's built-in event system. Emits roll20://connected, roll20://disconnected, and roll20://characters-updated events. Distinct from the Tool Event Bus — this is backend-to-frontend, not tool-to-tool.",
+      "tags": ["internal", "bridge"],
+      "Direction": "Internal",
+      "Storage": "None",
+      "Layer": "Backend → Frontend"
+    },
+    {
+      "label": "WebSocket Bridge",
+      "type": "Infrastructure",
+      "description": "Local WebSocket server on 127.0.0.1:7423 that connects the Tauri desktop app to the Chrome extension running inside Roll20. Accepts one connection at a time. Carries both inbound (Live Feed) and outbound (Writeback) traffic.",
+      "tags": ["internal", "bridge"],
+      "Direction": "Bidirectional",
+      "Storage": "None",
+      "Layer": "Backend ↔ Extension"
+    },
+    {
+      "label": "Resonance Roller",
+      "type": "Tool",
+      "description": "The main resonance rolling tool. Consumes GM Roll Config, drives the Dice Engine, displays results, and distributes them to exports, Roll20, and the event bus. Also queries the Dyscrasia Store on Acute results.",
+      "tags": ["tool", "frontend"]
+    },
+    {
+      "label": "Dyscrasia Manager",
+      "type": "Tool",
+      "description": "Full CRUD interface for browsing, searching, filtering, adding, editing, and deleting dyscrasias. Also supports rolling a random dyscrasia by resonance type.",
+      "tags": ["tool", "frontend"]
+    },
+    {
+      "label": "Campaign Viewer",
+      "type": "Tool",
+      "description": "Live Roll20 character stat display. Shows hunger, health, willpower, humanity, and blood potency for all connected characters in real time.",
+      "tags": ["tool", "frontend"]
+    },
+    {
+      "label": "Roll20 Game Session",
+      "type": "External System",
+      "description": "The Roll20 browser-based virtual tabletop where the actual VTM game is played. Source of all live character data. The browser extension runs inside this page.",
+      "tags": ["external"]
+    },
+    {
+      "label": "Browser Extension",
+      "type": "External System",
+      "description": "Chrome extension injected into Roll20 pages. Reads character data from Roll20's Backbone/Firebase data layer, debounces attribute changes, and relays snapshots to the desktop app. Also receives writeback commands.",
+      "tags": ["external", "extension"]
+    },
+    {
+      "label": "Storyteller",
+      "type": "Actor",
+      "description": "The GM / Storyteller using the desktop app. Configures roll settings, triggers rolls, manages dyscrasias, and monitors the coterie via the Campaign viewer.",
+      "tags": ["actor", "user"]
+    },
+    {
+      "label": "Roll History",
+      "type": "Data Source",
+      "description": "In-memory list of past resonance roll results for the current session. Displayed in the Resonance Roller UI. Resets when the app restarts.",
+      "tags": ["internal", "ephemeral"],
+      "Direction": "Internal",
+      "Storage": "In-memory",
+      "Layer": "Frontend"
+    }
+  ],
+  "connections": [
+    {
+      "from": "Storyteller",
+      "to": "GM Roll Config",
+      "type": "configures",
+      "direction": "directed"
+    },
+    {
+      "from": "GM Roll Config",
+      "to": "Resonance Roller",
+      "type": "feeds",
+      "direction": "directed"
+    },
+    {
+      "from": "Resonance Roller",
+      "to": "Dice Engine",
+      "type": "invokes",
+      "direction": "directed"
+    },
+    {
+      "from": "Dice Engine",
+      "to": "Resonance Roll Result",
+      "type": "produces",
+      "direction": "directed"
+    },
+    {
+      "from": "Resonance Roll Result",
+      "to": "Resonance Roller",
+      "type": "displayed by",
+      "direction": "directed"
+    },
+    {
+      "from": "Resonance Roll Result",
+      "to": "Roll History",
+      "type": "stored in",
+      "direction": "directed"
+    },
+    {
+      "from": "Resonance Roll Result",
+      "to": "Tool Event Bus",
+      "type": "published to",
+      "direction": "directed"
+    },
+    {
+      "from": "Resonance Roll Result",
+      "to": "Markdown Export",
+      "type": "exported to",
+      "direction": "directed"
+    },
+    {
+      "from": "Resonance Roll Result",
+      "to": "Roll20 Writeback",
+      "type": "written back via",
+      "direction": "directed"
+    },
+    {
+      "from": "Resonance Roller",
+      "to": "Dyscrasia Store",
+      "type": "queries on Acute",
+      "direction": "directed"
+    },
+    {
+      "from": "Dyscrasia Manager",
+      "to": "Dyscrasia Store",
+      "type": "reads and writes",
+      "direction": "mutual"
+    },
+    {
+      "from": "Storyteller",
+      "to": "Dyscrasia Manager",
+      "type": "manages",
+      "direction": "directed"
+    },
+    {
+      "from": "Storyteller",
+      "to": "Campaign Viewer",
+      "type": "monitors",
+      "direction": "directed"
+    },
+    {
+      "from": "Roll20 Game Session",
+      "to": "Browser Extension",
+      "type": "exposes data to",
+      "direction": "directed"
+    },
+    {
+      "from": "Browser Extension",
+      "to": "WebSocket Bridge",
+      "type": "sends snapshots via",
+      "direction": "directed"
+    },
+    {
+      "from": "WebSocket Bridge",
+      "to": "Roll20 Live Feed",
+      "type": "delivers to",
+      "direction": "directed"
+    },
+    {
+      "from": "Roll20 Live Feed",
+      "to": "Tauri Event Bridge",
+      "type": "emits via",
+      "direction": "directed"
+    },
+    {
+      "from": "Tauri Event Bridge",
+      "to": "Campaign Viewer",
+      "type": "updates",
+      "direction": "directed"
+    },
+    {
+      "from": "Tauri Event Bridge",
+      "to": "Resonance Roller",
+      "type": "updates character list",
+      "direction": "directed"
+    },
+    {
+      "from": "Roll20 Writeback",
+      "to": "WebSocket Bridge",
+      "type": "sends commands via",
+      "direction": "directed"
+    },
+    {
+      "from": "WebSocket Bridge",
+      "to": "Browser Extension",
+      "type": "relays commands to",
+      "direction": "directed"
+    },
+    {
+      "from": "Browser Extension",
+      "to": "Roll20 Game Session",
+      "type": "writes back to",
+      "direction": "directed"
+    },
+    {
+      "from": "Storyteller",
+      "to": "Resonance Roller",
+      "type": "triggers rolls",
+      "direction": "directed"
+    }
+  ]
+}
