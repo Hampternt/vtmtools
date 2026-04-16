@@ -270,24 +270,26 @@
 
           <!-- ── Header ──────────────────────────────────────────────────── -->
           <div class="card-header">
-            <div class="name-clan">
+            <div class="header-line">
               <span class="char-name">{char.name}</span>
-              {#if clan}<span class="char-clan">{clan}</span>{/if}
+              <span class="badge" class:pc={isPC(char)} class:npc={!isPC(char)}>
+                {isPC(char) ? 'PC' : 'NPC'}
+              </span>
             </div>
-            <span class="badge" class:pc={isPC(char)} class:npc={!isPC(char)}>
-              {isPC(char) ? 'PC' : 'NPC'}
-            </span>
-            <div class="header-stats">
-              <div class="hunger-drops">
-                {#each dots(hunger, 5) as filled}
-                  <svg class="blood-drop" class:filled viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 2C12 2 4 14 4 20a8 8 0 0 0 16 0c0-6-8-18-8-18z" />
-                  </svg>
-                {/each}
-              </div>
-              <div class="bp-pill">
-                <span class="qs-label">BP</span>
-                <span class="bp-value">{bp}</span>
+            <div class="header-line">
+              {#if clan}<span class="char-clan">{clan}</span>{:else}<span></span>{/if}
+              <div class="header-vitals">
+                <div class="hunger-drops">
+                  {#each dots(hunger, 5) as filled}
+                    <svg class="blood-drop" class:filled viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M12 2C12 2 4 14 4 20a8 8 0 0 0 16 0c0-6-8-18-8-18z" />
+                    </svg>
+                  {/each}
+                </div>
+                <div class="bp-pill">
+                  <span class="qs-label">BP</span>
+                  <span class="bp-value">{bp}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -689,18 +691,22 @@
   /* ── Header ───────────────────────────────────────────────────────────── */
   .card-header {
     display: flex;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    padding: 0.75rem 0.9rem 0.65rem;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: var(--card-pad, 0.6rem) var(--card-pad, 0.6rem) calc(var(--card-pad, 0.6rem) - 0.1rem);
     border-bottom: 1px solid var(--border-faint);
   }
-  .name-clan {
-    flex: 1;
+  .header-line {
     display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    min-width: 0;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .header-vitals {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
   }
   .char-name {
     font-size: 0.95rem;
@@ -733,18 +739,10 @@
   .badge.pc  { background: #2a1515; color: var(--accent);  border: 1px solid #3a1e1e; }
   .badge.npc { background: #151528; color: #7986cb; border: 1px solid #1e1e3a; }
 
-  /* ── Header stats sub-row (hunger + BP) ──────────────────────────────── */
-  .header-stats {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-top: 0.25rem;
-  }
   .bp-pill {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.25rem;
   }
 
   /* ── Conscience row ──────────────────────────────────────────────────── */
@@ -774,8 +772,8 @@
     gap: 0.25rem;
   }
   .blood-drop {
-    width: 1.6rem;
-    height: 2.1rem;
+    width: var(--drop-size, 1.6rem);
+    height: calc(var(--drop-size, 1.6rem) * 1.3125);
     fill: none;
     stroke: var(--border-surface);
     stroke-width: 1.5;
