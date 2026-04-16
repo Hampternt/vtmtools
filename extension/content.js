@@ -121,7 +121,7 @@ function setCharacterAttribute(characterId, attrName, value) {
   }
   const existing = model.attribs.find(a => a.get('name') === attrName);
   if (existing) {
-    existing.save({ current: value });
+    existing.set('current', value);
   } else {
     model.attribs.create({ name: attrName, current: value, max: '' });
   }

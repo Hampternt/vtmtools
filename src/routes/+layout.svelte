@@ -59,9 +59,9 @@
     --bg-active: #380808;  /* selected / pressed state */
 
     /* ── Borders ────────────────────────────────────── */
-    --border-faint:   #1e0e0e;  /* separators */
-    --border-card:    #2a1010;  /* card edges */
-    --border-surface: #3a1a1a;  /* raised element edges */
+    --border-faint:   #5a3030;  /* separators  — DEBUG: was #1e0e0e */
+    --border-card:    #6a3535;  /* card edges  — DEBUG: was #2a1010 */
+    --border-surface: #7a4545;  /* raised element edges  — DEBUG: was #3a1a1a */
     --border-active:  #cc2222;  /* focused / active ring */
 
     /* ── Accent colors ──────────────────────────────── */
@@ -74,6 +74,14 @@
     --temp-negligible-dim: #686868;  /* zone labels, prob bars */
     --temp-fleeting-dim:   #907220;
     --temp-intense-dim:    #902020;
+  }
+
+  @font-face {
+    font-family: 'Last Rites';
+    src: url('/fonts/LastRites.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
   }
 
   :global(body) {
