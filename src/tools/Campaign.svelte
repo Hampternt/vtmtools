@@ -748,10 +748,9 @@
   /* ── Conscience row ──────────────────────────────────────────────────── */
   .conscience-row {
     container-type: inline-size;
-    min-height: 3rem;
     display: flex;
     align-items: stretch;
-    padding: 0 0.5rem;
+    padding: 0.2rem var(--card-pad, 0.6rem);
     border-bottom: 1px solid var(--border-faint);
     overflow: hidden;
     box-sizing: border-box;
@@ -789,7 +788,6 @@
   .conscience-track {
     display: flex;
     width: 100%;
-    height: 100%;
     align-items: stretch;
     gap: 0;
   }
@@ -799,17 +797,18 @@
     align-items: center;
     justify-content: center;
     font-family: 'Last Rites', cursive;
-    font-size: min(9cqi, 4rem);
+    font-size: min(9cqi, var(--conscience-cap, 2.5rem));
     font-weight: 400;
     color: var(--text-ghost);
-    line-height: 0.7;
+    line-height: 1;
+    padding: 0.15rem 0;
     overflow: hidden;
     transition: color 0.2s, text-shadow 0.2s;
     position: relative;
   }
   .conscience-letter.filled {
     color: var(--accent);
-    text-shadow: 0 0 0.5rem color-mix(in srgb, var(--accent) 50%, transparent);
+    text-shadow: var(--conscience-glow, none);
   }
   .conscience-letter.stained {
     color: #e07b00;
