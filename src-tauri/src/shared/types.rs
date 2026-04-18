@@ -139,3 +139,94 @@ pub struct ResonanceRollResult {
     /// Populated after GM rolls/picks Dyscrasia (not auto-populated here)
     pub dyscrasia: Option<DyscrasiaEntry>,
 }
+
+// ---------------------------------------------------------------------------
+// Domains Manager / Chronicle graph types
+// ---------------------------------------------------------------------------
+
+/// A running game. Contains nodes and edges.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Chronicle {
+    pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Single-or-multi string value. Serialized untagged: a raw string for single,
+/// an array for multi.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum StringFieldValue {
+    Single(String),
+    Multi(Vec<String>),
+}
+
+/// Single-or-multi number value.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum NumberFieldValue {
+    Single(f64),
+    Multi(Vec<f64>),
+}
+
+/// A typed field value. `#[serde(tag = "type")]` means the JSON discriminator field
+/// `"type"` chooses which variant is parsed; a value of the wrong type fails to
+/// deserialize — no manual validation code needed.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum FieldValue {
+    String    { value: StringFieldValue },
+    Text      { value: String           },
+    Number    { value: NumberFieldValue },
+    Date      { value: String           },
+    Url       { value: String           },
+    Email     { value: String           },
+    Bool      { value: bool             },
+    Reference { value: i64              },
+}
+
+/// A named, typed field. JSON shape example:
+///   {"name": "influence_rating", "type": "number", "value": 3}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Field {
+    pub name: String,
+    #[serde(flatten)]
+    pub value: FieldValue,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Node {
+    pub id: i64,
+    pub chronicle_id: i64,
+    #[serde(rename = "type")]
+    pub node_type: String,
+    pub label: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub properties: Vec<Field>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Edge {
+    pub id: i64,
+    pub chronicle_id: i64,
+    pub from_node_id: i64,
+    pub to_node_id: i64,
+    pub edge_type: String,
+    pub description: String,
+    pub properties: Vec<Field>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EdgeDirection {
+    In,
+    Out,
+    Both,
+}
