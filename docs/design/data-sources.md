@@ -75,6 +75,27 @@ This document names and describes every source of data in VTM Tools where data c
 
 ---
 
+## Chronicle Store
+
+**Direction:** Both (app reads and writes)
+**What it is:** The SQLite tables holding all user-authored chronicle data — geographic/organizational areas, characters, businesses, merits, influence holdings, and typed relationships between them. Split across three tables: `chronicles`, `nodes`, `edges`.
+
+**Data carried per chronicle:** name, description, timestamps.
+
+**Data carried per node:** type (freeform user-chosen string), label, markdown description, cross-cutting tags, and a typed property bag (array of named fields with declared types: string, text, number, date, url, email, bool, reference).
+
+**Data carried per edge:** type (freeform user-chosen string), from-node, to-node, markdown description, typed property bag.
+
+**Behavior:**
+- Nothing is seeded; all data is user-created.
+- The `"contains"` edge type is treated by the UI as the navigation relationship (breadcrumbs and drilldown walk it), but the DB does not privilege it.
+- Deleting a chronicle cascades to all its nodes and edges. Deleting a node cascades to all its edges.
+- A node has at most one incoming `contains` edge (enforced by a partial unique index) — the `contains` sub-graph is a strict tree.
+
+**Currently used by:** Domains Manager (full CRUD + derived tree queries).
+
+---
+
 ## Roll20 Live Feed
 
 **Direction:** Input (Roll20 browser → app)
@@ -208,6 +229,7 @@ Backend ──── Tauri Event Bridge ────→ Frontend
 | Dice Engine             | Internal        | None       | Backend          |
 | Resonance Roll Result   | Output/Internal | In-memory  | Backend→Frontend |
 | Dyscrasia Store         | Both            | SQLite     | Backend          |
+| Chronicle Store         | Both            | SQLite     | Backend          |
 | Roll20 Live Feed        | Input           | In-memory  | Extension→Backend|
 | Roll20 Writeback        | Output          | None       | Backend→Extension|
 | Markdown Export         | Output          | Filesystem | Backend          |
