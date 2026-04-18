@@ -19,9 +19,12 @@ npm run tauri build
 
 # Compile-check Rust only
 cargo check --manifest-path src-tauri/Cargo.toml
+
+# Run all existing correctness gates (type-check, cargo tests, frontend build)
+./scripts/verify.sh
 ```
 
-There are no test suites. `npm run check` (svelte-check + tsc) is the primary correctness gate.
+`./scripts/verify.sh` is the aggregate gate: it runs `npm run check`, `cargo test`, and `npm run build`. Rust unit tests live as `#[cfg(test)] mod tests` inside each source file (currently `shared/dice.rs`, `shared/resonance.rs`, `db/dyscrasia.rs`, `tools/export.rs`). There is no frontend test framework.
 
 ## Architecture
 
@@ -71,13 +74,15 @@ Chrome extension that runs inside Roll20 and connects to the Tauri WebSocket ser
 
 ### Database
 
-SQLite, stored in the Tauri app data directory (`app.path().app_data_dir()`). Migrations are in `src-tauri/migrations/`. Schema currently has one table: `dyscrasias` (id, resonance_type, name, description, bonus, is_custom).
+SQLite, stored in the Tauri app data directory (`app.path().app_data_dir()`). Migrations are in `src-tauri/migrations/`. `PRAGMA foreign_keys = ON` is enabled on the pool via `SqliteConnectOptions` so `ON DELETE CASCADE` actually fires. Migration `0001_initial.sql` creates `dyscrasias` (id, resonance_type, name, description, bonus, is_custom).
 
 `seed.rs` deletes all `is_custom = 0` rows and reinserts canonical entries on every app start (not "only if empty"). This is intentional — it keeps built-in data fresh when the seed changes. Do not revert to the count-check guard.
 
 `resonance_type` CHECK constraint uses `'Melancholy'` (not `'Melancholic'`). Source material uses both spellings; the DB enforces the former.
 
 In `DyscrasiaCard`: `description` = full effect text shown in the card body; `bonus` = short one-line mechanical tag shown in the card footer.
+
+Migration `0002_chronicle_graph.sql` adds three tables for the Domains Manager tool: `chronicles` (one row per running game), `nodes` (any discrete thing — area, character, institution, business, merit), and `edges` (typed directional relationships between nodes). `nodes.type` and `edges.edge_type` are freeform user-authored strings; no enum enforcement. Custom fields live in `nodes.properties_json` / `edges.properties_json` as a JSON array of typed Field records (each `{name, type, value}`). Deleting a chronicle cascades to its nodes and edges; deleting a node cascades to its edges. The `"contains"` edge type is the UI's convention for hierarchy/drilldown (and a partial unique index enforces at most one `contains` parent per node) but other edge types are unrestricted.
 
 ### VTM 5e Dice Mechanics
 
