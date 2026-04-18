@@ -3,3 +3,4 @@ pub mod seed;
 
 pub mod chronicle;
 pub mod node;
+pub mod edge;
