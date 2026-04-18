@@ -1,6 +1,6 @@
 [package]
 name = "vtmtools"
-version = "0.1.2"
+version = "0.2.0"
 description = "VTM 5e GM tooling suite — feeding dice roller and more"
 authors = ["Hampternt"]
 edition = "2021"
