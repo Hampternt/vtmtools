@@ -133,6 +133,150 @@ async fn db_delete(pool: &SqlitePool, id: i64) -> Result<(), String> {
     Ok(())
 }
 
+// -------- Derived tree queries (all follow edge_type = 'contains') --------
+
+async fn db_get_parent(pool: &SqlitePool, node_id: i64) -> Result<Option<Node>, String> {
+    let r = sqlx::query(
+        "SELECT n.id, n.chronicle_id, n.type, n.label, n.description, n.tags_json, n.properties_json, n.created_at, n.updated_at
+         FROM nodes n
+         JOIN edges e ON e.from_node_id = n.id
+         WHERE e.to_node_id = ? AND e.edge_type = 'contains'
+         LIMIT 1"
+    )
+    .bind(node_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match r {
+        Some(row) => Ok(Some(row_to_node(&row)?)),
+        None => Ok(None),
+    }
+}
+
+async fn db_get_children(pool: &SqlitePool, node_id: i64) -> Result<Vec<Node>, String> {
+    let rows = sqlx::query(
+        "SELECT n.id, n.chronicle_id, n.type, n.label, n.description, n.tags_json, n.properties_json, n.created_at, n.updated_at
+         FROM nodes n
+         JOIN edges e ON e.to_node_id = n.id
+         WHERE e.from_node_id = ? AND e.edge_type = 'contains'
+         ORDER BY n.id ASC"
+    )
+    .bind(node_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    rows.iter().map(row_to_node).collect()
+}
+
+async fn db_get_siblings(pool: &SqlitePool, node_id: i64) -> Result<Vec<Node>, String> {
+    let rows = sqlx::query(
+        "SELECT n.id, n.chronicle_id, n.type, n.label, n.description, n.tags_json, n.properties_json, n.created_at, n.updated_at
+         FROM nodes n
+         JOIN edges e ON e.to_node_id = n.id
+         WHERE e.edge_type = 'contains'
+           AND e.from_node_id = (
+               SELECT from_node_id FROM edges
+               WHERE to_node_id = ? AND edge_type = 'contains'
+               LIMIT 1
+           )
+           AND n.id != ?
+         ORDER BY n.id ASC"
+    )
+    .bind(node_id)
+    .bind(node_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    rows.iter().map(row_to_node).collect()
+}
+
+async fn db_get_path_to_root(pool: &SqlitePool, node_id: i64) -> Result<Vec<Node>, String> {
+    let rows = sqlx::query(
+        "WITH RECURSIVE ancestors(id, chronicle_id, type, label, description, tags_json, properties_json, created_at, updated_at, depth) AS (
+            SELECT n.id, n.chronicle_id, n.type, n.label, n.description, n.tags_json, n.properties_json, n.created_at, n.updated_at, 0
+            FROM nodes n WHERE n.id = ?
+
+            UNION ALL
+
+            SELECT n.id, n.chronicle_id, n.type, n.label, n.description, n.tags_json, n.properties_json, n.created_at, n.updated_at, a.depth + 1
+            FROM nodes n
+            JOIN edges e ON e.from_node_id = n.id
+            JOIN ancestors a ON a.id = e.to_node_id
+            WHERE e.edge_type = 'contains' AND a.depth < 32
+        )
+        SELECT id, chronicle_id, type, label, description, tags_json, properties_json, created_at, updated_at
+        FROM ancestors WHERE depth > 0 ORDER BY depth ASC"
+    )
+    .bind(node_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    rows.iter().map(row_to_node).collect()
+}
+
+async fn db_get_subtree(
+    pool: &SqlitePool,
+    node_id: i64,
+    max_depth: Option<i32>,
+) -> Result<Vec<Node>, String> {
+    let cap = max_depth.unwrap_or(32);
+    let rows = sqlx::query(
+        "WITH RECURSIVE descendants(id, chronicle_id, type, label, description, tags_json, properties_json, created_at, updated_at, depth) AS (
+            SELECT n.id, n.chronicle_id, n.type, n.label, n.description, n.tags_json, n.properties_json, n.created_at, n.updated_at, 0
+            FROM nodes n WHERE n.id = ?
+
+            UNION ALL
+
+            SELECT n.id, n.chronicle_id, n.type, n.label, n.description, n.tags_json, n.properties_json, n.created_at, n.updated_at, d.depth + 1
+            FROM nodes n
+            JOIN edges e ON e.to_node_id = n.id
+            JOIN descendants d ON d.id = e.from_node_id
+            WHERE e.edge_type = 'contains' AND d.depth < ?
+        )
+        SELECT id, chronicle_id, type, label, description, tags_json, properties_json, created_at, updated_at
+        FROM descendants WHERE depth > 0 ORDER BY depth ASC, id ASC"
+    )
+    .bind(node_id)
+    .bind(cap)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    rows.iter().map(row_to_node).collect()
+}
+
+/// Returns true if creating a contains edge `from -> to` would produce a cycle.
+/// Cycle exists if `from` is already in `to`'s descendant set (via contains).
+pub(crate) async fn would_create_cycle(
+    pool: &SqlitePool,
+    from_node_id: i64,
+    to_node_id: i64,
+) -> Result<bool, String> {
+    let row = sqlx::query(
+        "WITH RECURSIVE descendants(id, depth) AS (
+            SELECT ?, 0
+            UNION ALL
+            SELECT e.to_node_id, d.depth + 1
+            FROM edges e
+            JOIN descendants d ON e.from_node_id = d.id
+            WHERE e.edge_type = 'contains' AND d.depth < 32
+        )
+        SELECT COUNT(*) AS cnt FROM descendants WHERE id = ?"
+    )
+    .bind(to_node_id)
+    .bind(from_node_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let cnt: i64 = row.get("cnt");
+    Ok(cnt > 0)
+}
+
 // -------- Tauri commands --------
 
 #[tauri::command]
@@ -186,6 +330,49 @@ pub async fn delete_node(
     db_delete(&pool.0, id).await
 }
 
+// -------- Derived-query Tauri commands --------
+
+#[tauri::command]
+pub async fn get_parent_of(
+    pool: tauri::State<'_, crate::DbState>,
+    node_id: i64,
+) -> Result<Option<Node>, String> {
+    db_get_parent(&pool.0, node_id).await
+}
+
+#[tauri::command]
+pub async fn get_children_of(
+    pool: tauri::State<'_, crate::DbState>,
+    node_id: i64,
+) -> Result<Vec<Node>, String> {
+    db_get_children(&pool.0, node_id).await
+}
+
+#[tauri::command]
+pub async fn get_siblings_of(
+    pool: tauri::State<'_, crate::DbState>,
+    node_id: i64,
+) -> Result<Vec<Node>, String> {
+    db_get_siblings(&pool.0, node_id).await
+}
+
+#[tauri::command]
+pub async fn get_path_to_root(
+    pool: tauri::State<'_, crate::DbState>,
+    node_id: i64,
+) -> Result<Vec<Node>, String> {
+    db_get_path_to_root(&pool.0, node_id).await
+}
+
+#[tauri::command]
+pub async fn get_subtree(
+    pool: tauri::State<'_, crate::DbState>,
+    node_id: i64,
+    max_depth: Option<i32>,
+) -> Result<Vec<Node>, String> {
+    db_get_subtree(&pool.0, node_id, max_depth).await
+}
+
 // -------- Unit tests --------
 
 #[cfg(test)]
@@ -198,6 +385,16 @@ mod tests {
         let r = sqlx::query("INSERT INTO chronicles (name) VALUES ('Test')")
             .execute(pool).await.unwrap();
         r.last_insert_rowid()
+    }
+
+    /// Helper: insert a raw contains edge for test scaffolding, bypassing edge.rs logic.
+    async fn insert_contains(pool: &SqlitePool, chronicle_id: i64, from: i64, to: i64) {
+        sqlx::query(
+            "INSERT INTO edges (chronicle_id, from_node_id, to_node_id, edge_type)
+             VALUES (?, ?, ?, 'contains')"
+        )
+        .bind(chronicle_id).bind(from).bind(to)
+        .execute(pool).await.unwrap();
     }
 
     #[tokio::test]
@@ -284,5 +481,141 @@ mod tests {
             .bind(cid).execute(&pool).await.unwrap();
 
         assert!(db_list(&pool, cid, None).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_parent_returns_some_when_parent_exists() {
+        let pool = test_pool().await;
+        let cid = make_chronicle(&pool).await;
+        let parent = db_create(&pool, cid, "area", "Parent", "", &[], &[]).await.unwrap();
+        let child  = db_create(&pool, cid, "area", "Child",  "", &[], &[]).await.unwrap();
+        insert_contains(&pool, cid, parent.id, child.id).await;
+
+        let p = db_get_parent(&pool, child.id).await.unwrap();
+        assert!(p.is_some());
+        assert_eq!(p.unwrap().id, parent.id);
+    }
+
+    #[tokio::test]
+    async fn get_parent_returns_none_for_root() {
+        let pool = test_pool().await;
+        let cid = make_chronicle(&pool).await;
+        let root = db_create(&pool, cid, "area", "Root", "", &[], &[]).await.unwrap();
+        assert!(db_get_parent(&pool, root.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn get_children_returns_all_direct_children() {
+        let pool = test_pool().await;
+        let cid = make_chronicle(&pool).await;
+        let parent = db_create(&pool, cid, "area", "Parent", "", &[], &[]).await.unwrap();
+        let a = db_create(&pool, cid, "area", "A", "", &[], &[]).await.unwrap();
+        let b = db_create(&pool, cid, "area", "B", "", &[], &[]).await.unwrap();
+        let c = db_create(&pool, cid, "area", "C", "", &[], &[]).await.unwrap();
+        insert_contains(&pool, cid, parent.id, a.id).await;
+        insert_contains(&pool, cid, parent.id, b.id).await;
+        insert_contains(&pool, cid, a.id,      c.id).await;
+
+        let kids = db_get_children(&pool, parent.id).await.unwrap();
+        let ids: Vec<i64> = kids.iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec![a.id, b.id]);
+    }
+
+    #[tokio::test]
+    async fn get_siblings_returns_peers() {
+        let pool = test_pool().await;
+        let cid = make_chronicle(&pool).await;
+        let parent = db_create(&pool, cid, "area", "P", "", &[], &[]).await.unwrap();
+        let a = db_create(&pool, cid, "area", "A", "", &[], &[]).await.unwrap();
+        let b = db_create(&pool, cid, "area", "B", "", &[], &[]).await.unwrap();
+        let c = db_create(&pool, cid, "area", "C", "", &[], &[]).await.unwrap();
+        insert_contains(&pool, cid, parent.id, a.id).await;
+        insert_contains(&pool, cid, parent.id, b.id).await;
+        insert_contains(&pool, cid, parent.id, c.id).await;
+
+        let sibs = db_get_siblings(&pool, a.id).await.unwrap();
+        let ids: Vec<i64> = sibs.iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec![b.id, c.id]);
+    }
+
+    #[tokio::test]
+    async fn get_siblings_empty_for_root() {
+        let pool = test_pool().await;
+        let cid = make_chronicle(&pool).await;
+        let n = db_create(&pool, cid, "area", "Solo", "", &[], &[]).await.unwrap();
+        assert!(db_get_siblings(&pool, n.id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_path_to_root_returns_ancestors_bottom_up() {
+        let pool = test_pool().await;
+        let cid = make_chronicle(&pool).await;
+        let g = db_create(&pool, cid, "area", "State",     "", &[], &[]).await.unwrap();
+        let p = db_create(&pool, cid, "area", "City",      "", &[], &[]).await.unwrap();
+        let c = db_create(&pool, cid, "area", "Borough",   "", &[], &[]).await.unwrap();
+        let l = db_create(&pool, cid, "area", "Neighbor",  "", &[], &[]).await.unwrap();
+        insert_contains(&pool, cid, g.id, p.id).await;
+        insert_contains(&pool, cid, p.id, c.id).await;
+        insert_contains(&pool, cid, c.id, l.id).await;
+
+        let path = db_get_path_to_root(&pool, l.id).await.unwrap();
+        let ids: Vec<i64> = path.iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec![c.id, p.id, g.id]);
+    }
+
+    #[tokio::test]
+    async fn get_subtree_returns_descendants() {
+        let pool = test_pool().await;
+        let cid = make_chronicle(&pool).await;
+        let r = db_create(&pool, cid, "area", "Root", "", &[], &[]).await.unwrap();
+        let a = db_create(&pool, cid, "area", "A",    "", &[], &[]).await.unwrap();
+        let b = db_create(&pool, cid, "area", "B",    "", &[], &[]).await.unwrap();
+        let c = db_create(&pool, cid, "area", "C",    "", &[], &[]).await.unwrap();
+        insert_contains(&pool, cid, r.id, a.id).await;
+        insert_contains(&pool, cid, r.id, b.id).await;
+        insert_contains(&pool, cid, a.id, c.id).await;
+
+        let sub = db_get_subtree(&pool, r.id, None).await.unwrap();
+        let ids: Vec<i64> = sub.iter().map(|n| n.id).collect();
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains(&a.id));
+        assert!(ids.contains(&b.id));
+        assert!(ids.contains(&c.id));
+    }
+
+    #[tokio::test]
+    async fn get_subtree_respects_max_depth() {
+        let pool = test_pool().await;
+        let cid = make_chronicle(&pool).await;
+        let r = db_create(&pool, cid, "area", "R", "", &[], &[]).await.unwrap();
+        let a = db_create(&pool, cid, "area", "A", "", &[], &[]).await.unwrap();
+        let b = db_create(&pool, cid, "area", "B", "", &[], &[]).await.unwrap();
+        insert_contains(&pool, cid, r.id, a.id).await;
+        insert_contains(&pool, cid, a.id, b.id).await;
+
+        let sub = db_get_subtree(&pool, r.id, Some(1)).await.unwrap();
+        let ids: Vec<i64> = sub.iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec![a.id]);
+    }
+
+    #[tokio::test]
+    async fn would_create_cycle_true_for_back_edge() {
+        let pool = test_pool().await;
+        let cid = make_chronicle(&pool).await;
+        let a = db_create(&pool, cid, "area", "A", "", &[], &[]).await.unwrap();
+        let b = db_create(&pool, cid, "area", "B", "", &[], &[]).await.unwrap();
+        insert_contains(&pool, cid, a.id, b.id).await;
+
+        assert!(would_create_cycle(&pool, b.id, a.id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn would_create_cycle_false_for_safe_edge() {
+        let pool = test_pool().await;
+        let cid = make_chronicle(&pool).await;
+        let a = db_create(&pool, cid, "area", "A", "", &[], &[]).await.unwrap();
+        let b = db_create(&pool, cid, "area", "B", "", &[], &[]).await.unwrap();
+
+        assert!(!would_create_cycle(&pool, a.id, b.id).await.unwrap());
     }
 }
