@@ -4,6 +4,8 @@ mod db;
 mod roll20;
 
 use sqlx::SqlitePool;
+use sqlx::sqlite::SqliteConnectOptions;
+use std::str::FromStr;
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -21,7 +23,10 @@ pub fn run() {
 
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
-                let pool = SqlitePool::connect(&db_url).await
+                let opts = SqliteConnectOptions::from_str(&db_url)
+                    .expect("Invalid db_url")
+                    .foreign_keys(true);
+                let pool = SqlitePool::connect_with(opts).await
                     .expect("Failed to connect to database");
                 sqlx::migrate!("./migrations").run(&pool).await
                     .expect("Failed to run migrations");
