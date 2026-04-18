@@ -73,6 +73,7 @@ pub fn weighted_resonance_pick(weights: &ResonanceWeights) -> ResonanceType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::types::SliderLevel;
 
     #[test]
     fn roll_d10_stays_in_range() {

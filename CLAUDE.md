@@ -26,6 +26,8 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 `./scripts/verify.sh` is the aggregate gate: it runs `npm run check`, `cargo test`, and `npm run build`. Rust unit tests live as `#[cfg(test)] mod tests` inside each source file (currently `shared/dice.rs`, `shared/resonance.rs`, `db/dyscrasia.rs`, `tools/export.rs`). There is no frontend test framework.
 
+Expected `verify.sh` warnings (not regressions): `shared/types.rs` types for the Domains Manager (`Chronicle`, `Node`, `Edge`, `Field`, `FieldValue`, `StringFieldValue`, `NumberFieldValue`, `EdgeDirection`) trigger "never constructed / never used" — they back migration `0002_chronicle_graph.sql` but aren't yet wired into Tauri commands. `npm run build` also reports an unused `listen` import in `Campaign.svelte` and `Resonance.svelte`. Don't remove any of these without checking with the user — in-progress surface, not dead code.
+
 ## Architecture
 
 This is a **Tauri 2 + SvelteKit + TypeScript** desktop app. The frontend is a SPA (static adapter, no SSR). All GM logic lives in the Rust backend; the frontend is display + input only.
