@@ -134,6 +134,21 @@
       "Direction": "Internal",
       "Storage": "In-memory",
       "Layer": "Frontend"
+    },
+    {
+      "label": "Chronicle Store",
+      "type": "Data Source",
+      "description": "SQLite tables (chronicles, nodes, edges) holding all user-authored game state — areas, characters, businesses, merits, influence, and typed relationships.",
+      "tags": ["input", "output", "persistent"],
+      "Direction": "Both",
+      "Storage": "SQLite",
+      "Layer": "Backend"
+    },
+    {
+      "label": "Domains Manager",
+      "type": "Tool",
+      "description": "Hierarchical chronicle tracker. Lets the Storyteller model a game's territories, institutions, characters, and relationships as a graph of typed nodes connected by typed edges.",
+      "tags": ["tool", "frontend"]
     }
   ],
   "connections": [
@@ -274,6 +289,18 @@
       "to": "Resonance Roller",
       "type": "triggers rolls",
       "direction": "directed"
+    },
+    {
+      "from": "Storyteller",
+      "to": "Domains Manager",
+      "type": "manages",
+      "direction": "directed"
+    },
+    {
+      "from": "Domains Manager",
+      "to": "Chronicle Store",
+      "type": "reads and writes",
+      "direction": "mutual"
     }
   ]
 }
