@@ -55,3 +55,53 @@ export interface Roll20Character {
   controlled_by: string;
   attributes: Roll20Attribute[];
 }
+
+// ---------------------------------------------------------------------------
+// Domains Manager / Chronicle graph types
+// ---------------------------------------------------------------------------
+
+export interface Chronicle {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type FieldValue =
+  | { type: 'string';    value: string | string[] }
+  | { type: 'text';      value: string }
+  | { type: 'number';    value: number | number[] }
+  | { type: 'date';      value: string }
+  | { type: 'url';       value: string }
+  | { type: 'email';     value: string }
+  | { type: 'bool';      value: boolean }
+  | { type: 'reference'; value: number };
+
+export type Field = { name: string } & FieldValue;
+
+export interface ChronicleNode {
+  id: number;
+  chronicle_id: number;
+  type: string;
+  label: string;
+  description: string;
+  tags: string[];
+  properties: Field[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChronicleEdge {
+  id: number;
+  chronicle_id: number;
+  from_node_id: number;
+  to_node_id: number;
+  edge_type: string;
+  description: string;
+  properties: Field[];
+  created_at: string;
+  updated_at: string;
+}
+
+export type EdgeDirection = 'in' | 'out' | 'both';
