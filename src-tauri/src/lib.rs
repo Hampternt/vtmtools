@@ -32,6 +32,8 @@ pub fn run() {
                     .expect("Failed to run migrations");
                 db::seed::seed_dyscrasias(&pool).await
                     .expect("Failed to seed dyscrasias");
+                db::seed::seed_advantages(&pool).await
+                    .expect("Failed to seed advantages");
                 handle.manage(DbState(Arc::new(pool)));
 
                 // Roll20 WebSocket integration
