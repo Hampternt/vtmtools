@@ -206,22 +206,28 @@ fn seed_rows() -> &'static [SeedRow] {
 
 fn row_to_properties(row: &SeedRow) -> Vec<Field> {
     let mut props: Vec<Field> = Vec::new();
-    if let Some(l) = row.level {
-        props.push(Field {
-            name: "level".to_string(),
-            value: FieldValue::Number { value: NumberFieldValue::Single(l as f64) },
-        });
-    }
-    if let Some(max) = row.level_max {
-        let min = row.level.unwrap_or(1) as f64;
-        props.push(Field {
-            name: "min_level".to_string(),
-            value: FieldValue::Number { value: NumberFieldValue::Single(min) },
-        });
-        props.push(Field {
-            name: "max_level".to_string(),
-            value: FieldValue::Number { value: NumberFieldValue::Single(max as f64) },
-        });
+    // `level` (fixed dot rating) and `min_level`/`max_level` (ranged) are mutually
+    // exclusive: downstream consumers display `level` as a fixed dot strip or fall
+    // back to the range label. Emitting both would render a ranged row as fixed.
+    match (row.level, row.level_max) {
+        (_, Some(max)) => {
+            let min = row.level.unwrap_or(1) as f64;
+            props.push(Field {
+                name: "min_level".to_string(),
+                value: FieldValue::Number { value: NumberFieldValue::Single(min) },
+            });
+            props.push(Field {
+                name: "max_level".to_string(),
+                value: FieldValue::Number { value: NumberFieldValue::Single(max as f64) },
+            });
+        }
+        (Some(l), None) => {
+            props.push(Field {
+                name: "level".to_string(),
+                value: FieldValue::Number { value: NumberFieldValue::Single(l as f64) },
+            });
+        }
+        (None, None) => {}
     }
     props.push(Field {
         name: "source".to_string(),
