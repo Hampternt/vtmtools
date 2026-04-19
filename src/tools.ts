@@ -34,4 +34,10 @@ export const tools: Tool[] = [
     icon: '🏰',
     component: () => import('./tools/DomainsManager.svelte'),
   },
+  {
+    id: 'advantages',
+    label: 'Advantages',
+    icon: '⚜',
+    component: () => import('./tools/AdvantagesManager.svelte'),
+  },
 ];
