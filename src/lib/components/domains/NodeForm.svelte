@@ -3,8 +3,8 @@
   import type { ChronicleNode, Field, FieldValue } from '../../../types';
   import * as api from '../../domains/api';
   import { session, cache, refreshNodes, refreshEdges, selectNode } from '../../../store/domains.svelte';
-  import PropertyEditor from './PropertyEditor.svelte';
-  import { SUPPORTED_TYPES } from './property-widgets';
+  import PropertyEditor from '../properties/PropertyEditor.svelte';
+  import { SUPPORTED_TYPES } from '../properties/property-widgets';
 
   const { node = null, parentId = null, oncancel, onsave }: {
     node?: ChronicleNode | null;
