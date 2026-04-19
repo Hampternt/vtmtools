@@ -195,7 +195,10 @@
       {/if}
 
       {#each visible as entry (entry.id)}
-        <div animate:flip={{ duration: 300, easing: cubicOut }}>
+        <div
+          animate:flip={{ duration: 300, easing: cubicOut }}
+          transition:fade={{ duration: 120 }}
+        >
           {#if editingId === entry.id}
             <div
               in:scale={{ start: 0.9, duration: 200, easing: cubicOut }}

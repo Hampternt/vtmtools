@@ -7,19 +7,19 @@ use crate::shared::types::{Advantage, Field};
 // --------------------------------------------------------------------------
 
 fn serialize_tags(tags: &[String]) -> Result<String, String> {
-    serde_json::to_string(tags).map_err(|e| e.to_string())
+    serde_json::to_string(tags).map_err(|e| format!("db/advantage.serialize_tags: {}", e))
 }
 
 fn deserialize_tags(s: &str) -> Result<Vec<String>, String> {
-    serde_json::from_str(s).map_err(|e| e.to_string())
+    serde_json::from_str(s).map_err(|e| format!("db/advantage.deserialize_tags: {}", e))
 }
 
 fn serialize_properties(props: &[Field]) -> Result<String, String> {
-    serde_json::to_string(props).map_err(|e| e.to_string())
+    serde_json::to_string(props).map_err(|e| format!("db/advantage.serialize_properties: {}", e))
 }
 
 fn deserialize_properties(s: &str) -> Result<Vec<Field>, String> {
-    serde_json::from_str(s).map_err(|e| e.to_string())
+    serde_json::from_str(s).map_err(|e| format!("db/advantage.deserialize_properties: {}", e))
 }
 
 // --------------------------------------------------------------------------
@@ -33,7 +33,7 @@ async fn db_list(pool: &SqlitePool) -> Result<Vec<Advantage>, String> {
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| format!("db/advantage.list: {}", e))?;
 
     let mut out = Vec::with_capacity(rows.len());
     for r in rows.iter() {

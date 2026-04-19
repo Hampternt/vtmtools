@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { Advantage, Field } from '../../types';
-  import { fade } from 'svelte/transition';
 
   const { entry, onedit, ondelete }: {
     entry: Advantage;
@@ -43,7 +42,7 @@
   }
 </script>
 
-<article class="card" transition:fade={{ duration: 120 }}>
+<article class="card">
   <header class="head">
     <h3 class="name">{entry.name}</h3>
     {#if entry.tags.length > 0}
