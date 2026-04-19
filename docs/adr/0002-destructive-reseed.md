@@ -28,8 +28,12 @@ reinserts the full canonical set from the seed source. Rows with
   built-in.
 - No migration is required when the seed changes — the next boot
   reconciles automatically.
-- Foreign-key dependencies on built-in dyscrasias are stable because IDs
-  are deterministic within a seed version.
+- Row `id` values are AUTOINCREMENT and renumber on every startup when
+  built-ins are deleted and reinserted. Code that references a built-in
+  dyscrasia must use the stable natural key (`resonance_type` + `name`),
+  not `id`. No tables currently declare a foreign key against
+  `dyscrasias.id`, and any new such table should avoid doing so or rely
+  on a stable natural-key column instead.
 
 ## Alternatives considered
 
