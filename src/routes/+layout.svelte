@@ -103,6 +103,12 @@
     padding: 1.5rem;
     overflow-y: auto;
     min-height: 0; /* prevent flex child from overflowing */
+    /* Flex column so tools can opt into `flex: 1; min-height: 0` and fit
+       the available height without resorting to 100vh (which overflows
+       by the content's padding). Tools with intrinsic height still work
+       because flex-column children honour their own `height`. */
+    display: flex;
+    flex-direction: column;
   }
   .loading {
     color: var(--text-muted);
