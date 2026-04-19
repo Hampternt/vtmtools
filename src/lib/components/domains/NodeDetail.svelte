@@ -2,6 +2,7 @@
   import PropertyEditor from './PropertyEditor.svelte';
   import NodeForm from './NodeForm.svelte';
   import * as api from '../../domains/api';
+  import type { ChronicleNode } from '../../../types';
   import { session, cache, refreshNodes, refreshEdges, selectNode } from '../../../store/domains.svelte';
 
   const node = $derived(cache.nodes.find(n => n.id === session.nodeId) ?? null);
@@ -11,6 +12,28 @@
       ? 0
       : cache.edges.filter(e => e.edge_type === 'contains' && e.from_node_id === node.id).length
   );
+
+  // Walk the contains edges to build an ancestor list (top-down).
+  const pathToRoot = $derived(computePath());
+
+  function computePath(): ChronicleNode[] {
+    if (!node) return [];
+    const byId = new Map(cache.nodes.map(n => [n.id, n]));
+    const byChild = new Map<number, number>();
+    for (const e of cache.edges) {
+      if (e.edge_type === 'contains') byChild.set(e.to_node_id, e.from_node_id);
+    }
+    const path: ChronicleNode[] = [];
+    let cur: number | undefined = byChild.get(node.id);
+    let guard = 0;
+    while (cur != null && guard++ < 64) {
+      const p = byId.get(cur);
+      if (!p) break;
+      path.unshift(p);
+      cur = byChild.get(cur);
+    }
+    return path;
+  }
 
   let editing = $state(false);
   let deleting = $state(false);
@@ -50,6 +73,14 @@
       onsave={() => editing = false}
     />
   {:else}
+    {#if pathToRoot.length > 0}
+      <nav class="crumbs" aria-label="breadcrumb">
+        {#each pathToRoot as p, i (p.id)}
+          <button class="crumb" onclick={() => selectNode(p.id)}>{p.label}</button>
+          {#if i < pathToRoot.length}<span class="sep">▸</span>{/if}
+        {/each}
+      </nav>
+    {/if}
     <header class="head">
       <span class="title">{node.label}</span>
       <span class="type-chip">{node.type}</span>
@@ -91,6 +122,24 @@
   .detail { padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.55rem; overflow: auto; }
   .muted { color: var(--text-ghost); font-size: 0.8rem; }
   .muted.small { font-size: 0.7rem; }
+  .crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.65rem;
+    color: var(--text-ghost);
+  }
+  .crumb {
+    background: none;
+    border: 0;
+    color: var(--text-muted);
+    font-size: inherit;
+    padding: 0;
+    cursor: pointer;
+  }
+  .crumb:hover { color: var(--text-primary); text-decoration: underline; }
+  .sep { color: var(--text-ghost); }
   .head { display: flex; align-items: center; gap: 0.5rem; }
   .title { font-size: 1.1rem; font-weight: 600; color: var(--text-primary); }
   .type-chip {

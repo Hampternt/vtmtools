@@ -10,6 +10,53 @@
 
   let adding = $state<'root' | number | null>(null); // 'root' or parent node id
 
+  let rawSearch = $state('');
+  let searchQuery = $state('');
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function onSearchInput(e: Event) {
+    rawSearch = (e.target as HTMLInputElement).value;
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { searchQuery = rawSearch; }, 110);
+  }
+
+  $effect(() => () => { if (searchTimer) clearTimeout(searchTimer); });
+
+  // Filter: a node is visible if it matches or has a matching descendant.
+  const visibleIds = $derived(computeVisibleIds());
+
+  function computeVisibleIds(): Set<number> | null {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return null; // null = show all
+
+    const matches = new Set<number>();
+    for (const n of cache.nodes) {
+      const hit =
+        n.label.toLowerCase().includes(q) ||
+        n.description.toLowerCase().includes(q) ||
+        n.tags.some(t => t.toLowerCase().includes(q));
+      if (hit) matches.add(n.id);
+    }
+    // Include all ancestors of matches so they stay visible.
+    const keep = new Set<number>(matches);
+    const byChild = new Map<number, number>();
+    for (const e of cache.edges) {
+      if (e.edge_type === 'contains') byChild.set(e.to_node_id, e.from_node_id);
+    }
+    for (const id of matches) {
+      let cur: number | undefined = byChild.get(id);
+      while (cur != null) {
+        keep.add(cur);
+        cur = byChild.get(cur);
+      }
+    }
+    return keep;
+  }
+
+  function isVisible(id: number): boolean {
+    return visibleIds == null || visibleIds.has(id);
+  }
+
   function computeRoots(): ChronicleNode[] {
     const containsTargets = new Set(
       cache.edges.filter(e => e.edge_type === 'contains').map(e => e.to_node_id)
@@ -47,6 +94,16 @@
 <aside class="tree">
   <div class="tree-header">Domains</div>
 
+  <div class="search-wrap">
+    <input
+      class="search"
+      type="text"
+      value={rawSearch}
+      oninput={onSearchInput}
+      placeholder="🔍 Search this chronicle…"
+    />
+  </div>
+
   {#if session.chronicleId == null}
     <p class="empty">No chronicle selected.</p>
   {:else}
@@ -77,6 +134,7 @@
 {#snippet treeRow(node: ChronicleNode, depth: number)}
   {@const kids = childrenByParent.get(node.id) ?? []}
   {@const open = expanded.has(node.id)}
+  {#if isVisible(node.id)}
   <li>
     <div
       class="row-wrap"
@@ -122,6 +180,7 @@
       </ul>
     {/if}
   </li>
+  {/if}
 {/snippet}
 
 <style>
@@ -141,6 +200,20 @@
     color: var(--text-muted);
     border-bottom: 1px solid var(--border-faint);
   }
+  .search-wrap { padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border-faint); }
+  .search {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg-input);
+    border: 1px solid var(--border-surface);
+    border-radius: 4px;
+    padding: 0.3rem 0.45rem;
+    color: var(--text-primary);
+    font-size: 0.74rem;
+    outline: none;
+  }
+  .search:focus { border-color: var(--accent); }
+  .search::placeholder { color: var(--text-ghost); }
   .empty { color: var(--text-ghost); font-size: 0.74rem; padding: 0.6rem 0.8rem; }
   .list { list-style: none; margin: 0; padding: 0; }
   .row-wrap {
