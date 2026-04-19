@@ -1,17 +1,43 @@
 <script lang="ts">
   import PropertyEditor from './PropertyEditor.svelte';
   import NodeForm from './NodeForm.svelte';
-  import { session, cache } from '../../../store/domains.svelte';
+  import * as api from '../../domains/api';
+  import { session, cache, refreshNodes, refreshEdges, selectNode } from '../../../store/domains.svelte';
 
   const node = $derived(cache.nodes.find(n => n.id === session.nodeId) ?? null);
 
-  let editing = $state(false);
+  const childCount = $derived(
+    node == null
+      ? 0
+      : cache.edges.filter(e => e.edge_type === 'contains' && e.from_node_id === node.id).length
+  );
 
-  // Exit edit mode when the selected node changes.
+  let editing = $state(false);
+  let deleting = $state(false);
+
   $effect(() => {
     session.nodeId;
     editing = false;
   });
+
+  async function handleDelete() {
+    if (!node) return;
+    const msg = childCount > 0
+      ? `Delete "${node.label}"? ${childCount} child node${childCount === 1 ? '' : 's'} will also be removed (cascade). This cannot be undone.`
+      : `Delete "${node.label}"? This cannot be undone.`;
+    if (!confirm(msg)) return;
+    deleting = true;
+    try {
+      await api.deleteNode(node.id);
+      selectNode(null);
+      await refreshNodes();
+      await refreshEdges();
+    } catch (e) {
+      alert(`Delete failed: ${e}`);
+    } finally {
+      deleting = false;
+    }
+  }
 </script>
 
 <section class="detail">
@@ -29,6 +55,9 @@
       <span class="type-chip">{node.type}</span>
       <span class="spacer"></span>
       <button class="btn" onclick={() => editing = true}>✎ Edit</button>
+      <button class="btn danger" onclick={handleDelete} disabled={deleting}>
+        {deleting ? 'Deleting…' : '✕ Delete'}
+      </button>
     </header>
 
     {#if node.tags.length > 0}
@@ -85,6 +114,9 @@
     cursor: pointer;
   }
   .btn:hover { box-shadow: 0 0 8px #cc992255; }
+  .btn.danger { color: var(--accent); }
+  .btn.danger:hover { box-shadow: 0 0 8px #cc222255; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .tags { display: flex; gap: 0.3rem; flex-wrap: wrap; }
   .tag {
     background: var(--bg-card);
