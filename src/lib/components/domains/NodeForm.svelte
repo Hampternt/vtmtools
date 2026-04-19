@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import type { ChronicleNode, Field, FieldValue } from '../../../types';
   import * as api from '../../domains/api';
-  import { session, cache, refreshNodes, refreshEdges, selectNode } from '../../../store/domains.svelte';
+  import { session, cache, refreshNodes, refreshEdges, selectNode, autoRelatePref } from '../../../store/domains.svelte';
   import PropertyEditor from './PropertyEditor.svelte';
   import { SUPPORTED_TYPES } from './property-widgets';
 
@@ -24,10 +24,17 @@
 
   let saving = $state(false);
   let localError = $state('');
+  let autoRelateDescription = $state('');
 
   // Known types suggested from existing cache (for the autocomplete list).
   const knownTypes = $derived(
     Array.from(new Set(cache.nodes.map(n => n.type))).sort()
+  );
+
+  const knownEdgeTypes = $derived(
+    Array.from(new Set(
+      cache.edges.map(e => e.edge_type).filter(t => t !== 'contains')
+    )).sort()
   );
 
   function defaultValueFor(type: FieldValue['type']): Field {
@@ -72,6 +79,10 @@
     if (!label.trim()) { localError = 'Label is required.'; return; }
     if (!nodeType.trim()) { localError = 'Type is required.'; return; }
     if (session.chronicleId == null) { localError = 'No chronicle selected.'; return; }
+    if (node == null && parentId != null && autoRelatePref.enabled && !autoRelatePref.edgeType.trim()) {
+      localError = 'Relationship type is required when auto-relate is on.';
+      return;
+    }
 
     const tags = tagsText.split(',').map(t => t.trim()).filter(Boolean);
 
@@ -88,19 +99,40 @@
           session.chronicleId, nodeType.trim(), label.trim(), description, tags, properties,
         );
         if (parentId != null) {
+          let containsOk = true;
           try {
             await api.createEdge(
               session.chronicleId, parentId, saved.id, 'contains', '', [],
             );
           } catch (e) {
+            containsOk = false;
             localError = `Node created, but linking to parent failed: ${e}`;
+          }
+
+          if (containsOk && autoRelatePref.enabled && autoRelatePref.edgeType.trim()) {
+            const type = autoRelatePref.edgeType.trim();
+            const desc = autoRelateDescription;
+            try {
+              // 'both' fires both branches; each named direction fires exactly one.
+              if (autoRelatePref.direction !== 'child-to-parent') {
+                await api.createEdge(session.chronicleId, parentId, saved.id, type, desc, []);
+              }
+              if (autoRelatePref.direction !== 'parent-to-child') {
+                await api.createEdge(session.chronicleId, saved.id, parentId, type, desc, []);
+              }
+            } catch (e) {
+              localError = `Node created, but auto-relation failed: ${friendlyError(String(e))}`;
+            }
           }
         }
       }
       await refreshNodes();
       await refreshEdges();
       selectNode(saved.id);
-      onsave(saved);
+      // Gate onsave on !localError: keep the form mounted (and the error visible)
+      // on any partial-failure path. This retroactively fixes the pre-existing
+      // contains-link flash-and-disappear too — intentional per spec.
+      if (!localError) onsave(saved);
     } catch (e) {
       localError = friendlyError(String(e));
     } finally {
@@ -159,6 +191,53 @@
     </div>
   </div>
 
+  {#if node == null && parentId != null}
+    <div class="auto-relate">
+      <label class="ar-checkbox">
+        <input type="checkbox" bind:checked={autoRelatePref.enabled} />
+        Also add a relationship to parent
+      </label>
+
+      {#if autoRelatePref.enabled}
+        <div class="field">
+          <label for="nf-ar-type">Relationship type</label>
+          <input
+            id="nf-ar-type"
+            list="nf-ar-types"
+            bind:value={autoRelatePref.edgeType}
+            placeholder="member-of, located-in, allied-with…"
+          />
+          <datalist id="nf-ar-types">
+            {#each knownEdgeTypes as t (t)}
+              <option value={t}></option>
+            {/each}
+          </datalist>
+        </div>
+
+        <fieldset class="ar-direction">
+          <legend>Direction</legend>
+          <label class="ar-radio">
+            <input type="radio" bind:group={autoRelatePref.direction} value="parent-to-child" />
+            parent → new
+          </label>
+          <label class="ar-radio">
+            <input type="radio" bind:group={autoRelatePref.direction} value="child-to-parent" />
+            new → parent
+          </label>
+          <label class="ar-radio">
+            <input type="radio" bind:group={autoRelatePref.direction} value="both" />
+            both
+          </label>
+        </fieldset>
+
+        <div class="field">
+          <label for="nf-ar-desc">Description (optional)</label>
+          <input id="nf-ar-desc" bind:value={autoRelateDescription} />
+        </div>
+      {/if}
+    </div>
+  {/if}
+
   {#if localError}
     <p class="error">{localError}</p>
   {/if}
@@ -188,7 +267,7 @@
     color: var(--text-label);
   }
   .field { display: flex; flex-direction: column; gap: 0.2rem; }
-  label {
+  .field > label {
     font-size: 0.6rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -248,4 +327,46 @@
   .btn.primary:hover { box-shadow: 0 0 8px #cc222255; }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .error { font-size: 0.7rem; color: var(--accent-bright); }
+  .auto-relate {
+    border-top: 1px solid var(--border-faint);
+    padding-top: 0.45rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .ar-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .ar-checkbox input { margin: 0; }
+  .ar-direction {
+    border: 1px solid var(--border-surface);
+    border-radius: 4px;
+    padding: 0.3rem 0.55rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    background: var(--bg-input);
+    margin: 0;
+  }
+  .ar-direction legend {
+    font-size: 0.55rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    padding: 0 0.3rem;
+  }
+  .ar-radio {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .ar-radio input { margin: 0; }
 </style>

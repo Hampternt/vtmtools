@@ -23,6 +23,19 @@ export const status = $state<{ loading: boolean; error: string | null }>({
   error: null,
 });
 
+// Session-sticky preference for the NodeForm "Auto-relate to parent" UI.
+// In-memory only — resets on app restart. Description is deliberately NOT
+// persisted here (it's per-edge content, kept as form-local state in NodeForm).
+export const autoRelatePref = $state<{
+  enabled: boolean;
+  edgeType: string;
+  direction: 'parent-to-child' | 'child-to-parent' | 'both';
+}>({
+  enabled: false,
+  edgeType: '',
+  direction: 'child-to-parent',
+});
+
 // -------- Mutators ---------------------------------------------------------
 
 export async function refreshChronicles(): Promise<void> {
