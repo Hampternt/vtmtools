@@ -113,6 +113,7 @@
             const type = autoRelatePref.edgeType.trim();
             const desc = autoRelateDescription;
             try {
+              // 'both' fires both branches; each named direction fires exactly one.
               if (autoRelatePref.direction !== 'child-to-parent') {
                 await api.createEdge(session.chronicleId, parentId, saved.id, type, desc, []);
               }
@@ -128,6 +129,9 @@
       await refreshNodes();
       await refreshEdges();
       selectNode(saved.id);
+      // Gate onsave on !localError: keep the form mounted (and the error visible)
+      // on any partial-failure path. This retroactively fixes the pre-existing
+      // contains-link flash-and-disappear too — intentional per spec.
       if (!localError) onsave(saved);
     } catch (e) {
       localError = friendlyError(String(e));
@@ -263,7 +267,7 @@
     color: var(--text-label);
   }
   .field { display: flex; flex-direction: column; gap: 0.2rem; }
-  label {
+  .field > label {
     font-size: 0.6rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -337,8 +341,6 @@
     font-size: 0.72rem;
     color: var(--text-secondary);
     cursor: pointer;
-    text-transform: none;
-    letter-spacing: normal;
   }
   .ar-checkbox input { margin: 0; }
   .ar-direction {
@@ -365,8 +367,6 @@
     font-size: 0.72rem;
     color: var(--text-secondary);
     cursor: pointer;
-    text-transform: none;
-    letter-spacing: normal;
   }
   .ar-radio input { margin: 0; }
 </style>
