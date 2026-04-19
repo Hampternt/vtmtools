@@ -57,6 +57,17 @@
     properties = properties.filter((_, i) => i !== index);
   }
 
+  function friendlyError(raw: string): string {
+    if (raw.includes('cycle')) return 'Cannot link: this would create a loop under contains.';
+    if (raw.includes('UNIQUE constraint failed')) {
+      if (raw.includes('idx_edges_contains_single_parent')) {
+        return 'That node already has a parent. Move-under is not supported in v1 — delete the existing contains edge first.';
+      }
+      return 'That relationship already exists.';
+    }
+    return raw;
+  }
+
   async function save() {
     if (!label.trim()) { localError = 'Label is required.'; return; }
     if (!nodeType.trim()) { localError = 'Type is required.'; return; }
@@ -91,7 +102,7 @@
       selectNode(saved.id);
       onsave(saved);
     } catch (e) {
-      localError = String(e);
+      localError = friendlyError(String(e));
     } finally {
       saving = false;
     }
