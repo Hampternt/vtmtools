@@ -26,6 +26,15 @@ export interface DyscrasiaEntry {
   isCustom: boolean;
 }
 
+export interface Advantage {
+  id: number;
+  name: string;
+  description: string;
+  tags: string[];
+  properties: Field[];
+  isCustom: boolean;
+}
+
 export interface ResonanceRollResult {
   temperamentDice: number[];
   temperamentDie: number;
