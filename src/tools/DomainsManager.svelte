@@ -3,6 +3,7 @@
   import ChronicleHeader from '$lib/components/domains/ChronicleHeader.svelte';
   import DomainTree from '$lib/components/domains/DomainTree.svelte';
   import NodeDetail from '$lib/components/domains/NodeDetail.svelte';
+  import EdgesPanel from '$lib/components/domains/EdgesPanel.svelte';
   import { session, cache, status, refreshChronicles, setChronicle } from '../store/domains.svelte';
 
   onMount(async () => {
@@ -26,9 +27,7 @@
     <div class="grid">
       <DomainTree />
       <NodeDetail />
-      <aside class="edges-placeholder">
-        <p class="muted">Relationships panel (Task 11).</p>
-      </aside>
+      <EdgesPanel />
     </div>
   {/if}
 </div>
@@ -46,6 +45,5 @@
     flex: 1;
     min-height: 0;
   }
-  .edges-placeholder { padding: 1rem; overflow: auto; border-left: 1px solid var(--border-surface); background: var(--bg-sunken); }
   .muted { color: var(--text-ghost); font-size: 0.82rem; }
 </style>
