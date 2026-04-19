@@ -655,12 +655,13 @@ inventing a new hook.
   uses freeform strings ([ADR 0003](docs/adr/0003-freeform-node-edge-types.md));
   the UI derives autocomplete from existing distinct values.
 - **Add a Tauri command.** Declare in the relevant
-  `src-tauri/src/**/commands.rs` (or the module's `mod.rs` for
-  single-file modules), register in `src-tauri/src/lib.rs` inside
-  the `invoke_handler(tauri::generate_handler![...])` list, revisit
-  the capability JSON if a narrower ACL is in force (§8), then add
-  a typed wrapper in `src/lib/**/api.ts`. Components call the
-  wrapper, never `invoke(...)` directly.
+  `src-tauri/src/**/commands.rs` (or in a per-feature module file
+  under the feature directory, e.g. `src-tauri/src/tools/resonance.rs`),
+  register in `src-tauri/src/lib.rs` inside the
+  `invoke_handler(tauri::generate_handler![...])` list, revisit the
+  capability JSON if a narrower ACL is in force (§8), then add a
+  typed wrapper in `src/lib/**/api.ts`. Components call the wrapper,
+  never `invoke(...)` directly.
 - **Add a cross-tool event.** Publish via
   `src/store/toolEvents.ts`. Document the event name + payload
   shape near the publisher.
