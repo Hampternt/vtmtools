@@ -1,19 +1,34 @@
 <script lang="ts">
   import PropertyEditor from './PropertyEditor.svelte';
+  import NodeForm from './NodeForm.svelte';
   import { session, cache } from '../../../store/domains.svelte';
 
   const node = $derived(cache.nodes.find(n => n.id === session.nodeId) ?? null);
+
+  let editing = $state(false);
+
+  // Exit edit mode when the selected node changes.
+  $effect(() => {
+    session.nodeId;
+    editing = false;
+  });
 </script>
 
 <section class="detail">
   {#if !node}
     <p class="muted">No node selected. Click one in the tree to view its details.</p>
+  {:else if editing}
+    <NodeForm
+      node={node}
+      oncancel={() => editing = false}
+      onsave={() => editing = false}
+    />
   {:else}
     <header class="head">
       <span class="title">{node.label}</span>
       <span class="type-chip">{node.type}</span>
       <span class="spacer"></span>
-      <button class="btn" disabled title="Edit mode lands in Task 9">✎ Edit</button>
+      <button class="btn" onclick={() => editing = true}>✎ Edit</button>
     </header>
 
     {#if node.tags.length > 0}
@@ -63,13 +78,13 @@
   .btn {
     background: var(--bg-active);
     border: 1px solid var(--border-active);
-    color: var(--text-muted);
+    color: var(--accent-amber);
     border-radius: 4px;
     padding: 0.25rem 0.55rem;
     font-size: 0.72rem;
     cursor: pointer;
   }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn:hover { box-shadow: 0 0 8px #cc992255; }
   .tags { display: flex; gap: 0.3rem; flex-wrap: wrap; }
   .tag {
     background: var(--bg-card);
