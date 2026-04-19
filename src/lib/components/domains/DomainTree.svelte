@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SvelteSet } from 'svelte/reactivity';
   import type { ChronicleNode } from '../../../types';
   import { session, cache, selectNode } from '../../../store/domains.svelte';
   import NodeForm from './NodeForm.svelte';
@@ -6,7 +7,9 @@
   // Nodes that appear in the tree root: those with no incoming 'contains' edge.
   const rootNodes = $derived(computeRoots());
   const childrenByParent = $derived(computeChildrenMap());
-  const expanded: Set<number> = $state(new Set());
+  // SvelteSet: plain Set inside $state is not reactive on .add/.delete mutations
+  // (only reassignment is). SvelteSet tracks mutations natively.
+  const expanded = new SvelteSet<number>();
 
   let adding = $state<'root' | number | null>(null); // 'root' or parent node id
 
@@ -143,7 +146,7 @@
       <button
         class="row"
         style="padding-left: calc(0.5rem + {depth * 0.8}rem)"
-        onclick={() => selectNode(node.id)}
+        onclick={() => { selectNode(node.id); if (kids.length > 0) toggle(node.id); }}
       >
         {#if kids.length > 0}
           <span

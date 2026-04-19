@@ -17,7 +17,7 @@
   let nodeType    = $state(untrack(() => node?.type ?? 'area'));
   let description = $state(untrack(() => node?.description ?? ''));
   let tagsText    = $state(untrack(() => (node?.tags ?? []).join(', ')));
-  let properties  = $state<Field[]>(untrack(() => structuredClone(node?.properties ?? [])));
+  let properties  = $state<Field[]>(untrack(() => $state.snapshot(node?.properties ?? []) as Field[]));
 
   let newPropName = $state('');
   let newPropType = $state<FieldValue['type']>('string');
@@ -221,12 +221,18 @@
     letter-spacing: 0.08em;
   }
   .add-prop {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
+    display: flex;
+    flex-wrap: wrap;
     gap: 0.35rem;
     align-items: center;
     padding-top: 0.3rem;
   }
+  .add-prop > input.small {
+    flex: 1 1 6rem;
+    min-width: 0;
+  }
+  .add-prop > select.small { flex: 0 0 auto; }
+  .add-prop > .btn { flex: 0 0 auto; }
   .actions { display: flex; justify-content: flex-end; gap: 0.4rem; }
   .btn {
     background: var(--bg-active);
