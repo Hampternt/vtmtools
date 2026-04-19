@@ -28,6 +28,10 @@ export const tools: Tool[] = [
     icon: '🗺️',
     component: () => import('./tools/Campaign.svelte'),
   },
-  // Future tools go here, e.g.:
-  // { id: 'combat', label: 'Combat Tracker', icon: '⚔️', component: () => import('./tools/Combat.svelte') },
+  {
+    id: 'domains',
+    label: 'Domains',
+    icon: '🏰',
+    component: () => import('./tools/DomainsManager.svelte'),
+  },
 ];
