@@ -1,5 +1,5 @@
 <script lang="ts">
-  import PropertyEditor from './PropertyEditor.svelte';
+  import PropertyEditor from '../properties/PropertyEditor.svelte';
   import NodeForm from './NodeForm.svelte';
   import * as api from '../../domains/api';
   import type { ChronicleNode } from '../../../types';

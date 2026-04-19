@@ -112,3 +112,157 @@ pub async fn seed_dyscrasias(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     Ok(())
 }
+
+use crate::shared::types::{Field, FieldValue, NumberFieldValue};
+
+/// One canonical row shape used during seeding. `level` and `level_max` are
+/// optional; when present they become number-typed Fields inside properties_json.
+struct SeedRow {
+    name: &'static str,
+    description: &'static str,
+    tags: &'static [&'static str],
+    level: Option<i64>,
+    level_max: Option<i64>,
+    source: &'static str,
+}
+
+fn seed_rows() -> &'static [SeedRow] {
+    &[
+        // -------- Merits (V5 Corebook) --------
+        SeedRow {
+            name: "Iron Gullet",
+            description: "Your character can digest rancid, defiled, or otherwise corrupted blood without issue.",
+            tags: &["VTM 5e", "Merit", "Feeding"],
+            level: Some(3), level_max: None,
+            source: "V5 Corebook",
+        },
+        SeedRow {
+            name: "Eat Food",
+            description: "Your character can still consume and enjoy food like a mortal would, though it does not nourish them.",
+            tags: &["VTM 5e", "Merit", "Feeding"],
+            level: Some(2), level_max: None,
+            source: "V5 Corebook",
+        },
+        SeedRow {
+            name: "Bloodhound",
+            description: "Your character can sniff out distinct Resonances in a blood vessel simply by being near them.",
+            tags: &["VTM 5e", "Merit", "Supernatural"],
+            level: Some(1), level_max: None,
+            source: "V5 Corebook",
+        },
+        SeedRow {
+            name: "Beautiful",
+            description: "Add one die to related Social pools.",
+            tags: &["VTM 5e", "Merit", "Social"],
+            level: Some(2), level_max: None,
+            source: "V5 Corebook",
+        },
+        // -------- Backgrounds --------
+        SeedRow {
+            name: "Allies",
+            description: "Mortal friends or family who stand with your character, specified at purchase. Rated by Effectiveness (dots) and Reliability (further dots).",
+            tags: &["VTM 5e", "Background", "Social"],
+            level: Some(1), level_max: Some(5),
+            source: "V5 Corebook",
+        },
+        SeedRow {
+            name: "Contacts",
+            description: "Mortal sources of information or goods. Rated by usefulness and influence.",
+            tags: &["VTM 5e", "Background", "Social"],
+            level: Some(1), level_max: Some(5),
+            source: "V5 Corebook",
+        },
+        SeedRow {
+            name: "Haven",
+            description: "A refuge your character can use as a base. Rated from a squat (1) to a fortress (5).",
+            tags: &["VTM 5e", "Background", "Territorial"],
+            level: Some(1), level_max: Some(5),
+            source: "V5 Corebook",
+        },
+        SeedRow {
+            name: "Resources",
+            description: "Financial stability ranging from beggary (1) to millionaire (5). Does not represent liquid cash.",
+            tags: &["VTM 5e", "Background", "Material"],
+            level: Some(1), level_max: Some(5),
+            source: "V5 Corebook",
+        },
+        // -------- Flaws --------
+        SeedRow {
+            name: "Prey Exclusion",
+            description: "Your character cannot feed from a specific class of mortals (children, the elderly, etc.). Suffer one-point stains if they do.",
+            tags: &["VTM 5e", "Flaw", "Feeding"],
+            level: Some(1), level_max: None,
+            source: "V5 Corebook",
+        },
+        SeedRow {
+            name: "Enemy",
+            description: "A mortal or ghoul who actively works against your character. The player and Storyteller define the threat.",
+            tags: &["VTM 5e", "Flaw", "Social"],
+            level: Some(1), level_max: Some(2),
+            source: "V5 Corebook",
+        },
+    ]
+}
+
+fn row_to_properties(row: &SeedRow) -> Vec<Field> {
+    let mut props: Vec<Field> = Vec::new();
+    // `level` (fixed dot rating) and `min_level`/`max_level` (ranged) are mutually
+    // exclusive: downstream consumers display `level` as a fixed dot strip or fall
+    // back to the range label. Emitting both would render a ranged row as fixed.
+    match (row.level, row.level_max) {
+        (_, Some(max)) => {
+            let min = row.level.unwrap_or(1) as f64;
+            props.push(Field {
+                name: "min_level".to_string(),
+                value: FieldValue::Number { value: NumberFieldValue::Single(min) },
+            });
+            props.push(Field {
+                name: "max_level".to_string(),
+                value: FieldValue::Number { value: NumberFieldValue::Single(max as f64) },
+            });
+        }
+        (Some(l), None) => {
+            props.push(Field {
+                name: "level".to_string(),
+                value: FieldValue::Number { value: NumberFieldValue::Single(l as f64) },
+            });
+        }
+        (None, None) => {}
+    }
+    props.push(Field {
+        name: "source".to_string(),
+        value: FieldValue::String {
+            value: crate::shared::types::StringFieldValue::Single(row.source.to_string()),
+        },
+    });
+    props
+}
+
+/// Replaces all built-in Advantage entries with the canonical VTM 5e corebook set.
+/// Custom entries (is_custom = 1) are never touched.
+pub async fn seed_advantages(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM advantages WHERE is_custom = 0")
+        .execute(pool)
+        .await?;
+
+    for row in seed_rows() {
+        let tags_vec: Vec<String> = row.tags.iter().map(|s| s.to_string()).collect();
+        let tags_json = serde_json::to_string(&tags_vec)
+            .expect("seed tags must serialize");
+        let props = row_to_properties(row);
+        let props_json = serde_json::to_string(&props)
+            .expect("seed properties must serialize");
+
+        sqlx::query(
+            "INSERT INTO advantages (name, description, tags_json, properties_json, is_custom)
+             VALUES (?, ?, ?, ?, 0)"
+        )
+        .bind(row.name)
+        .bind(row.description)
+        .bind(&tags_json)
+        .bind(&props_json)
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
+}

@@ -2,9 +2,15 @@
   import { untrack } from 'svelte';
   import type { ChronicleNode, Field, FieldValue } from '../../../types';
   import * as api from '../../domains/api';
+<<<<<<< HEAD
   import { session, cache, refreshNodes, refreshEdges, selectNode, autoRelatePref } from '../../../store/domains.svelte';
   import PropertyEditor from './PropertyEditor.svelte';
   import { SUPPORTED_TYPES } from './property-widgets';
+=======
+  import { session, cache, refreshNodes, refreshEdges, selectNode } from '../../../store/domains.svelte';
+  import PropertyEditor from '../properties/PropertyEditor.svelte';
+  import { SUPPORTED_TYPES } from '../properties/property-widgets';
+>>>>>>> feat/advantages-library
 
   const { node = null, parentId = null, oncancel, onsave }: {
     node?: ChronicleNode | null;

@@ -120,6 +120,18 @@ pub struct DyscrasiaEntry {
     pub is_custom: bool,
 }
 
+/// A library entry for a VTM 5e Merit, Background, or Flaw.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Advantage {
+    pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub properties: Vec<Field>,
+    pub is_custom: bool,
+}
+
 /// Full result of one resonance roll sequence
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

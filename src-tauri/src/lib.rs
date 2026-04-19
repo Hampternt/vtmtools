@@ -32,6 +32,8 @@ pub fn run() {
                     .expect("Failed to run migrations");
                 db::seed::seed_dyscrasias(&pool).await
                     .expect("Failed to seed dyscrasias");
+                db::seed::seed_advantages(&pool).await
+                    .expect("Failed to seed advantages");
                 handle.manage(DbState(Arc::new(pool)));
 
                 // Roll20 WebSocket integration
@@ -78,6 +80,11 @@ pub fn run() {
             db::edge::create_edge,
             db::edge::update_edge,
             db::edge::delete_edge,
+            db::advantage::list_advantages,
+            db::advantage::add_advantage,
+            db::advantage::update_advantage,
+            db::advantage::delete_advantage,
+            db::advantage::roll_random_advantage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
