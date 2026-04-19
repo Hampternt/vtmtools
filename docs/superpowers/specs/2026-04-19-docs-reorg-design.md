@@ -169,7 +169,8 @@ Named places to add things, so future feature specs can cite the seam instead of
 - No frontend test framework is installed — this is a deliberate current choice. If a feature requires frontend tests, that's a scope change to be raised explicitly, not assumed.
 - `./scripts/verify.sh` is the aggregate gate: runs `npm run check`, `cargo test`, `npm run build`. All claims of "done" must be backed by a green `verify.sh` run.
 - Expected (non-regression) warnings are listed here so sub-agents don't "fix" them:
-  - `shared/types.rs`: Chronicle-graph types (`Chronicle`, `Node`, `Edge`, `Field`, `FieldValue`, `StringFieldValue`, `NumberFieldValue`, `EdgeDirection`) — "never constructed / never used" until fully wired.
+  - `shared/types.rs`: the Domains Manager's core types (`Chronicle`, `Node`, `Edge`, `Field`, `FieldValue`, `StringFieldValue`, `NumberFieldValue`, `EdgeDirection`) are fully wired into Tauri commands and the Svelte UI as of 2026-04-19, so they no longer trigger "never constructed / never used."
+  - `shared/types.rs`: `FieldValue` variants `date`, `url`, `email`, and `reference` may still surface "never constructed" — the v1 Domains UI uses only `string`, `text`, `number`, and `bool` widgets. The unused variants ship with the backend by design, as extensibility seams for future property widgets (see §9); do not remove them.
   - `npm run build`: unused `listen` import in `Campaign.svelte` and `Resonance.svelte`.
 
 ### §11 Plan & execution conventions
