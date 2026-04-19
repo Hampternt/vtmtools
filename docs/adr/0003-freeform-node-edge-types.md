@@ -20,9 +20,11 @@ in the current chronicle.
 
 The sole exception is the `"contains"` edge type, which the UI uses as
 its hierarchy/drilldown convention. A partial unique index
-(`ON edges(chronicle_id, to_node_id) WHERE edge_type = 'contains'`)
-enforces at most one `contains` parent per node. All other edge types
-are unconstrained.
+(`ON edges(to_node_id) WHERE edge_type = 'contains'`) enforces at most
+one `contains` parent per node — the single-column form is sufficient
+because `nodes.id` is globally unique and a node belongs to exactly one
+chronicle via foreign key, so "one parent per node" and "one parent per
+(chronicle, node)" coincide. All other edge types are unconstrained.
 
 ## Consequences
 
