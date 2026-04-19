@@ -26,7 +26,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 `./scripts/verify.sh` is the aggregate gate: it runs `npm run check`, `cargo test`, and `npm run build`. Rust unit tests live as `#[cfg(test)] mod tests` inside each source file (currently `shared/dice.rs`, `shared/resonance.rs`, `db/dyscrasia.rs`, `tools/export.rs`). There is no frontend test framework.
 
-Expected `verify.sh` warnings (not regressions): `shared/types.rs` types for the Domains Manager (`Chronicle`, `Node`, `Edge`, `Field`, `FieldValue`, `StringFieldValue`, `NumberFieldValue`, `EdgeDirection`) trigger "never constructed / never used" — they back migration `0002_chronicle_graph.sql` but aren't yet wired into Tauri commands. `npm run build` also reports an unused `listen` import in `Campaign.svelte` and `Resonance.svelte`. Don't remove any of these without checking with the user — in-progress surface, not dead code.
+Expected `verify.sh` warnings (not regressions): `shared/types.rs` types for the Domains Manager (`Chronicle`, `Node`, `Edge`, `Field`, `FieldValue`, `StringFieldValue`, `NumberFieldValue`, `EdgeDirection`) are now wired into both Tauri commands and the Svelte UI (Domains tool), so these specific types no longer trigger the warning. The v1 UI uses only `string`, `text`, `number`, and `bool` FieldValue variants — `date`, `url`, `email`, and `reference` may still surface "never constructed" until property widgets for them ship. `npm run build` also reports an unused `listen` import in `Campaign.svelte` and `Resonance.svelte`. Don't remove any of these without checking with the user — in-progress surface, not dead code.
 
 ## Architecture
 
@@ -36,9 +36,11 @@ This is a **Tauri 2 + SvelteKit + TypeScript** desktop app. The frontend is a SP
 
 - **`tools.ts`** — registry of all tools. Adding a new tool means adding one entry here; the sidebar and lazy-loading are automatic.
 - **`routes/+layout.svelte`** — shell layout: sidebar + lazy-loaded tool component. Active tool component is loaded on selection.
-- **`src/tools/*.svelte`** — one file per tool (e.g. `Resonance.svelte`). Each tool is an independent page-level component. `DyscrasiaManager.svelte` handles dyscrasia CRUD and random rolling. `Campaign.svelte` is the Roll20 viewer: it listens to `roll20://` events and uses a hardcoded `ATTR` constants map to resolve sheet attribute names from Roll20 Jumpgate character sheets.
+- **`src/tools/*.svelte`** — one file per tool (e.g. `Resonance.svelte`). Each tool is an independent page-level component. `DyscrasiaManager.svelte` handles dyscrasia CRUD and random rolling. `Campaign.svelte` is the Roll20 viewer: it listens to `roll20://` events and uses a hardcoded `ATTR` constants map to resolve sheet attribute names from Roll20 Jumpgate character sheets. `DomainsManager.svelte` is the shell for the Domains Manager; it composes zone components from `src/lib/components/domains/`.
 - **`src/lib/components/`** — shared UI components used by tools.
+- **`src/store/domains.svelte.ts`** — runes-based UI state for the Domains Manager: current chronicle/node selection and cached `nodes`/`edges` lists. Intended to be importable from other tools for future cross-tool chronicle awareness.
 - **`src/types.ts`** — all shared TypeScript interfaces (kept thin; mirrors Rust structs).
+- **`src/lib/domains/api.ts`** — typed wrappers around the 20 Tauri commands backing the Domains Manager. Every call from a Domains component goes through here; components never call `invoke` directly.
 - **`src/store/toolEvents.ts`** — Svelte writable store for cross-tool event broadcasting (`publishEvent` / `toolEvents`).
 
 Svelte 5 runes are used throughout (`$state`, `$derived`, `$props`, `$effect`). Use `untrack()` when initializing `$state` from a prop to avoid reactive-capture warnings.
