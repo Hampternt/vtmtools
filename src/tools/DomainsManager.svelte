@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import ChronicleHeader from '$lib/components/domains/ChronicleHeader.svelte';
   import { session, cache, status, refreshChronicles, setChronicle } from '../store/domains.svelte';
 
   onMount(async () => {
@@ -10,26 +11,31 @@
   });
 </script>
 
-<div class="page">
-  <h1 class="title">Domains</h1>
+<div class="tool">
+  <ChronicleHeader />
 
-  {#if status.loading}
-    <p class="loading-text">Loading…</p>
-  {:else if status.error}
-    <p class="error-text">{status.error}</p>
-  {:else if cache.chronicles.length === 0}
-    <p class="empty">No chronicles yet. Create one to get started.</p>
-  {:else}
-    <p class="empty">
-      Chronicle selected: {cache.chronicles.find(c => c.id === session.chronicleId)?.name ?? '(none)'}
-      — nodes: {cache.nodes.length}, edges: {cache.edges.length}.
-    </p>
-  {/if}
+  <div class="body">
+    {#if status.loading}
+      <p class="muted">Loading…</p>
+    {:else if cache.chronicles.length === 0}
+      <p class="muted">No chronicles yet. Click "+ New" above to create one.</p>
+    {:else if session.chronicleId == null}
+      <p class="muted">Select a chronicle to start.</p>
+    {:else}
+      <p class="muted">
+        Chronicle loaded: {cache.nodes.length} nodes, {cache.edges.length} edges.
+      </p>
+    {/if}
+  </div>
 </div>
 
 <style>
-  .page { padding: 1rem 1.25rem; }
-  .title { color: var(--accent); font-size: 1.4rem; margin-bottom: 1rem; }
-  .loading-text, .empty { color: var(--text-ghost); font-size: 0.8rem; }
-  .error-text { color: var(--accent); font-size: 0.8rem; padding: 1rem 0; }
+  .tool {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100%;
+  }
+  .body { flex: 1; padding: 1rem 1.25rem; overflow: auto; }
+  .muted { color: var(--text-ghost); font-size: 0.82rem; }
 </style>
