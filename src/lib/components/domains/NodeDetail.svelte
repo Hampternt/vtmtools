@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PropertyEditor from './PropertyEditor.svelte';
   import { session, cache } from '../../../store/domains.svelte';
 
   const node = $derived(cache.nodes.find(n => n.id === session.nodeId) ?? null);
@@ -29,13 +30,23 @@
       <p class="desc muted">(no description)</p>
     {/if}
 
-    <!-- Properties panel lands in Task 8. -->
+    <div class="props">
+      <div class="props-label">Properties</div>
+      {#if node.properties.length === 0}
+        <p class="muted small">(none)</p>
+      {:else}
+        {#each node.properties as f (f.name)}
+          <PropertyEditor field={f} readonly={true} />
+        {/each}
+      {/if}
+    </div>
   {/if}
 </section>
 
 <style>
   .detail { padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.55rem; overflow: auto; }
   .muted { color: var(--text-ghost); font-size: 0.8rem; }
+  .muted.small { font-size: 0.7rem; }
   .head { display: flex; align-items: center; gap: 0.5rem; }
   .title { font-size: 1.1rem; font-weight: 600; color: var(--text-primary); }
   .type-chip {
@@ -75,5 +86,13 @@
     border-top: 1px solid var(--border-faint);
     padding-top: 0.5rem;
     white-space: pre-wrap;
+  }
+  .props { border-top: 1px solid var(--border-faint); padding-top: 0.5rem; }
+  .props-label {
+    font-size: 0.55rem;
+    color: #7c9;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.25rem;
   }
 </style>
