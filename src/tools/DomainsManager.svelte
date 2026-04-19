@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import ChronicleHeader from '$lib/components/domains/ChronicleHeader.svelte';
   import DomainTree from '$lib/components/domains/DomainTree.svelte';
+  import NodeDetail from '$lib/components/domains/NodeDetail.svelte';
   import { session, cache, status, refreshChronicles, setChronicle } from '../store/domains.svelte';
 
   onMount(async () => {
@@ -24,16 +25,7 @@
   {:else}
     <div class="grid">
       <DomainTree />
-      <main class="detail-placeholder">
-        {#if session.nodeId == null}
-          <p class="muted">Select a node from the tree to view its details.</p>
-        {:else}
-          <p class="muted">
-            Selected node id: {session.nodeId}
-            — (detail pane not implemented yet; see Task 6)
-          </p>
-        {/if}
-      </main>
+      <NodeDetail />
       <aside class="edges-placeholder">
         <p class="muted">Relationships panel (Task 11).</p>
       </aside>
@@ -54,7 +46,6 @@
     flex: 1;
     min-height: 0;
   }
-  .detail-placeholder, .edges-placeholder { padding: 1rem; overflow: auto; }
-  .edges-placeholder { border-left: 1px solid var(--border-surface); background: var(--bg-sunken); }
+  .edges-placeholder { padding: 1rem; overflow: auto; border-left: 1px solid var(--border-surface); background: var(--bg-sunken); }
   .muted { color: var(--text-ghost); font-size: 0.82rem; }
 </style>
