@@ -1,5 +1,6 @@
 <script lang="ts">
   import * as api from '../../domains/api';
+  import { friendlyEdgeError } from '../../domains/errors';
   import { session, cache, refreshEdges } from '../../../store/domains.svelte';
 
   const { oncancel, onsave }: {
@@ -28,12 +29,6 @@
       .sort((a, b) => a.label.localeCompare(b.label))
   );
 
-  function friendlyError(raw: string): string {
-    if (raw.includes('cycle')) return 'Cannot link: this would create a loop under contains.';
-    if (raw.includes('UNIQUE constraint failed')) return 'That relationship already exists.';
-    return raw;
-  }
-
   async function save() {
     if (session.chronicleId == null || session.nodeId == null) { localError = 'No node selected.'; return; }
     if (targetId === '') { localError = 'Target node is required.'; return; }
@@ -50,7 +45,7 @@
       await refreshEdges();
       onsave();
     } catch (e) {
-      localError = friendlyError(String(e));
+      localError = friendlyEdgeError(String(e));
     } finally {
       saving = false;
     }

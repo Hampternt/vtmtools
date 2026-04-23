@@ -2,15 +2,10 @@
   import { untrack } from 'svelte';
   import type { ChronicleNode, Field, FieldValue } from '../../../types';
   import * as api from '../../domains/api';
-<<<<<<< HEAD
+  import { friendlyEdgeError } from '../../domains/errors';
   import { session, cache, refreshNodes, refreshEdges, selectNode, autoRelatePref } from '../../../store/domains.svelte';
-  import PropertyEditor from './PropertyEditor.svelte';
-  import { SUPPORTED_TYPES } from './property-widgets';
-=======
-  import { session, cache, refreshNodes, refreshEdges, selectNode } from '../../../store/domains.svelte';
   import PropertyEditor from '../properties/PropertyEditor.svelte';
   import { SUPPORTED_TYPES } from '../properties/property-widgets';
->>>>>>> feat/advantages-library
 
   const { node = null, parentId = null, oncancel, onsave }: {
     node?: ChronicleNode | null;
@@ -43,21 +38,20 @@
     )).sort()
   );
 
-  function defaultValueFor(type: FieldValue['type']): Field {
-    switch (type) {
-      case 'string': return { name: newPropName.trim(), type: 'string', value: '' };
-      case 'text':   return { name: newPropName.trim(), type: 'text',   value: '' };
-      case 'number': return { name: newPropName.trim(), type: 'number', value: 0 };
-      case 'bool':   return { name: newPropName.trim(), type: 'bool',   value: false };
-      default:       return { name: newPropName.trim(), type: 'string', value: '' };
-    }
+  function blankField(name: string, type: FieldValue['type']): Field {
+    if (type === 'number') return { name, type, value: 0 };
+    if (type === 'bool')   return { name, type, value: false };
+    if (type === 'text')   return { name, type, value: '' };
+    // Unsupported discriminators (date/url/email/reference — no widget yet)
+    // fall back to a plain string field.
+    return { name, type: 'string', value: '' };
   }
 
   function addProperty() {
     const name = newPropName.trim();
     if (!name) { localError = 'Property name is required.'; return; }
     if (properties.some(p => p.name === name)) { localError = 'Property name already used.'; return; }
-    properties = [...properties, defaultValueFor(newPropType)];
+    properties = [...properties, blankField(name, newPropType)];
     newPropName = '';
     localError = '';
   }
@@ -68,17 +62,6 @@
 
   function removeProperty(index: number) {
     properties = properties.filter((_, i) => i !== index);
-  }
-
-  function friendlyError(raw: string): string {
-    if (raw.includes('cycle')) return 'Cannot link: this would create a loop under contains.';
-    if (raw.includes('UNIQUE constraint failed')) {
-      if (raw.includes('idx_edges_contains_single_parent')) {
-        return 'That node already has a parent. Move-under is not supported in v1 — delete the existing contains edge first.';
-      }
-      return 'That relationship already exists.';
-    }
-    return raw;
   }
 
   async function save() {
@@ -118,29 +101,25 @@
           if (containsOk && autoRelatePref.enabled && autoRelatePref.edgeType.trim()) {
             const type = autoRelatePref.edgeType.trim();
             const desc = autoRelateDescription;
+            const edge = (from: number, to: number) =>
+              api.createEdge(session.chronicleId!, from, to, type, desc, []);
+            const jobs: Promise<unknown>[] = [];
+            if (autoRelatePref.direction !== 'child-to-parent') jobs.push(edge(parentId, saved.id));
+            if (autoRelatePref.direction !== 'parent-to-child') jobs.push(edge(saved.id, parentId));
             try {
-              // 'both' fires both branches; each named direction fires exactly one.
-              if (autoRelatePref.direction !== 'child-to-parent') {
-                await api.createEdge(session.chronicleId, parentId, saved.id, type, desc, []);
-              }
-              if (autoRelatePref.direction !== 'parent-to-child') {
-                await api.createEdge(session.chronicleId, saved.id, parentId, type, desc, []);
-              }
+              await Promise.all(jobs);
             } catch (e) {
-              localError = `Node created, but auto-relation failed: ${friendlyError(String(e))}`;
+              localError = `Node created, but auto-relation failed: ${friendlyEdgeError(String(e))}`;
             }
           }
         }
       }
-      await refreshNodes();
-      await refreshEdges();
+      await Promise.all([refreshNodes(), refreshEdges()]);
       selectNode(saved.id);
-      // Gate onsave on !localError: keep the form mounted (and the error visible)
-      // on any partial-failure path. This retroactively fixes the pre-existing
-      // contains-link flash-and-disappear too — intentional per spec.
+      // Gate onsave on !localError so partial-failure paths keep the form mounted.
       if (!localError) onsave(saved);
     } catch (e) {
-      localError = friendlyError(String(e));
+      localError = friendlyEdgeError(String(e));
     } finally {
       saving = false;
     }
