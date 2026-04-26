@@ -6,6 +6,8 @@ The bridge runs **only in the GM's browser session**. Players' browsers never co
 
 ## Install
 
+### Option A — Manifest URL (recommended once a release is cut)
+
 1. In Foundry's setup screen, go to **Add-on Modules → Install Module**.
 2. Paste this manifest URL into the **Manifest URL** field:
    ```
@@ -13,6 +15,27 @@ The bridge runs **only in the GM's browser session**. Players' browsers never co
    ```
 3. Click **Install**.
 4. Enable the module in your world (**Manage Modules → vtmtools Desktop Bridge**).
+
+### Option B — Sideload (manual copy, current dev workflow)
+
+> **Critical:** The installed directory name MUST be `vtmtools-bridge` — Foundry uses it as the module's primary key. If the folder is named anything else (`foundry-module`, `vtmtools-bridge-main` from a GitHub zip download, or anything custom), Foundry rejects the install with `Invalid module "vtmtools-bridge" detected in directory "<wrong-name>"`.
+
+1. Locate your Foundry data directory's modules folder:
+   - Linux: `~/.local/share/FoundryVTT/Data/modules/`
+   - macOS: `~/Library/Application Support/FoundryVTT/Data/modules/`
+   - Windows: `%LOCALAPPDATA%\FoundryVTT\Data\modules\`
+2. Copy this entire directory (the one containing this README) into that location, **keeping the name `vtmtools-bridge/`**.
+3. Restart Foundry; enable the module in your world.
+
+If you cloned the repo and want a live symlink instead of copying:
+```bash
+ln -s /path/to/vtmtools/vtmtools-bridge ~/.local/share/FoundryVTT/Data/modules/vtmtools-bridge
+```
+Both the source path's last segment and the symlink name in `modules/` must be `vtmtools-bridge`.
+
+### If you already have a broken install
+
+You'll see warnings like `Invalid module "vtmtools-bridge" detected in directory "..."` in the Foundry console. Delete every copy that has the wrong directory name, then sideload (or manifest-install) one fresh copy named `vtmtools-bridge/`. If a manifest in your installed copy contains an `"action"` key, it was edited by Foundry's "Edit Module" UI — replace it with the unmodified `module.json` from this repo.
 
 ## First-time cert acceptance
 
