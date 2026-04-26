@@ -43,7 +43,7 @@ pub fn run() {
                 // Bridge layer — sources registered here, accept loops spawned.
                 let mut sources: HashMap<SourceKind, Arc<dyn BridgeSource>> = HashMap::new();
                 sources.insert(SourceKind::Roll20, Arc::new(bridge::roll20::Roll20Source));
-                // Foundry source registers in Task 9.
+                sources.insert(SourceKind::Foundry, Arc::new(bridge::foundry::FoundrySource));
 
                 let foundry_tls = match bridge::tls::ensure_cert(&app_data_dir).await {
                     Ok(acc) => Some(acc),

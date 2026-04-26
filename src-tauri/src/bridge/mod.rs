@@ -7,6 +7,7 @@
 // in BridgeState.
 
 pub mod commands;
+pub mod foundry;
 pub mod roll20;
 pub mod source;
 pub mod tls;
