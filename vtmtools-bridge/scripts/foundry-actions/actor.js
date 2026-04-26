@@ -29,6 +29,10 @@ async function createItemSimple(actor, msg) {
   ]);
 }
 
+async function deleteItemById(actor, msg) {
+  await actor.deleteEmbeddedDocuments("Item", [msg.item_id]);
+}
+
 async function deleteItemsByPrefix(actor, msg) {
   const matches = actor.items.filter(
     (i) =>
@@ -112,6 +116,7 @@ async function applyDyscrasia(msg) {
 export const handlers = {
   "actor.update_field": wireExecutor(updateField),
   "actor.create_item_simple": wireExecutor(createItemSimple),
+  "actor.delete_item_by_id": wireExecutor(deleteItemById),
   "actor.delete_items_by_prefix": wireExecutor(deleteItemsByPrefix),
   "actor.create_feature": wireExecutor(createFeature),
   "actor.replace_private_notes": wireExecutor(replacePrivateNotes),

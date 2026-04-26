@@ -45,6 +45,14 @@ pub fn build_apply_dyscrasia(actor_id: &str, payload: &str) -> Result<Value, Str
     }))
 }
 
+pub fn build_delete_item_by_id(actor_id: &str, item_id: &str) -> Value {
+    json!({
+        "type": "actor.delete_item_by_id",
+        "actor_id": actor_id,
+        "item_id": item_id,
+    })
+}
+
 pub fn build_delete_items_by_prefix(
     actor_id: &str,
     item_type: &str,
@@ -272,6 +280,14 @@ mod tests {
             msg.starts_with("foundry/actor.delete_items_by_prefix: empty name_prefix"),
             "error must use module-prefixed convention, got: {msg}"
         );
+    }
+
+    #[test]
+    fn delete_item_by_id_shape() {
+        let out = build_delete_item_by_id("actor-xyz", "item-abc");
+        assert_eq!(out["type"], "actor.delete_item_by_id");
+        assert_eq!(out["actor_id"], "actor-xyz");
+        assert_eq!(out["item_id"], "item-abc");
     }
 
     #[test]
