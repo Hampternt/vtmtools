@@ -36,3 +36,47 @@ pub struct ApplyDyscrasiaPayload {
     pub description: String,
     pub bonus: String,
 }
+
+/// Payload for actor.append_private_notes_line wire message.
+/// Used at feature-time when a frontend tool wants to append a notes line.
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct AppendPrivateNotesLinePayload {
+    pub line: String,
+}
+
+/// Payload for actor.replace_private_notes wire message.
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct ReplacePrivateNotesPayload {
+    pub full_text: String,
+}
+
+/// Payload for actor.create_feature wire message.
+/// `featuretype` must be one of "merit", "flaw", "background", "boon".
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct CreateFeaturePayload {
+    pub featuretype: String,
+    pub name: String,
+    pub description: String,
+    pub points: i32,
+}
+
+/// Payload for actor.delete_items_by_prefix wire message.
+/// `featuretype` is optional — when None, only `item_type` and `name_prefix`
+/// filter the deletion set.
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct DeleteItemsByPrefixPayload {
+    pub item_type: String,
+    pub featuretype: Option<String>,
+    pub name_prefix: String,
+}
+
+/// Payload for actor.delete_item_by_id wire message.
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct DeleteItemByIdPayload {
+    pub item_id: String,
+}
