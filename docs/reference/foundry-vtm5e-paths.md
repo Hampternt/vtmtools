@@ -30,13 +30,15 @@ All paths are dot-notation under `actor.system.<…>`. Schema source:
 | health.max | `system.health.max` | 5 | total boxes |
 | health.superficial | `system.health.superficial` | 0 | superficial damage taken |
 | health.aggravated | `system.health.aggravated` | 0 | aggravated damage taken |
-| (health remaining) | `system.health.value` | 5 | derived; equals max − aggravated − superficial |
+| (health remaining) | `system.health.value` | 5 | NOT derived — see note below |
 | willpower.max | `system.willpower.max` | 5 | |
 | willpower.superficial | `system.willpower.superficial` | 0 | |
 | willpower.aggravated | `system.willpower.aggravated` | 0 | |
-| (willpower remaining) | `system.willpower.value` | 5 | derived |
+| (willpower remaining) | `system.willpower.value` | 5 | NOT derived — see note below |
 
 Health/willpower follow V5 rules: total = max, damage = superficial + aggravated. The system tracks all four fields independently.
+
+**Caveat — `value` is independent, not derived.** Initial doc claimed `system.health.value = max − aggravated − superficial`. The 2026-04-26 captured sample (`foundry-vtm5e-actor-sample.json`) disproves this: that character has `max:6, aggravated:0, superficial:0, value:5`. With zero damage and `value !== max`, the relationship is clearly not arithmetic. Treat `value` as an independent field WoD5e tracks alongside max/aggravated/superficial; the canonical translator ignores it and only reads max/aggravated/superficial.
 
 ## Apply-attribute routing (apply-roll write-back)
 
@@ -88,3 +90,38 @@ This keeps `name` opaque to the frontend while letting each source impl interpre
 ## Ownership
 
 Foundry actor ownership is on `actor.ownership`, a map `{ <userId>: <permissionLevel> }` where `3` (`OWNER`) means full control. The translator should pick the first non-GM owner ID, or `null` if only the GM owns the actor — analogous to Roll20's `controlled_by` field.
+
+## Live capture sample
+
+A real, captured wire blob (the exact JSON the Foundry module sends to the Tauri app inside `FoundryInbound::ActorUpdate`) is checked in at [`foundry-vtm5e-actor-sample.json`](./foundry-vtm5e-actor-sample.json). Use it as ground truth for the wire shape — better than re-reading the WoD5e source whenever the translator needs adjusting.
+
+### Shape findings beyond the canonical fields
+
+The sample shows that **WoD5e attaches all three splat schemas (vampire / werewolf / hunter) to every actor**, regardless of the actor's `type`. Default-zero fields just sit there until the GM populates them. Practical consequence: the canonical Foundry translator can read vampire fields straight off any actor, but a future feature could surface werewolf/hunter data without schema gymnastics.
+
+Splat-specific shapes worth knowing if/when the Campaign tool extends Foundry support:
+
+| Path | Shape | Splat |
+|---|---|---|
+| `system.attributes.<name>.value` | int 0-5; `<name>` ∈ str/dex/sta/cha/man/com/int/wits/resolve | shared |
+| `system.skills.<name>.value` | int 0-5; ~27 skills | shared |
+| `system.disciplines.<name>` | `{ value: int, visible: bool, selected: bool, powers: [], description: "" }` | vampire |
+| `system.selectedDiscipline` | discipline name string (e.g. `"auspex"`) | vampire |
+| `system.headers.{ambition,desire,sire,touchstones,tenets,…}` | strings | shared |
+| `system.rage.value` / `system.rage.max` | int | werewolf |
+| `system.balance.harano.value` / `system.balance.hauglosk.value` | int | werewolf |
+| `system.crinosHealth.{max,superficial,aggravated,value}` | health-track-like | werewolf |
+| `system.gifts.<name>.value` | int 0-5; `<name>` ∈ tribe/auspice keys | werewolf |
+| `system.renown.{glory,honor,wisdom}.value` | int | werewolf |
+| `system.edges.<name>.{value,visible,perks,pools,description}` | hunter-specific advantage tree | hunter |
+
+### Disciplines, in detail
+
+Unlike Roll20 (which uses repeating-section attribute names like `repeating_disciplines_<id>_discipline`), Foundry stores disciplines as a **flat keyed object** under `system.disciplines`. Each discipline has:
+- `value`: dot rating (0-5)
+- `visible`: shown on the sheet
+- `selected`: which discipline is currently active for rolls (only one is `true`)
+- `powers`: array of power objects (per-discipline)
+- `description`: free-form text
+
+The list of discipline keys observed in the sample: `alchemy, animalism, auspex, celerity, ceremonies, dominate, fortitude, obfuscate, oblivion, potence, presence, protean, rituals, sorcery`. Note that `ceremonies`, `rituals`, `sorcery`, and `alchemy` are **discipline-extensions** (Blood Sorcery rituals, Oblivion ceremonies, etc.), not core V5 disciplines — they coexist with their parent disciplines in the same map.
