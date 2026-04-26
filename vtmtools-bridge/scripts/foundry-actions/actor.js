@@ -68,8 +68,7 @@ async function applyDyscrasia(msg) {
 }
 
 export const handlers = {
-  // OLD wire names — renamed in Tasks 4-6.
-  update_actor: wireExecutor(updateField),
+  "actor.update_field": wireExecutor(updateField),  // was: update_actor
   create_item: wireExecutor(createItemSimple),
   apply_dyscrasia: applyDyscrasia,
 };

@@ -7,7 +7,7 @@ use crate::bridge::foundry::types::ApplyDyscrasiaPayload;
 
 pub fn build_update_field(actor_id: &str, path: &str, value: Value) -> Value {
     json!({
-        "type": "update_actor",
+        "type": "actor.update_field",
         "actor_id": actor_id,
         "path": path,
         "value": value,
@@ -78,6 +78,15 @@ mod tests {
             "bonus": bonus,
         })
         .to_string()
+    }
+
+    #[test]
+    fn update_field_shape() {
+        let out = build_update_field("actor-xyz", "system.hunger.value", json!(3));
+        assert_eq!(out["type"], "actor.update_field");
+        assert_eq!(out["actor_id"], "actor-xyz");
+        assert_eq!(out["path"], "system.hunger.value");
+        assert_eq!(out["value"], 3);
     }
 
     #[test]
