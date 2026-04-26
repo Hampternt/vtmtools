@@ -37,6 +37,7 @@
   let selectorOpen  = $state(false);
   let applyState    = $state<'idle' | 'applying' | 'applied' | 'error'>('idle');
   let confirmedDyscrasia = $state<DyscrasiaEntry | null>(null);
+  let dyscrasiaApplyState = $state<'idle' | 'applying' | 'applied' | 'error'>('idle');
 
   const charKey = (c: BridgeCharacter) => `${c.source}:${c.source_id}`;
   const connected = $derived(anyConnected());
@@ -133,6 +134,31 @@
     } catch {
       applyState = 'error';
       setTimeout(() => { applyState = 'idle'; }, 1800);
+    }
+  }
+
+  async function applyDyscrasia() {
+    if (!confirmedDyscrasia || !selectedChar) return;
+    if (selectedChar.source !== 'foundry') return; // hard guard; UI also hides the button
+    dyscrasiaApplyState = 'applying';
+    try {
+      const payload = JSON.stringify({
+        dyscrasia_name: confirmedDyscrasia.name,
+        resonance_type: confirmedDyscrasia.resonanceType,
+        description: confirmedDyscrasia.description,
+        bonus: confirmedDyscrasia.bonus,
+      });
+      await setAttribute(
+        selectedChar.source,
+        selectedChar.source_id,
+        'dyscrasia',
+        payload,
+      );
+      dyscrasiaApplyState = 'applied';
+      setTimeout(() => { dyscrasiaApplyState = 'idle'; }, 1800);
+    } catch {
+      dyscrasiaApplyState = 'error';
+      setTimeout(() => { dyscrasiaApplyState = 'idle'; }, 1800);
     }
   }
 
@@ -243,8 +269,8 @@
           {result}
           onDyscrasiaConfirmChange={(d) => { confirmedDyscrasia = d; }}
         />
-        {#if selectedChar && result.resonanceType}
-          <div class="apply-row">
+        <div class="apply-row">
+          {#if selectedChar && result.resonanceType}
             <button
               class="apply-btn"
               class:applied={applyState === 'applied'}
@@ -257,8 +283,22 @@
                : applyState === 'error' ? '✗ Failed — retry'
                : `✓ Apply to ${selectedChar.name}`}
             </button>
-          </div>
-        {/if}
+          {/if}
+          {#if selectedChar?.source === 'foundry' && confirmedDyscrasia !== null}
+            <button
+              class="apply-btn apply-btn--dyscrasia"
+              class:applied={dyscrasiaApplyState === 'applied'}
+              class:error={dyscrasiaApplyState === 'error'}
+              onclick={applyDyscrasia}
+              disabled={dyscrasiaApplyState !== 'idle'}
+            >
+              {dyscrasiaApplyState === 'applying' ? 'Applying Dyscrasia…'
+               : dyscrasiaApplyState === 'applied' ? '✓ Dyscrasia Applied'
+               : dyscrasiaApplyState === 'error' ? '✗ Failed — retry'
+               : `✓ Apply Dyscrasia to ${selectedChar.name}`}
+            </button>
+          {/if}
+        </div>
       {/if}
 
       <!-- ── Config steps ── -->
@@ -476,7 +516,12 @@
   .steps-panel > :global(.result-card) { margin-top: 0; }
 
   /* ── Apply button ── */
-  .apply-row { display: flex; justify-content: flex-end; }
+  .apply-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
   .apply-btn {
     padding: 0.45rem 1.2rem;
     background: var(--bg-sunken);
