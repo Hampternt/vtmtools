@@ -463,10 +463,14 @@ pub struct FoundryActor {
 }
 ```
 
-Outbound (Tauri → Foundry module): `update_actor` (dot-path field
-write via `actor.update`), `create_item` (resonance-style item
-creation), `refresh`. Schemas inlined in the Foundry module's
-`handleInbound` (`vtmtools-bridge/scripts/bridge.js`).
+Outbound (Tauri → Foundry module): dot-namespaced wire types
+(`actor.update_field`, `actor.create_item_simple`,
+`actor.apply_dyscrasia`, `refresh`). Each helper has a typed
+Rust builder in `bridge/foundry/actions/<umbrella>.rs` and a
+JS executor in `vtmtools-bridge/scripts/foundry-actions/<umbrella>.js`
+registered into `bridge.js::handleInbound`'s handler-map dispatch.
+See `docs/superpowers/specs/2026-04-26-foundry-helper-library-roadmap.md`
+for the umbrella conventions.
 
 ### Mirror layer
 

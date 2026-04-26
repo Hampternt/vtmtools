@@ -54,9 +54,10 @@ If the module shows a "could not reach desktop app" warning, repeat step 3.
 
 - On world ready (GM only): pushes the full list of actors to the desktop app.
 - On `updateActor` / `createActor` / `deleteActor` hooks: pushes the changed actor.
-- On inbound messages from the desktop app:
-  - `update_actor` → calls `actor.update({ <path>: <value> })` (e.g. setting hunger).
-  - `create_item` → creates an Item document on the actor (used for resonance, since WoD5e stores it as an Item, not a system field).
+- On inbound messages from the desktop app, dispatched via a handler-map registered in `scripts/foundry-actions/`:
+  - `actor.update_field` → calls `actor.update({ <path>: <value> })` (e.g. setting hunger).
+  - `actor.create_item_simple` → creates an Item document on the actor (used for resonance, since WoD5e stores it as an Item, not a system field).
+  - `actor.apply_dyscrasia` → composite: deletes prior dyscrasia merits, creates the new merit Item, appends a timestamped audit line to private notes.
   - `refresh` → re-pushes all actors.
 
 ## Status pip

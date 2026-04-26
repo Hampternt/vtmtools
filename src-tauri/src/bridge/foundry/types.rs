@@ -28,7 +28,7 @@ pub struct FoundryActor {
 /// `bridge_set_attribute` when `name == "dyscrasia"`. The Foundry
 /// source impl parses this back into the typed struct, stamps the
 /// timestamp, renders the merit description HTML, and emits the
-/// `apply_dyscrasia` wire shape.
+/// `actor.apply_dyscrasia` wire shape.
 #[derive(Debug, Deserialize)]
 pub struct ApplyDyscrasiaPayload {
     pub dyscrasia_name: String,
