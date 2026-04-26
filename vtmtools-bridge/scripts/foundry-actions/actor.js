@@ -75,42 +75,28 @@ async function appendPrivateNotesLine(actor, msg) {
   await actor.update({ "system.privatenotes": next });
 }
 
+// Composes deleteItemsByPrefix + createFeature + appendPrivateNotesLine;
+// single inbound-handler tick preserves atomicity.
 async function applyDyscrasia(msg) {
   const actor = game.actors.get(msg.actor_id);
   if (!actor) return;
 
-  const existing = actor.items.filter(
-    (i) =>
-      i.type === "feature" &&
-      i.system?.featuretype === "merit" &&
-      typeof i.name === "string" &&
-      i.name.startsWith("Dyscrasia: "),
-  );
-  if (msg.replace_existing && existing.length) {
-    await actor.deleteEmbeddedDocuments(
-      "Item",
-      existing.map((i) => i.id),
-    );
+  if (msg.replace_existing) {
+    await deleteItemsByPrefix(actor, {
+      item_type: "feature",
+      featuretype: "merit",
+      name_prefix: "Dyscrasia: ",
+    });
   }
 
-  await actor.createEmbeddedDocuments("Item", [
-    {
-      type: "feature",
-      name: `Dyscrasia: ${msg.dyscrasia_name}`,
-      system: {
-        featuretype: "merit",
-        description: msg.merit_description_html,
-        points: 0,
-      },
-    },
-  ]);
+  await createFeature(actor, {
+    featuretype: "merit",
+    name: `Dyscrasia: ${msg.dyscrasia_name}`,
+    description: msg.merit_description_html,
+    points: 0,
+  });
 
-  const current = actor.system?.privatenotes ?? "";
-  const next =
-    current.trim() === ""
-      ? msg.notes_line
-      : `${current}\n${msg.notes_line}`;
-  await actor.update({ "system.privatenotes": next });
+  await appendPrivateNotesLine(actor, { line: msg.notes_line });
 }
 
 export const handlers = {
