@@ -45,6 +45,14 @@ pub fn build_apply_dyscrasia(actor_id: &str, payload: &str) -> Result<Value, Str
     }))
 }
 
+pub fn build_append_private_notes_line(actor_id: &str, line: &str) -> Value {
+    json!({
+        "type": "actor.append_private_notes_line",
+        "actor_id": actor_id,
+        "line": line,
+    })
+}
+
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -141,6 +149,14 @@ mod tests {
         assert!(html.contains("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;"));
         assert!(html.contains("&amp; &gt; &lt;"));
         assert!(!html.contains("<script>"));
+    }
+
+    #[test]
+    fn append_private_notes_line_shape() {
+        let out = build_append_private_notes_line("actor-xyz", "Hello world");
+        assert_eq!(out["type"], "actor.append_private_notes_line");
+        assert_eq!(out["actor_id"], "actor-xyz");
+        assert_eq!(out["line"], "Hello world");
     }
 
     #[test]

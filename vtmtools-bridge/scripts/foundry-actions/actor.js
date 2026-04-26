@@ -29,6 +29,13 @@ async function createItemSimple(actor, msg) {
   ]);
 }
 
+async function appendPrivateNotesLine(actor, msg) {
+  const current = actor.system?.privatenotes ?? "";
+  const next =
+    current.trim() === "" ? msg.line : `${current}\n${msg.line}`;
+  await actor.update({ "system.privatenotes": next });
+}
+
 async function applyDyscrasia(msg) {
   const actor = game.actors.get(msg.actor_id);
   if (!actor) return;
@@ -70,5 +77,6 @@ async function applyDyscrasia(msg) {
 export const handlers = {
   "actor.update_field": wireExecutor(updateField),
   "actor.create_item_simple": wireExecutor(createItemSimple),
+  "actor.append_private_notes_line": wireExecutor(appendPrivateNotesLine),
   "actor.apply_dyscrasia": applyDyscrasia,
 };
