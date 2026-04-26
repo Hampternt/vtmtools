@@ -8,6 +8,7 @@
 
 pub mod roll20;
 pub mod source;
+pub mod tls;
 pub mod types;
 
 use std::collections::HashMap;
