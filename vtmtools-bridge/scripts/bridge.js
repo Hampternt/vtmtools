@@ -98,6 +98,51 @@ async function handleInbound(msg) {
     ]);
     return;
   }
+  if (msg.type === "apply_dyscrasia") {
+    const actor = game.actors.get(msg.actor_id);
+    if (!actor) return;
+
+    // (1) Delete prior dyscrasia merits. Filter is name-prefix-based —
+    // any feature Item with featuretype="merit" whose name starts with
+    // "Dyscrasia: " is treated as tool-managed and clobbered. Documented
+    // limitation in spec §2.
+    const existing = actor.items.filter(
+      (i) =>
+        i.type === "feature" &&
+        i.system?.featuretype === "merit" &&
+        typeof i.name === "string" &&
+        i.name.startsWith("Dyscrasia: "),
+    );
+    if (msg.replace_existing && existing.length) {
+      await actor.deleteEmbeddedDocuments(
+        "Item",
+        existing.map((i) => i.id),
+      );
+    }
+
+    // (2) Create the new dyscrasia merit.
+    await actor.createEmbeddedDocuments("Item", [
+      {
+        type: "feature",
+        name: `Dyscrasia: ${msg.dyscrasia_name}`,
+        system: {
+          featuretype: "merit",
+          description: msg.merit_description_html,
+          points: 0,
+        },
+      },
+    ]);
+
+    // (3) Append timestamped audit line to private notes. Empty notes →
+    // bare line; existing content → newline-prefixed append.
+    const current = actor.system?.privatenotes ?? "";
+    const next =
+      current.trim() === ""
+        ? msg.notes_line
+        : `${current}\n${msg.notes_line}`;
+    await actor.update({ "system.privatenotes": next });
+    return;
+  }
   console.warn(`[${MODULE_ID}] unknown inbound type:`, msg.type);
 }
 
