@@ -45,6 +45,27 @@ pub fn build_apply_dyscrasia(actor_id: &str, payload: &str) -> Result<Value, Str
     }))
 }
 
+pub fn build_delete_items_by_prefix(
+    actor_id: &str,
+    item_type: &str,
+    featuretype: Option<&str>,
+    name_prefix: &str,
+) -> Result<Value, String> {
+    if name_prefix.is_empty() {
+        return Err(
+            "foundry/actor.delete_items_by_prefix: empty name_prefix is not allowed"
+                .to_string(),
+        );
+    }
+    Ok(json!({
+        "type": "actor.delete_items_by_prefix",
+        "actor_id": actor_id,
+        "item_type": item_type,
+        "featuretype": featuretype,
+        "name_prefix": name_prefix,
+    }))
+}
+
 pub fn build_create_feature(
     actor_id: &str,
     featuretype: &str,
@@ -219,6 +240,36 @@ mod tests {
         let msg = result.unwrap_err();
         assert!(
             msg.starts_with("foundry/actor.create_feature: invalid featuretype:"),
+            "error must use module-prefixed convention, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn delete_items_by_prefix_with_featuretype_shape() {
+        let out = build_delete_items_by_prefix("actor-xyz", "feature", Some("merit"), "Dyscrasia: ")
+            .expect("non-empty prefix is valid");
+        assert_eq!(out["type"], "actor.delete_items_by_prefix");
+        assert_eq!(out["actor_id"], "actor-xyz");
+        assert_eq!(out["item_type"], "feature");
+        assert_eq!(out["featuretype"], "merit");
+        assert_eq!(out["name_prefix"], "Dyscrasia: ");
+    }
+
+    #[test]
+    fn delete_items_by_prefix_without_featuretype_omits_field() {
+        let out = build_delete_items_by_prefix("a", "weapon", None, "Stake")
+            .expect("featuretype is optional");
+        assert_eq!(out["type"], "actor.delete_items_by_prefix");
+        assert!(out["featuretype"].is_null(), "featuretype must serialize as null when absent");
+    }
+
+    #[test]
+    fn delete_items_by_prefix_empty_prefix_returns_err() {
+        let result = build_delete_items_by_prefix("a", "feature", None, "");
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.starts_with("foundry/actor.delete_items_by_prefix: empty name_prefix"),
             "error must use module-prefixed convention, got: {msg}"
         );
     }

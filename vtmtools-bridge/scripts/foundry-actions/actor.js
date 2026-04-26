@@ -29,6 +29,23 @@ async function createItemSimple(actor, msg) {
   ]);
 }
 
+async function deleteItemsByPrefix(actor, msg) {
+  const matches = actor.items.filter(
+    (i) =>
+      i.type === msg.item_type &&
+      (msg.featuretype === null ||
+        msg.featuretype === undefined ||
+        i.system?.featuretype === msg.featuretype) &&
+      typeof i.name === "string" &&
+      i.name.startsWith(msg.name_prefix),
+  );
+  if (matches.length === 0) return;
+  await actor.deleteEmbeddedDocuments(
+    "Item",
+    matches.map((i) => i.id),
+  );
+}
+
 async function createFeature(actor, msg) {
   await actor.createEmbeddedDocuments("Item", [
     {
@@ -95,6 +112,7 @@ async function applyDyscrasia(msg) {
 export const handlers = {
   "actor.update_field": wireExecutor(updateField),
   "actor.create_item_simple": wireExecutor(createItemSimple),
+  "actor.delete_items_by_prefix": wireExecutor(deleteItemsByPrefix),
   "actor.create_feature": wireExecutor(createFeature),
   "actor.replace_private_notes": wireExecutor(replacePrivateNotes),
   "actor.append_private_notes_line": wireExecutor(appendPrivateNotesLine),
