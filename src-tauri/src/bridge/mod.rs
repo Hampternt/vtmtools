@@ -74,13 +74,25 @@ pub async fn start_servers(
         ));
     }
     if state.sources.contains_key(&SourceKind::Foundry) {
-        tokio::spawn(accept_loop(
-            state.clone(),
-            handle.clone(),
-            7424,
-            SourceKind::Foundry,
-            foundry_tls,
-        ));
+        // Refuse to spawn a plain-ws listener on :7424 when TLS init fails —
+        // the Foundry module dials wss://, so plain ws would handshake-fail
+        // and look exactly like a missing-cert error to the user. Better to
+        // log loudly and disable the path than silently mislead them.
+        if let Some(tls) = foundry_tls {
+            tokio::spawn(accept_loop(
+                state.clone(),
+                handle.clone(),
+                7424,
+                SourceKind::Foundry,
+                Some(tls),
+            ));
+        } else {
+            eprintln!(
+                "[bridge] Foundry source registered but TLS cert init failed — \
+                 wss://localhost:7424 will NOT be served. Foundry connections \
+                 disabled this session."
+            );
+        }
     }
 }
 

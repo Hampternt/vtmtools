@@ -1,4 +1,4 @@
-use crate::bridge::types::{CanonicalCharacter, SourceKind};
+use crate::bridge::types::CanonicalCharacter;
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -8,10 +8,13 @@ use serde_json::Value;
 /// (characters map, outbound channel, connected flag) lives in
 /// `BridgeState`, so a single `Arc<dyn BridgeSource>` is shared by
 /// every connection on its port.
+///
+/// The `SourceKind` discriminator is stored externally (in the
+/// `BridgeState.sources` map key, the `accept_loop` argument, and the
+/// canonical characters this source emits) — sources don't need to
+/// report it themselves.
 #[async_trait]
 pub trait BridgeSource: Send + Sync {
-    fn kind(&self) -> SourceKind;
-
     /// Parse an inbound JSON message from this source's wire protocol
     /// and return the canonical character snapshot the frontend should
     /// mirror. Sources that send non-character messages (chat, etc.)
