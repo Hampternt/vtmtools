@@ -1,0 +1,39 @@
+{
+  "id": "vtmtools-bridge",
+  "title": "vtmtools Desktop Bridge",
+  "description": "Mirror Foundry actors into the vtmtools desktop app. GM-only; opens a WebSocket to wss://localhost:7424 on world ready.",
+  "version": "0.1.0",
+  "authors": [
+    {
+      "name": "Hampternt",
+      "url": "https://github.com/Hampternt/vtmtools"
+    }
+  ],
+  "compatibility": {
+    "minimum": "12",
+    "verified": "14",
+    "maximum": ""
+  },
+  "esmodules": [
+    "scripts/bridge.js"
+  ],
+  "styles": [
+    "styles/bridge.css"
+  ],
+  "relationships": {
+    "systems": [
+      {
+        "id": "wod5e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "5"
+        }
+      }
+    ]
+  },
+  "url": "https://github.com/Hampternt/vtmtools",
+  "manifest": "https://github.com/Hampternt/vtmtools/releases/latest/download/module.json",
+  "download": "https://github.com/Hampternt/vtmtools/releases/latest/download/vtmtools-bridge.zip",
+  "license": "./LICENSE.md",
+  "readme": "./README.md"
+}

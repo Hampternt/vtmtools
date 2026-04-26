@@ -1,0 +1,19 @@
+/* Status pip in the Foundry player list footer. Red when disconnected,
+   green when the bridge is open. Tiny — just a visual confirmation
+   for the GM. */
+
+.vtmtools-bridge-pip {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin: 4px 6px;
+  border-radius: 50%;
+  background: #c33;
+  box-shadow: 0 0 4px rgba(204, 51, 51, 0.6);
+  vertical-align: middle;
+}
+
+.vtmtools-bridge-pip.connected {
+  background: #4c8;
+  box-shadow: 0 0 4px rgba(68, 204, 136, 0.6);
+}
