@@ -45,6 +45,14 @@ pub fn build_apply_dyscrasia(actor_id: &str, payload: &str) -> Result<Value, Str
     }))
 }
 
+pub fn build_replace_private_notes(actor_id: &str, full_text: &str) -> Value {
+    json!({
+        "type": "actor.replace_private_notes",
+        "actor_id": actor_id,
+        "full_text": full_text,
+    })
+}
+
 pub fn build_append_private_notes_line(actor_id: &str, line: &str) -> Value {
     json!({
         "type": "actor.append_private_notes_line",
@@ -157,6 +165,14 @@ mod tests {
         assert_eq!(out["type"], "actor.append_private_notes_line");
         assert_eq!(out["actor_id"], "actor-xyz");
         assert_eq!(out["line"], "Hello world");
+    }
+
+    #[test]
+    fn replace_private_notes_shape() {
+        let out = build_replace_private_notes("actor-xyz", "All new notes");
+        assert_eq!(out["type"], "actor.replace_private_notes");
+        assert_eq!(out["actor_id"], "actor-xyz");
+        assert_eq!(out["full_text"], "All new notes");
     }
 
     #[test]

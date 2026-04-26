@@ -29,6 +29,10 @@ async function createItemSimple(actor, msg) {
   ]);
 }
 
+async function replacePrivateNotes(actor, msg) {
+  await actor.update({ "system.privatenotes": msg.full_text });
+}
+
 async function appendPrivateNotesLine(actor, msg) {
   const current = actor.system?.privatenotes ?? "";
   const next =
@@ -77,6 +81,7 @@ async function applyDyscrasia(msg) {
 export const handlers = {
   "actor.update_field": wireExecutor(updateField),
   "actor.create_item_simple": wireExecutor(createItemSimple),
+  "actor.replace_private_notes": wireExecutor(replacePrivateNotes),
   "actor.append_private_notes_line": wireExecutor(appendPrivateNotesLine),
   "actor.apply_dyscrasia": applyDyscrasia,
 };
