@@ -29,6 +29,20 @@ async function createItemSimple(actor, msg) {
   ]);
 }
 
+async function createFeature(actor, msg) {
+  await actor.createEmbeddedDocuments("Item", [
+    {
+      type: "feature",
+      name: msg.name,
+      system: {
+        featuretype: msg.featuretype,
+        description: msg.description,
+        points: msg.points,
+      },
+    },
+  ]);
+}
+
 async function replacePrivateNotes(actor, msg) {
   await actor.update({ "system.privatenotes": msg.full_text });
 }
@@ -81,6 +95,7 @@ async function applyDyscrasia(msg) {
 export const handlers = {
   "actor.update_field": wireExecutor(updateField),
   "actor.create_item_simple": wireExecutor(createItemSimple),
+  "actor.create_feature": wireExecutor(createFeature),
   "actor.replace_private_notes": wireExecutor(replacePrivateNotes),
   "actor.append_private_notes_line": wireExecutor(appendPrivateNotesLine),
   "actor.apply_dyscrasia": applyDyscrasia,

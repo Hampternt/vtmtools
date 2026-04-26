@@ -45,6 +45,31 @@ pub fn build_apply_dyscrasia(actor_id: &str, payload: &str) -> Result<Value, Str
     }))
 }
 
+pub fn build_create_feature(
+    actor_id: &str,
+    featuretype: &str,
+    name: &str,
+    description: &str,
+    points: i32,
+) -> Result<Value, String> {
+    match featuretype {
+        "merit" | "flaw" | "background" | "boon" => {}
+        other => {
+            return Err(format!(
+                "foundry/actor.create_feature: invalid featuretype: {other}"
+            ));
+        }
+    }
+    Ok(json!({
+        "type": "actor.create_feature",
+        "actor_id": actor_id,
+        "featuretype": featuretype,
+        "name": name,
+        "description": description,
+        "points": points,
+    }))
+}
+
 pub fn build_replace_private_notes(actor_id: &str, full_text: &str) -> Value {
     json!({
         "type": "actor.replace_private_notes",
@@ -173,6 +198,29 @@ mod tests {
         assert_eq!(out["type"], "actor.replace_private_notes");
         assert_eq!(out["actor_id"], "actor-xyz");
         assert_eq!(out["full_text"], "All new notes");
+    }
+
+    #[test]
+    fn create_feature_happy_path_shape() {
+        let out = build_create_feature("actor-xyz", "merit", "Iron Will", "Description.", 2)
+            .expect("merit is a valid featuretype");
+        assert_eq!(out["type"], "actor.create_feature");
+        assert_eq!(out["actor_id"], "actor-xyz");
+        assert_eq!(out["featuretype"], "merit");
+        assert_eq!(out["name"], "Iron Will");
+        assert_eq!(out["description"], "Description.");
+        assert_eq!(out["points"], 2);
+    }
+
+    #[test]
+    fn create_feature_invalid_featuretype_returns_err() {
+        let result = build_create_feature("a", "discipline", "X", "y", 1);
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.starts_with("foundry/actor.create_feature: invalid featuretype:"),
+            "error must use module-prefixed convention, got: {msg}"
+        );
     }
 
     #[test]
