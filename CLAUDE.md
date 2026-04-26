@@ -11,6 +11,14 @@ read-scope guide below says to.
 - **Topic-gated** (load only when the topic matches):
   - `docs/reference/roll20-bundle.md` — Roll20 bridge work; Jumpgate
     sheet attribute names; DOM selectors.
+  - `docs/reference/foundry-vtm5e-paths.md` — Foundry bridge work;
+    WoD5e actor schema dot-paths; multi-splat shape.
+  - `docs/reference/foundry-vtm5e-actor-sample.json` — Foundry
+    bridge work; live-captured actor wire blob (ground truth).
+  - `docs/reference/foundry-vtm5e-rolls.md` — Foundry roll API,
+    V5 dice mechanics, ChatMessage shape, hooks for roll mirroring.
+  - `docs/reference/foundry-vtm5e-roll-sample.json` — Foundry
+    bridge work; live-captured roll ChatMessage.
   - `docs/reference/v5-combat-rules.md` — dice mechanics and combat
     rules.
   - `docs/reference/data-sources.md` and

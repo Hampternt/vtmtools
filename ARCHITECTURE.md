@@ -13,8 +13,10 @@ vtmtools is a desktop-first, single-GM tool for running Vampire: The
 Masquerade 5th Edition. The stack is Tauri 2 + SvelteKit (static SPA,
 no SSR) + a Rust backend backed by SQLite, running fully offline on
 one machine. The UI is dark-only, with no cloud sync, no multi-user
-operation, and no network surface beyond a single localhost Roll20
-bridge. See [ADR 0001](docs/adr/0001-tauri-2-stack.md) for the stack
+operation, and no network surface beyond two localhost VTT-bridge
+listeners (`ws://127.0.0.1:7423` for Roll20, `wss://127.0.0.1:7424`
+for Foundry — see [ADR 0006](docs/adr/0006-bridge-source-generalization.md)).
+See [ADR 0001](docs/adr/0001-tauri-2-stack.md) for the stack
 decision and [ADR 0004](docs/adr/0004-dark-only-theming.md) for the
 theming posture.
 
@@ -352,15 +354,73 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_contains_single_parent
     ON edges(to_node_id) WHERE edge_type = 'contains';
 ```
 
-### Roll20 domain
+### Bridge domain
+
+The bridge layer mirrors live character data from one or more VTT
+sources (Roll20, Foundry) into a source-agnostic shape the frontend
+consumes. Source-specific wire types live under
+`src-tauri/src/bridge/<source>/types.rs`; the canonical shape is
+defined once in `src-tauri/src/bridge/types.rs`. See
+[ADR 0006](docs/adr/0006-bridge-source-generalization.md).
 
 ```rust
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceKind { Roll20, Foundry }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Attribute {
-    pub name: String,
-    pub current: String,
-    pub max: String,
+pub struct HealthTrack {
+    pub max: u8,
+    pub superficial: u8,
+    pub aggravated: u8,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanonicalCharacter {
+    pub source: SourceKind,
+    pub source_id: String,
+    pub name: String,
+    pub controlled_by: Option<String>,
+    pub hunger: Option<u8>,
+    pub health: Option<HealthTrack>,
+    pub willpower: Option<HealthTrack>,
+    pub humanity: Option<u8>,
+    pub humanity_stains: Option<u8>,
+    pub blood_potency: Option<u8>,
+    /// Source-specific extras the canonical fields don't capture.
+    /// Roll20: serialized `Character` with the raw attribute list.
+    /// Foundry: serialized `FoundryActor` with the full system blob.
+    pub raw: serde_json::Value,
+}
+```
+
+The cached-character payload. The `bridge://characters-updated`
+event carries `Vec<CanonicalCharacter>` — the merged cache across
+all connected sources, not a diff. The frontend re-renders from
+the full list.
+
+```rust
+/// Stateless protocol adapter — one impl per VTT in
+/// `src-tauri/src/bridge/<source>/mod.rs`.
+#[async_trait]
+pub trait BridgeSource: Send + Sync {
+    async fn handle_inbound(&self, msg: Value) -> Result<Vec<CanonicalCharacter>, String>;
+    fn build_set_attribute(&self, source_id: &str, name: &str, value: &str) -> Value;
+    fn build_refresh(&self) -> Value;
+}
+```
+
+Sources are stateless transformers. Shared connection state
+(per-source connected flag, outbound `mpsc::Sender`, merged
+characters map) lives in `BridgeState` (`src-tauri/src/bridge/mod.rs`).
+
+**Roll20 source** wire protocol (extension protocol — preserved verbatim
+from the pre-bridge era so the existing browser extension keeps working):
+
+```rust
+// bridge/roll20/types.rs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Attribute { pub name: String, pub current: String, pub max: String }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Character {
@@ -369,45 +429,53 @@ pub struct Character {
     pub controlled_by: String,
     pub attributes: Vec<Attribute>,
 }
-```
 
-The cached-character payload. The `roll20://characters-updated`
-event carries `Vec<Character>` — the full cache, not a diff. The
-frontend re-renders from the full list.
-
-```rust
-/// Inbound messages from the browser extension.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InboundMsg {
     Characters { characters: Vec<Character> },
     CharacterUpdate { character: Character },
 }
+// Outbound messages built inline via `serde_json::json!` in the
+// Roll20Source::build_set_attribute / build_refresh impls.
+```
 
-/// Outbound messages sent to the browser extension.
-#[derive(Debug, Serialize)]
+**Foundry source** wire protocol (Foundry module → Tauri):
+
+```rust
+// bridge/foundry/types.rs
+#[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum OutboundMsg {
-    Refresh,
-    SendChat { message: String },
-    SetAttribute {
-        character_id: String,
-        name: String,
-        value: String,
-    },
+pub enum FoundryInbound {
+    Actors { actors: Vec<FoundryActor> },
+    ActorUpdate { actor: FoundryActor },
+    Hello,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FoundryActor {
+    pub id: String,
+    pub name: String,
+    pub owner: Option<String>,
+    /// Raw `actor.system` blob — translate.rs picks paths from
+    /// docs/reference/foundry-vtm5e-paths.md.
+    pub system: serde_json::Value,
 }
 ```
 
-Wire protocol with the browser extension. Tagged JSON with a `type`
-discriminator; `Characters` carries the whole cache, `CharacterUpdate`
-patches one entry. Outbound messages are driven by the matching
-Tauri commands in `roll20/commands.rs`.
+Outbound (Tauri → Foundry module): `update_actor` (dot-path field
+write via `actor.update`), `create_item` (resonance-style item
+creation), `refresh`. Schemas inlined in the Foundry module's
+`handleInbound` (`vtmtools-bridge/scripts/bridge.js`).
 
 ### Mirror layer
 
 The frontend `src/types.ts` mirrors these shapes in TypeScript.
 Drift is not tolerated — changing a Rust struct requires updating
-the TS mirror in the same commit.
+the TS mirror in the same commit. The TS mirror is `BridgeCharacter`
+(canonical) plus `Roll20Raw` / `Roll20RawAttribute` for
+source-specific helpers reading off `char.raw` when source is
+Roll20.
 
 ## §3 Storage strategy
 
@@ -426,10 +494,13 @@ the TS mirror in the same commit.
   - Svelte runes stores in `src/store/*` (e.g.
     `domains.svelte.ts` for chronicle UI state, `toolEvents.ts` for
     cross-tool pub/sub).
-  - `Arc<Roll20State>` on the Rust side holds the Roll20 character
-    cache (`HashMap<String, Character>`), connection flag, and the
-    outbound-message mpsc sender. Shared between the WS loop and
-    the Tauri command handlers.
+  - `Arc<BridgeState>` on the Rust side holds the merged
+    canonical-character cache (`HashMap<String, CanonicalCharacter>`
+    keyed by `<source>:<source_id>`), the per-source `ConnectionInfo`
+    map (connected flag + outbound mpsc sender), and the registered
+    `BridgeSource` impls. Shared between every accept loop and the
+    Tauri command handlers. See
+    [ADR 0006](docs/adr/0006-bridge-source-generalization.md).
 - **Export artifacts:** Markdown written to `~/Documents/vtmtools/`
   via `tokio::fs` in `src-tauri/src/tools/export.rs`.
 - **No cloud, no remote sync, no network storage** (see §12
@@ -461,12 +532,13 @@ Rust signature + the types it references in §2) is the stable contract.
   `delete_dyscrasia`, `roll_random_dyscrasia`.
 - **`src-tauri/src/tools/resonance.rs`** (1): `roll_resonance`.
 - **`src-tauri/src/tools/export.rs`** (1): `export_result_to_md`.
-- **`src-tauri/src/roll20/commands.rs`** (5):
-  `get_roll20_characters`, `get_roll20_status`,
-  `refresh_roll20_data`, `send_roll20_chat`,
-  `set_roll20_attribute`.
+- **`src-tauri/src/bridge/commands.rs`** (4):
+  `bridge_get_characters`, `bridge_get_status`,
+  `bridge_refresh`, `bridge_set_attribute`. Generic across Roll20
+  and Foundry — `set_attribute`'s `name` is opaque to the frontend
+  and translated per-source by the source's `BridgeSource` impl.
 
-Total: 32 commands. New commands are registered in
+Total: 31 commands. New commands are registered in
 `src-tauri/src/lib.rs` (`invoke_handler(tauri::generate_handler![...])`).
 See §8 for the Tauri capability / ACL surface.
 
@@ -478,26 +550,43 @@ through typed wrapper modules in `src/lib/**/api.ts` (see
 exported function per Tauri command, return type matching the Rust
 response). New tools adopt the same pattern.
 
-### Roll20 WebSocket protocol
+### Bridge WebSocket protocol
 
-- Binding: `127.0.0.1:7423`, localhost-only (see §8 Security model,
-  [ADR 0005](docs/adr/0005-roll20-ws-extension-bridge.md)).
-- At most one active extension session. Connection owner is
-  `src-tauri/src/roll20/mod.rs`.
-- Message framing is JSON text frames. Inbound (extension → app)
-  variants: `Characters { characters: Vec<Character> }` replaces
-  the cache, `CharacterUpdate { character: Character }` upserts one
-  entry by `id`. Outbound (app → extension) variants: `Refresh`,
-  `SendChat { message }`, `SetAttribute { character_id, name, value }`.
-  The exact Rust types are inlined in §2 under "Roll20 domain".
+Two listeners, both localhost, each pinned to a single source by port
+(see [ADR 0006](docs/adr/0006-bridge-source-generalization.md)):
+
+- **`ws://127.0.0.1:7423` → Roll20.** Plain WebSocket. Preserves the
+  Roll20 extension's pre-bridge wire protocol byte-for-byte. Connection
+  owner is `src-tauri/src/bridge/mod.rs::accept_loop`. At most one
+  active extension session.
+- **`wss://127.0.0.1:7424` → Foundry.** TLS WebSocket using a self-signed
+  cert generated on first launch by `rcgen` and persisted in the Tauri
+  app data dir (`bridge-cert.pem`, `bridge-key.pem`). The cert SAN is
+  `localhost` only. The GM accepts the cert warning once per browser by
+  visiting `https://localhost:7424` directly. wss is non-optional
+  because Foundry is commonly served over HTTPS (Forge, Molten,
+  reverse-proxied self-host) and browsers block `ws://localhost` from
+  HTTPS pages as mixed content.
+
+Message framing is JSON text frames per source — see §2 Bridge domain
+for the per-source inbound/outbound variants. The wire shape on each
+port is defined entirely by that source's `BridgeSource` impl; there
+is no in-message source tag.
+
+If TLS init fails at startup, the Foundry accept loop is NOT spawned
+(falling back to plain ws on `:7424` would produce mystery cert errors
+in the Foundry browser). The failure is logged once and Foundry stays
+disabled for the session; Roll20 is unaffected.
 
 ### Tauri events (backend → frontend)
 
 | Event | Payload | Emitted when |
 |---|---|---|
-| `roll20://connected` | none | Extension opens WS connection |
-| `roll20://disconnected` | none | Extension closes WS connection |
-| `roll20://characters-updated` | `Vec<Character>` | Character cache refreshed |
+| `bridge://roll20/connected` | none | Roll20 extension opens WS connection |
+| `bridge://roll20/disconnected` | none | Roll20 extension closes WS connection |
+| `bridge://foundry/connected` | none | Foundry module opens wss connection |
+| `bridge://foundry/disconnected` | none | Foundry module closes wss connection |
+| `bridge://characters-updated` | `Vec<CanonicalCharacter>` | Any source pushed updated characters; carries the merged cache across all sources |
 
 ### Svelte cross-tool pub/sub
 
@@ -527,8 +616,10 @@ Forbidding rules. Violations are merge blockers.
 
 - Only `src-tauri/src/db/*` talks to SQLite. No component or other
   backend module invokes `sqlx` or opens a connection.
-- Only `src-tauri/src/roll20/*` talks to the WebSocket server. No
-  other backend module binds a socket.
+- Only `src-tauri/src/bridge/*` talks to the WebSocket / WSS servers.
+  No other backend module binds a socket. Per-source impls live under
+  `bridge/<source>/` and implement `BridgeSource`; they do not bind
+  ports themselves — `bridge/mod.rs` owns the accept loops.
 - Frontend components never import SQL drivers or call the database
   directly. Database access is exclusively via Tauri `invoke(...)`
   calls, and those go through the typed API wrappers in
@@ -575,9 +666,10 @@ Properties that must hold across all features.
   elements whose lifecycle is controlled by the enclosing `{#each}`
   or `{#if}`, not on runes-mode component roots. Use a plain wrapper
   `<div in:scale out:fade>` in the parent's `{#each}` block.
-- Only one Roll20 extension session is active at a time. State is
-  held in `Arc<Roll20State>` shared between the WS loop and the
-  Tauri command handlers.
+- At most one connection per source at a time (one Roll20 extension,
+  one Foundry GM browser session). State is held in
+  `Arc<BridgeState>` shared between every accept loop and the Tauri
+  command handlers; per-source `ConnectionInfo` lives inside it.
 - Dark-only. No theme toggle exists or will be added
   ([ADR 0004](docs/adr/0004-dark-only-theming.md)).
 
@@ -597,9 +689,9 @@ How failures propagate across the Rust ↔ Tauri IPC ↔ Svelte boundary.
 - Panics in command paths are bugs, not error flow. No `unwrap()`
   in production code; use `?` or explicit error mapping.
 - WebSocket disconnect is expected flow, not an error. The
-  `roll20://disconnected` event fires, the UI shifts to "not
-  connected" state, and the next extension reconnect restores
-  service.
+  appropriate `bridge://<source>/disconnected` event fires, the UI
+  shifts that source's pip to "not connected", and the next reconnect
+  restores service. Other sources are unaffected.
 - Database errors from `sqlx` propagate as `Err(String)` with
   module-stable prefixes. Migration failures on startup are fatal
   (the app exits with a user-visible error).
@@ -611,14 +703,23 @@ Trust boundaries and assumptions for a single-user local desktop tool.
 - **Trust posture.** Single user, single machine. No authentication,
   no authorization, no user-level access control. These are non-
   goals (§12).
-- **Network surface.** Exactly one listener: the Roll20 WebSocket
-  on `127.0.0.1:7423`. It must never bind to `0.0.0.0` or any
-  routable interface. No other external network call is made by
-  the app.
+- **Network surface.** Exactly two listeners, both bound to loopback:
+  - `ws://127.0.0.1:7423` for the Roll20 extension.
+  - `wss://127.0.0.1:7424` for the Foundry module (TLS via self-signed
+    `localhost` cert in the app data dir).
+
+  Neither must ever bind to `0.0.0.0` or any routable interface. No
+  other external network call is made by the app.
 - **Localhost WS trust model.** Any process running as the user can
-  connect to `127.0.0.1:7423`. This is equivalent to trusting the
+  connect to either listener. This is equivalent to trusting the
   user and is the intended posture. Do not add authentication to
-  the WS without a specific threat that justifies it.
+  the listeners without a specific threat that justifies it.
+- **TLS cert.** Self-signed for `localhost` only, generated by
+  `rcgen` on first launch, persisted as `bridge-cert.pem` /
+  `bridge-key.pem` in the Tauri app data dir. Not installed into the
+  OS trust store; the GM accepts the cert warning once per browser
+  by visiting `https://localhost:7424`. Cert key material never
+  leaves the user's machine.
 - **Tauri capabilities / ACL.** `src-tauri/capabilities/default.json`
   currently grants `core:default` and `opener:default`. Custom
   `#[tauri::command]` handlers registered via
@@ -631,9 +732,15 @@ Trust boundaries and assumptions for a single-user local desktop tool.
   `app.path().app_data_dir()` (for SQLite) and
   `~/Documents/vtmtools/` (for exports). Any new write path must
   be added to this list and justified.
-- **Browser extension DOM-read surface.** The extension reads
-  Roll20 DOM nodes that feed the `Character`/`Attribute` shape
-  (§2). It never sends data outside the localhost WebSocket.
+- **Browser extension DOM-read surface (Roll20).** The extension
+  reads Roll20 DOM nodes that feed the `Character`/`Attribute`
+  shape (§2 Bridge domain → Roll20 source). It never sends data
+  outside the localhost WebSocket.
+- **Foundry module surface.** `vtmtools-bridge/` (a Foundry module
+  installed in the world) runs in the GM's browser only —
+  initialization is gated on `game.user.isGM`. It reads
+  `game.actors`, hooks `updateActor` / `createActor` / `deleteActor`,
+  and dials `wss://localhost:7424`. Players' browsers never connect.
 - **Secrets.** None. No API keys, tokens, or credentials in the
   app. If a future feature introduces one, this section is updated
   and an ADR is filed.
@@ -672,6 +779,18 @@ inventing a new hook.
   `date`, `url`, `email`, `bool`, `reference`. v1 UI widgets
   ship for `string`, `text`, `number`, `bool`; the other variants
   are extensibility seams whose widgets will follow.
+- **Add a VTT bridge source.** Add a `SourceKind` variant in
+  `src-tauri/src/bridge/types.rs`, create
+  `src-tauri/src/bridge/<vtt>/{mod.rs,types.rs,translate.rs}` with a
+  `BridgeSource` impl, and register it in `lib.rs` (insert into the
+  `sources` map before `start_servers`). Pick a port: plain ws is
+  fine if the VTT serves over plain http and the data path is a
+  browser extension; wss is required if the data path is a page-
+  context module from a TLS-served VTT (browsers block mixed
+  content). No protocol, command, or frontend changes are required
+  beyond the new `SourceKind` variant — the bridge store and tools
+  already iterate per-source. See
+  [ADR 0006](docs/adr/0006-bridge-source-generalization.md).
 
 ## §10 Testing & verification
 
@@ -689,14 +808,15 @@ inventing a new hook.
   check`, `cargo test`, and `npm run build`. All claims of "done"
   must be backed by a green run.
 - Expected (non-regression) warnings — do NOT "fix" these:
-  - `npm run build`: unused `listen` import in
-    `src/tools/Campaign.svelte` and `src/tools/Resonance.svelte`.
-    In-progress surface, not dead code.
   - `shared/types.rs`: `FieldValue` variants `Date`, `Url`,
     `Email`, and `Reference` may surface "never constructed" —
     the v1 Domains UI uses only `String`, `Text`, `Number`, and
     `Bool` widgets. The unused variants ship as extensibility
     seams for future property widgets (see §9). Do not remove.
+  - The pre-bridge "unused `listen` import in Campaign.svelte and
+    Resonance.svelte" entry is no longer applicable — the cutover
+    to the bridge store ([ADR 0006](docs/adr/0006-bridge-source-generalization.md))
+    moved all `listen()` calls into `src/store/bridge.svelte.ts`.
 
 ## §11 Plan & execution conventions
 
@@ -735,11 +855,20 @@ must first raise a scope change; do not assume it's allowed.
 - No light-mode, theme toggle, or configurable color scheme
   ([ADR 0004](docs/adr/0004-dark-only-theming.md)).
 - No authentication or authorization of any kind.
-- No network surface beyond the single `127.0.0.1:7423` WebSocket
-  listener.
+- No network surface beyond the two localhost bridge listeners
+  (`127.0.0.1:7423` plain ws for Roll20, `127.0.0.1:7424` wss for
+  Foundry).
 - No ingestion path for Roll20 data other than the browser extension
-  bridge ([ADR 0005](docs/adr/0005-roll20-ws-extension-bridge.md)).
-- No multi-session Roll20 support. One extension session at a time.
+  bridge ([ADR 0005](docs/adr/0005-roll20-ws-extension-bridge.md),
+  superseded structurally by [ADR 0006](docs/adr/0006-bridge-source-generalization.md)).
+- No ingestion path for Foundry data other than the
+  `vtmtools-bridge/` Foundry module
+  ([ADR 0006](docs/adr/0006-bridge-source-generalization.md)).
+- No multi-session per source. At most one Roll20 extension and one
+  Foundry GM browser at a time.
+- No additional VTT bridges in v1. New sources require a new
+  `bridge/<vtt>/` impl plus a `SourceKind` variant — no protocol or
+  command-surface change. See §9 Extensibility seams.
 - No frontend testing framework.
 
 ## §13 ADR index
@@ -750,7 +879,8 @@ must first raise a scope change; do not assume it's allowed.
 | 0002 | [Destructive reseed of non-custom dyscrasias on startup](docs/adr/0002-destructive-reseed.md) | accepted |
 | 0003 | [Freeform strings for nodes.type and edges.edge_type](docs/adr/0003-freeform-node-edge-types.md) | accepted |
 | 0004 | [Dark-only theming](docs/adr/0004-dark-only-theming.md) | accepted |
-| 0005 | [Roll20 integration via localhost WebSocket + browser extension](docs/adr/0005-roll20-ws-extension-bridge.md) | accepted |
+| 0005 | [Roll20 integration via localhost WebSocket + browser extension](docs/adr/0005-roll20-ws-extension-bridge.md) | superseded by 0006 |
+| 0006 | [Generalize Roll20 bridge into a multi-source `bridge/` layer](docs/adr/0006-bridge-source-generalization.md) | accepted |
 
 Add new rows here as ADRs are written. When an ADR is superseded,
 update its Status column to `superseded by NNNN`.

@@ -1,7 +1,17 @@
 # 0005: Roll20 integration via localhost WebSocket + browser extension
 
-**Status:** accepted
+**Status:** superseded by [ADR 0006](0006-bridge-source-generalization.md)
 **Date:** 2026-04-19
+
+> **Note (2026-04-26):** ADR 0006 generalized this Roll20-specific bridge
+> into a multi-source `bridge/` layer. The decisions below — localhost-
+> only WebSocket, no Roll20 API key, browser-extension as the data path
+> for Roll20 — are preserved inside the new structure. What changed:
+> `src-tauri/src/roll20/` moved to `src-tauri/src/bridge/roll20/`,
+> `Roll20State`/`Roll20Conn` were replaced by `BridgeState`/`BridgeConn`,
+> the five `roll20_*` Tauri commands collapsed to four `bridge_*`, and
+> the `roll20://*` event namespace became `bridge://roll20/*`. The
+> Roll20 extension's wire protocol is unchanged.
 
 ## Context
 

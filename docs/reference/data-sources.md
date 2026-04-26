@@ -49,7 +49,7 @@ This document names and describes every source of data in VTM Tools where data c
 - The Resonance Roller UI (displays the result card).
 - Roll History (stored in-memory for the current session).
 - Markdown Export (written to disk).
-- Roll20 Writeback (pushed to character sheet).
+- Bridge Writeback (pushed to a Roll20 sheet or a Foundry actor).
 - Tool Event Bus (broadcast to other tools).
 
 ---
@@ -96,42 +96,54 @@ This document names and describes every source of data in VTM Tools where data c
 
 ---
 
-## Roll20 Live Feed
+## Bridge Live Feed
 
-**Direction:** Input (Roll20 browser → app)
-**What it is:** Live character data streaming in from a Roll20 game session. The browser extension reads character models from Roll20's internal Backbone data layer and sends them to the desktop app over a local WebSocket connection.
+**Direction:** Input (VTT browser → app)
+**What it is:** Live character data streaming in from one or more VTT sessions. Each VTT has its own data path on its own port; both feed a single canonical character cache the frontend consumes uniformly. See [ADR 0006](../adr/0006-bridge-source-generalization.md).
 
-**Data carried per character:**
-- Character ID (Roll20's internal identifier).
-- Character name.
-- Controlled-by field (which player owns the character).
-- All character sheet attributes — name/value pairs covering stats like hunger, health, willpower, humanity, blood potency, and everything else on the sheet.
+### Roll20 source
 
-**How data arrives:**
-Roll20 uses Firebase under the hood. When any attribute changes (a player takes damage, gains hunger, etc.), Firebase fires individual per-attribute events. The extension uses a debounce pattern — it waits 200ms after the last attribute change for a character, then sends one batched update containing the full character snapshot. This means downstream consumers receive **whole-character updates**, not individual field changes.
+**Data path:** A Chrome extension reads character models from Roll20's internal Backbone data layer and sends them to the desktop app over a plain WebSocket on `ws://127.0.0.1:7423`.
+
+**Data carried per character (raw):** id, name, controlled-by, attributes (name/current/max triples for everything on the sheet).
+
+**How data arrives:** Roll20 uses Firebase under the hood. When any attribute changes (a player takes damage, gains hunger, etc.), Firebase fires individual per-attribute events. The extension uses a debounce pattern — it waits 200ms after the last attribute change for a character, then sends one batched update containing the full character snapshot. So downstream consumers receive **whole-character updates**, not field diffs.
+
+### Foundry source
+
+**Data path:** The `vtmtools-bridge/` Foundry module (installed in the GM's world) runs in the GM's browser only — gated on `game.user.isGM`. It dials `wss://127.0.0.1:7424` (the desktop app generates a self-signed `localhost` cert on first launch; the GM accepts it once per browser by visiting `https://localhost:7424`). On `ready` it pushes the full actor list, then forwards individual actor changes from `updateActor` / `createActor` / `deleteActor` hooks.
+
+**Data carried per actor (raw):** id, name, owner (the first non-GM `OWNER`-permission user, or null), and the full `actor.system` blob — which carries vampire/werewolf/hunter splat fields side-by-side because WoD5e attaches all three schemas to every actor regardless of type. See [`foundry-vtm5e-paths.md`](./foundry-vtm5e-paths.md) and [`foundry-vtm5e-actor-sample.json`](./foundry-vtm5e-actor-sample.json).
+
+### Canonical shape (what consumers see)
+
+Both sources are translated at the bridge layer into a `CanonicalCharacter` with shared fields (hunger, health, willpower, humanity, humanity_stains, blood_potency) plus a `raw` blob for source-specific extras (Roll20 attributes / Foundry `actor.system`). Tools that need source-specific data cast `char.raw` to a per-source type. The merged cache is keyed by `<source>:<source_id>`.
 
 **Data flow path:**
-1. Roll20 page (Firebase) → Backbone model events
-2. Extension content script → debounced character snapshot
-3. WebSocket message → Tauri backend
-4. Backend stores in in-memory HashMap → emits Tauri event
-5. Frontend receives `roll20://characters-updated` event
+1. VTT page (Roll20 Firebase / Foundry actor data) → source-specific scrape (extension content script / Foundry module hooks)
+2. WebSocket message (`ws://:7423` or `wss://:7424`) → Tauri backend
+3. `BridgeSource::handle_inbound` translates raw → canonical
+4. Backend stores in `HashMap<String, CanonicalCharacter>` → emits Tauri event
+5. Frontend receives `bridge://characters-updated` event
 
 **Currently consumed by:** Campaign tool (live stat display), Resonance Roller (character selector for writeback).
 
 ---
 
-## Roll20 Writeback
+## Bridge Writeback
 
-**Direction:** Output (app → Roll20 browser)
-**What it is:** Data pushed from the desktop app back into a Roll20 character sheet. Goes through the same WebSocket connection as the Live Feed, but in the opposite direction.
+**Direction:** Output (app → VTT browser)
+**What it is:** Data pushed from the desktop app back into a VTT character. Goes through the same per-source WebSocket connection as the Live Feed, but in the opposite direction. The frontend calls one generic `bridge_set_attribute(source, source_id, name, value)` Tauri command; each source impl translates it into source-specific operations.
 
 **Operations supported:**
-- **Set Attribute** — write a single attribute value on a specific character (identified by character ID + attribute name). Creates the attribute if it doesn't exist, updates it if it does.
-- **Send Chat** — inject a message into the Roll20 chat as if the user typed it.
-- **Refresh** — ask the extension to re-read all characters and send fresh snapshots.
+- **Set Attribute** — write a single attribute value on a specific character. The `name` is opaque to the frontend; per-source semantics:
+  - **Roll20:** `name` is a sheet-attribute name (e.g. `resonance`). Creates the attribute if missing, updates if present.
+  - **Foundry:** Most names map to `actor.update({ "system.<path>.value": <value> })` (e.g. `hunger`, `humanity`, `health_superficial`). The exception is `resonance` — WoD5e stores it as an Item document, so the source builds a `create_item` message and the Foundry module calls `actor.createEmbeddedDocuments("Item", [...])` after deleting any existing resonance items. See [`foundry-vtm5e-paths.md`](./foundry-vtm5e-paths.md).
+- **Refresh** — ask the source(s) to re-read all characters and send fresh snapshots. With no source specified, refreshes everyone.
 
-**Currently used by:** Resonance Roller (writes resonance result back to a selected character's sheet).
+**Note:** The Roll20-only `Send Chat` operation from the pre-bridge era was dropped during the cutover (no frontend consumer). The wire protocol still allows it; the typed wrapper does not expose it.
+
+**Currently used by:** Resonance Roller (writes resonance result back to a selected character's sheet — works against either source).
 
 ---
 
@@ -166,14 +178,16 @@ Roll20 uses Firebase under the hood. When any attribute changes (a player takes 
 ## Tauri Event Bridge
 
 **Direction:** Internal (backend → frontend)
-**What it is:** The event channel that carries real-time updates from the Rust backend to the Svelte frontend. Uses Tauri's built-in event system with `roll20://` prefixed event names.
+**What it is:** The event channel that carries real-time updates from the Rust backend to the Svelte frontend. Uses Tauri's built-in event system with the `bridge://` prefix.
 
 **Events currently emitted:**
-- `roll20://connected` — the browser extension has connected.
-- `roll20://disconnected` — the browser extension has disconnected.
-- `roll20://characters-updated` — new or updated character data is available (carries the full character list).
+- `bridge://roll20/connected` — Roll20 extension opened a WS connection.
+- `bridge://roll20/disconnected` — Roll20 extension closed.
+- `bridge://foundry/connected` — Foundry module opened a wss connection.
+- `bridge://foundry/disconnected` — Foundry module closed.
+- `bridge://characters-updated` — any source pushed new or updated character data; carries the merged `Vec<CanonicalCharacter>` across all sources.
 
-**Currently consumed by:** Campaign tool, Resonance Roller — both listen for connection status and character updates.
+**Currently consumed by:** Campaign tool, Resonance Roller — both subscribe via `src/store/bridge.svelte.ts` (the typed bridge store), not by listening directly. Per CLAUDE.md, components never call `invoke` or `listen` directly.
 
 **Notes:** This is distinct from the Tool Event Bus. The Tauri Event Bridge carries backend-to-frontend signals (connection state, data updates). The Tool Event Bus carries frontend-to-frontend signals (cross-tool reactions). They operate on different layers and should not be conflated.
 
@@ -190,22 +204,24 @@ Roll20 uses Firebase under the hood. When any attribute changes (a player takes 
 │                                        │    │    └──→ Tool Event Bus
 │                                        │    └──→ Markdown Export
 │                                        │                    │
-│                              Roll20 Writeback ←─────────────┘
+│                          Bridge Writeback ←─────────────────┘
 │                                   │                         │
 └───────────────────────────────────│─────────────────────────┘
                                     │
-                        ┌───────────▼──────────────┐
-                        │   WebSocket (port 7423)   │
-                        └───────────┬──────────────┘
-                                    │
-                        ┌───────────▼──────────────┐
-                        │   Browser Extension       │
-                        │   (Roll20 Live Feed)      │
-                        └───────────┬──────────────┘
-                                    │
-                        ┌───────────▼──────────────┐
-                        │   Roll20 Game Session     │
-                        └──────────────────────────┘
+                  ┌─────────────────┴────────────────┐
+                  │                                  │
+       ┌──────────▼──────────┐         ┌─────────────▼─────────────┐
+       │  ws://:7423          │         │  wss://:7424              │
+       └──────────┬──────────┘         └─────────────┬─────────────┘
+                  │                                  │
+       ┌──────────▼──────────┐         ┌─────────────▼─────────────┐
+       │  Roll20 extension   │         │  vtmtools-bridge module    │
+       │  (Chrome content)   │         │  (Foundry GM browser only) │
+       └──────────┬──────────┘         └─────────────┬─────────────┘
+                  │                                  │
+       ┌──────────▼──────────┐         ┌─────────────▼─────────────┐
+       │  Roll20 session     │         │  Foundry world (any host)  │
+       └─────────────────────┘         └───────────────────────────┘
 
 
 ┌──────────────────────────────────────────┐
@@ -218,7 +234,7 @@ Roll20 uses Firebase under the hood. When any attribute changes (a player takes 
 
 
 Backend ──── Tauri Event Bridge ────→ Frontend
-              (roll20:// events)
+              (bridge:// events; merged characters cache)
 ```
 
 ### Quick Reference Table
@@ -230,8 +246,8 @@ Backend ──── Tauri Event Bridge ────→ Frontend
 | Resonance Roll Result   | Output/Internal | In-memory  | Backend→Frontend |
 | Dyscrasia Store         | Both            | SQLite     | Backend          |
 | Chronicle Store         | Both            | SQLite     | Backend          |
-| Roll20 Live Feed        | Input           | In-memory  | Extension→Backend|
-| Roll20 Writeback        | Output          | None       | Backend→Extension|
+| Bridge Live Feed        | Input           | In-memory  | VTT→Backend      |
+| Bridge Writeback        | Output          | None       | Backend→VTT      |
 | Markdown Export         | Output          | Filesystem | Backend          |
 | Tool Event Bus          | Internal        | In-memory  | Frontend         |
 | Tauri Event Bridge      | Internal        | None       | Backend→Frontend |
