@@ -1,5 +1,6 @@
 pub mod types;
 pub mod commands;
+pub mod translate;
 
 pub use types::{Roll20Conn, Roll20State};
 
@@ -12,7 +13,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::roll20::types::{Character, InboundMsg};
+use crate::bridge::roll20::types::{Character, InboundMsg};
 
 /// Starts the WebSocket server on 127.0.0.1:7423.
 /// Accepts one connection at a time. Emits Tauri events to the frontend:

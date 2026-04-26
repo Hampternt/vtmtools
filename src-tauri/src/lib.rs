@@ -1,7 +1,6 @@
 mod shared;
 mod tools;
 mod db;
-mod roll20;
 mod bridge;
 
 use sqlx::SqlitePool;
@@ -38,12 +37,12 @@ pub fn run() {
                 handle.manage(DbState(Arc::new(pool)));
 
                 // Roll20 WebSocket integration
-                let roll20_state = Arc::new(roll20::Roll20State::new());
+                let roll20_state = Arc::new(bridge::roll20::Roll20State::new());
                 let roll20_state_for_ws = Arc::clone(&roll20_state);
                 let handle_for_ws = handle.clone();
-                handle.manage(roll20::Roll20Conn(roll20_state));
+                handle.manage(bridge::roll20::Roll20Conn(roll20_state));
                 tauri::async_runtime::spawn(
-                    roll20::start_ws_server(roll20_state_for_ws, handle_for_ws)
+                    bridge::roll20::start_ws_server(roll20_state_for_ws, handle_for_ws)
                 );
             });
             Ok(())
@@ -56,11 +55,11 @@ pub fn run() {
             db::dyscrasia::delete_dyscrasia,
             db::dyscrasia::roll_random_dyscrasia,
             tools::export::export_result_to_md,
-            roll20::commands::get_roll20_characters,
-            roll20::commands::get_roll20_status,
-            roll20::commands::refresh_roll20_data,
-            roll20::commands::send_roll20_chat,
-            roll20::commands::set_roll20_attribute,
+            bridge::roll20::commands::get_roll20_characters,
+            bridge::roll20::commands::get_roll20_status,
+            bridge::roll20::commands::refresh_roll20_data,
+            bridge::roll20::commands::send_roll20_chat,
+            bridge::roll20::commands::set_roll20_attribute,
             db::chronicle::list_chronicles,
             db::chronicle::get_chronicle,
             db::chronicle::create_chronicle,

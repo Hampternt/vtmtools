@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::roll20::types::{Character, OutboundMsg, Roll20Conn};
+use crate::bridge::roll20::types::{Character, OutboundMsg, Roll20Conn};
 
 /// Returns all characters currently known from the Roll20 session.
 /// Returns an empty vec if no extension is connected.
