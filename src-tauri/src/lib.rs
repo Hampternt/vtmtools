@@ -2,6 +2,7 @@ mod shared;
 mod tools;
 mod db;
 mod roll20;
+mod bridge;
 
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
