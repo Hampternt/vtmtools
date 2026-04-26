@@ -25,27 +25,32 @@ impl BridgeSource for FoundrySource {
         Ok(actors.iter().map(translate::to_canonical).collect())
     }
 
-    fn build_set_attribute(&self, source_id: &str, name: &str, value: &str) -> Value {
+    fn build_set_attribute(
+        &self,
+        source_id: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<Value, String> {
         // Maps the canonical attribute name to a Foundry operation.
         // Most fields are simple actor.update() calls; resonance is special
         // because WoD5e stores it as an Item document, not a system field.
         // See docs/reference/foundry-vtm5e-paths.md.
         match name {
-            "resonance" => json!({
+            "resonance" => Ok(json!({
                 "type": "create_item",
                 "actor_id": source_id,
                 "item_type": "resonance",
                 "item_name": value,
                 "replace_existing": true,
-            }),
+            })),
             _ => {
                 let path = canonical_to_path(name);
-                json!({
+                Ok(json!({
                     "type": "update_actor",
                     "actor_id": source_id,
                     "path": path,
                     "value": parse_value(value),
-                })
+                }))
             }
         }
     }

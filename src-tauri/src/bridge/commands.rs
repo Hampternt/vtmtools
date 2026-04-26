@@ -43,7 +43,9 @@ pub async fn bridge_set_attribute(
         .get(&source)
         .cloned()
         .ok_or_else(|| format!("source {} not registered", source.as_str()))?;
-    let payload = source_impl.build_set_attribute(&source_id, &name, &value);
+    let payload = source_impl
+        .build_set_attribute(&source_id, &name, &value)
+        .map_err(|e| format!("bridge/set_attribute: {e}"))?;
     let text = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
     send_to_source(&conn, source, text).await
 }

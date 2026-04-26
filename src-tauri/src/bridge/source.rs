@@ -23,8 +23,16 @@ pub trait BridgeSource: Send + Sync {
 
     /// Build an outbound "set attribute" message in this source's wire
     /// format. The `name` and `value` semantics are source-specific —
-    /// the frontend treats them as opaque strings.
-    fn build_set_attribute(&self, source_id: &str, name: &str, value: &str) -> Value;
+    /// the frontend treats them as opaque strings. Returns Err if the
+    /// source can't translate the (name, value) pair into its wire
+    /// shape (e.g. because `value` is a structured payload that fails
+    /// to parse for this source).
+    fn build_set_attribute(
+        &self,
+        source_id: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<Value, String>;
 
     /// Build an outbound "refresh" / "resend everything" message.
     fn build_refresh(&self) -> Value;

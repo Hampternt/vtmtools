@@ -24,13 +24,18 @@ impl BridgeSource for Roll20Source {
         Ok(chars.iter().map(translate::to_canonical).collect())
     }
 
-    fn build_set_attribute(&self, source_id: &str, name: &str, value: &str) -> Value {
-        json!({
+    fn build_set_attribute(
+        &self,
+        source_id: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<Value, String> {
+        Ok(json!({
             "type": "set_attribute",
             "character_id": source_id,
             "name": name,
             "value": value,
-        })
+        }))
     }
 
     fn build_refresh(&self) -> Value {
