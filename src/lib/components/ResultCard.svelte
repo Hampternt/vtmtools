@@ -3,7 +3,13 @@
   import AcutePanel from '$lib/components/AcutePanel.svelte';
   import type { ResonanceRollResult, DyscrasiaEntry } from '../../types';
 
-  const { result }: { result: ResonanceRollResult } = $props();
+  let {
+    result,
+    onDyscrasiaConfirmChange,
+  }: {
+    result: ResonanceRollResult;
+    onDyscrasiaConfirmChange?: (d: DyscrasiaEntry | null) => void;
+  } = $props();
 
   let confirmedDyscrasia: DyscrasiaEntry | null = $state(null);
   let acuteConfirmed = $state(false);
@@ -16,6 +22,11 @@
       confirmedDyscrasia = null;
       acuteConfirmed = false;
     }
+  });
+
+  // Notify parent whenever confirmedDyscrasia changes (including initial null).
+  $effect(() => {
+    onDyscrasiaConfirmChange?.(confirmedDyscrasia);
   });
 
   async function exportToMd() {

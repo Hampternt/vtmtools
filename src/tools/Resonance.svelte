@@ -7,7 +7,7 @@
   import { publishEvent } from '../store/toolEvents';
   import { bridge, anyConnected, sourceLabel } from '../store/bridge.svelte';
   import { refresh as bridgeRefresh, setAttribute } from '$lib/bridge/api';
-  import type { RollConfig, ResonanceRollResult, HistoryEntry, BridgeCharacter, Roll20Raw } from '../types';
+  import type { RollConfig, ResonanceRollResult, HistoryEntry, BridgeCharacter, Roll20Raw, DyscrasiaEntry } from '../types';
 
   // ── Roll config ──────────────────────────────────────────────────────────────
   let config: RollConfig = $state({
@@ -36,6 +36,7 @@
   let selectedKey   = $state<string | null>(null);
   let selectorOpen  = $state(false);
   let applyState    = $state<'idle' | 'applying' | 'applied' | 'error'>('idle');
+  let confirmedDyscrasia = $state<DyscrasiaEntry | null>(null);
 
   const charKey = (c: BridgeCharacter) => `${c.source}:${c.source_id}`;
   const connected = $derived(anyConnected());
@@ -238,7 +239,10 @@
 
       <!-- ── Result + Apply (above config) ── -->
       {#if result}
-        <ResultCard {result} />
+        <ResultCard
+          {result}
+          onDyscrasiaConfirmChange={(d) => { confirmedDyscrasia = d; }}
+        />
         {#if selectedChar && result.resonanceType}
           <div class="apply-row">
             <button
