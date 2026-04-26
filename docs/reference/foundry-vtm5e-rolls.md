@@ -122,9 +122,26 @@ WoD5e overrides `CONFIG.ChatMessage.documentClass` with `WoDChatMessage` and the
 When a roll posts to chat, the resulting `ChatMessage` carries:
 
 - Standard Foundry fields: `_id`, `speaker`, `rolls: [<serialized WOD5eRoll>]`, `content` (rendered HTML), `flavor` (the title), `rollMode`.
-- A `wod5e` flag scope for system-specific data. Notably:
-  - `flags.wod5e.isRollPrompt` — set on chat messages that are interactive roll prompts (the GM clicked "Send to chat" rather than rolling); other clients re-roll into them via `system.wod5e` socket events.
-- `system: 'mortal'|'vampire'|...` and a `rollMessageData` blob with `totalResult`, `margin`, `criticals`, `critFails`, `enrichedResultLabel`, etc. — built by `generateRollMessageData` (`system/scripts/rolls/roll-message.js`). Whether this lives on `flags` or directly on the message depends on the template; capture a real one to verify.
+- A `wod5e` flag scope is reserved but **mostly unused on regular rolls** — verified empty (`flags: {}`) on a captured live roll. The one observed flag is `flags.wod5e.isRollPrompt` on interactive roll-prompt messages (GM clicked "Send to chat" instead of rolling); other clients re-roll into them via `system.wod5e` socket events.
+
+**`rollMessageData` is NOT persisted.** The blob with `totalResult`, `margin`, `criticals`, `critFails`, `enrichedResultLabel` etc. (built by `generateRollMessageData` in `system/scripts/rolls/roll-message.js`) is computed render-time and rendered into the message's HTML — it is not saved as structured data on the message. Verified by capturing a real message: `flags: {}` after a vampire roll. **Implication for vtmtools:** to mirror rolls live, parse `message.rolls[0]` (raw dice results + formula) and **recompute** success / critical / bestial categories on our side. Re-implementing `generateRollMessageData`'s classification logic in Rust is straightforward — see the per-die-class result tables below.
+
+### Splat detection — read the formula, not `roll.system`
+
+The `roll.system` property (set by `WOD5eRoll`'s constructor) is unreliable downstream of `toJSON` / chat-message rehydration — captured live as `undefined`. The robust signal is the formula's dice term denominations, which `generateRollFormula` always emits per splat:
+
+| Formula contains | Splat |
+|---|---|
+| `dv` and `dg` | vampire |
+| `dw` and `dr` | werewolf |
+| `dh` and `ds` | hunter |
+| only `dm` | mortal |
+
+So vtmtools' inbound translator can derive splat with a regex on `roll.formula` rather than trusting `roll.system`.
+
+### Live sample
+
+A captured `ChatMessage` (12 vampire dice + 0 hunger, total 3 successes) is checked in at [`foundry-vtm5e-roll-sample.json`](./foundry-vtm5e-roll-sample.json). Notably it has empty `flags`, empty `flavor`, no `rollMode`, and `rolls[0]` only carries `total` + `formula` — confirming everything above.
 
 The renderer (`generateRollMessageData`) tags each die's display data:
 

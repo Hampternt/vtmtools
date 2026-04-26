@@ -1,0 +1,20 @@
+{
+  "_comment": "Live-captured ChatMessage shape for a vampire roll on a WoD5e v5.x Foundry world. Output of `JSON.stringify({rolls, flags, flavor, type, rollMode}, null, 2)` run on `game.messages.contents.at(-1)`. Use as ground truth for the post-roll message structure.",
+  "_captured_at": "2026-04-26",
+  "_actor_id": "ObCGftjZjCvpPBdN",
+  "_observations": [
+    "rolls[0].formula carries the splat — dv+dg = vampire, dw+dr = werewolf, dh+ds = hunter, dm only = mortal. More reliable than rolls[0].system (which was undefined here).",
+    "flags: {} confirms WoD5e does NOT persist roll metadata (criticals, margin, bestial flags) on the message. That data is recomputed render-time from the dice results.",
+    "vtmtools mirroring rolls must parse rolls[0].formula + rolls[0]._formula and recompute success/critical/bestial categories from the raw dice results.",
+    "12 basic vampire dice, 0 hunger dice (matches Jesper's hunger.value: 0 from the actor sample)."
+  ],
+  "rolls": [
+    {
+      "total": 3,
+      "formula": "12dvcs>5 + 0dgcs>5"
+    }
+  ],
+  "flags": {},
+  "flavor": "",
+  "type": "base"
+}
