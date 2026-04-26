@@ -3,6 +3,7 @@
   import type { Snippet } from 'svelte';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import { tools } from '../tools';
+  import { initBridge } from '../store/bridge.svelte';
   import type { Component } from 'svelte';
 
   const { children }: { children?: Snippet } = $props();
@@ -19,7 +20,10 @@
     ActiveComponent = mod.default;
   }
 
-  onMount(() => loadTool(activeTool));
+  onMount(() => {
+    loadTool(activeTool);
+    initBridge();
+  });
 </script>
 
 <div class="shell">

@@ -52,17 +52,48 @@ export interface HistoryEntry {
   result: ResonanceRollResult;
 }
 
-export interface Roll20Attribute {
+// ---------------------------------------------------------------------------
+// Bridge layer: source-agnostic character mirror for Roll20 / Foundry / etc.
+// Mirrors src-tauri/src/bridge/types.rs.
+// ---------------------------------------------------------------------------
+
+export type SourceKind = 'roll20' | 'foundry';
+
+export interface HealthTrack {
+  max: number;
+  superficial: number;
+  aggravated: number;
+}
+
+export interface BridgeCharacter {
+  source: SourceKind;
+  source_id: string;
+  name: string;
+  controlled_by: string | null;
+  hunger: number | null;
+  health: HealthTrack | null;
+  willpower: HealthTrack | null;
+  humanity: number | null;
+  humanity_stains: number | null;
+  blood_potency: number | null;
+  /// Source-specific extras the canonical fields don't capture. For
+  /// Roll20 sources this is the original Roll20 character (id, name,
+  /// controlled_by, attributes: [{name, current, max}, ...]) so legacy
+  /// helpers like parseDisciplines still work against it.
+  raw: unknown;
+}
+
+export interface Roll20RawAttribute {
   name: string;
   current: string;
   max: string;
 }
 
-export interface Roll20Character {
+export interface Roll20Raw {
   id: string;
   name: string;
   controlled_by: string;
-  attributes: Roll20Attribute[];
+  attributes: Roll20RawAttribute[];
 }
 
 // ---------------------------------------------------------------------------

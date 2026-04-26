@@ -1,27 +1,12 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
-  import type { Roll20Character, Roll20Attribute } from '../types';
-
-  // ── Attribute name constants ────────────────────────────────────────────
-  const ATTR = {
-    hunger:       'hunger',
-    health:       'health',
-    healthMax:    'health',
-    healthSup:    'health_superficial',
-    healthAgg:    'health_aggravated',
-    willpower:    'willpower',
-    willpowerMax: 'willpower',
-    willpowerSup: 'willpower_superficial',
-    willpowerAgg: 'willpower_aggravated',
-    humanity:     'humanity',
-    bloodPotency: 'blood_potency',
-  } as const;
+  import { bridge, anyConnected } from '../store/bridge.svelte';
+  import { refresh as bridgeRefresh } from '$lib/bridge/api';
+  import type { BridgeCharacter, Roll20Raw, Roll20RawAttribute } from '../types';
 
   // ── State ───────────────────────────────────────────────────────────────
-  let connected    = $state(false);
-  let characters   = $state<Roll20Character[]>([]);
-  let lastSync     = $state<Date | null>(null);
+  const connected  = $derived(anyConnected());
+  const characters = $derived(bridge.characters);
+  const lastSync   = $derived(bridge.lastSync);
   let expandedRaw   = $state<Set<string>>(new Set());
   let expandedAttrs = $state<Set<string>>(new Set());
   let expandedInfo  = $state<Set<string>>(new Set());
@@ -37,22 +22,6 @@
     urlCopied = true;
     setTimeout(() => { urlCopied = false; }, 1500);
   }
-
-  $effect(() => {
-    invoke<boolean>('get_roll20_status').then(s => { connected = s; });
-    invoke<Roll20Character[]>('get_roll20_characters').then(c => { characters = c; });
-
-    const unlisteners = [
-      listen<void>('roll20://connected', () => { connected = true; }),
-      listen<void>('roll20://disconnected', () => { connected = false; }),
-      listen<Roll20Character[]>('roll20://characters-updated', (e) => {
-        characters = e.payload;
-        lastSync = new Date();
-      }),
-    ];
-
-    return () => { unlisteners.forEach(p => p.then(u => u())); };
-  });
 
   $effect(() => {
     if (density !== 'auto') {
@@ -83,25 +52,29 @@
 
   // ── Helpers ─────────────────────────────────────────────────────────────
 
-  function attr(attributes: Roll20Attribute[], name: string): number {
-    const a = attributes.find(a => a.name === name);
+  /// Returns the raw Roll20 attribute list for a character, or [] for
+  /// non-Roll20 chars or if the raw blob is missing. Roll20-specific
+  /// helpers (clan, attributes, disciplines, etc.) read through this.
+  function r20Attrs(char: BridgeCharacter): Roll20RawAttribute[] {
+    if (char.source !== 'roll20') return [];
+    const raw = char.raw as Roll20Raw | null;
+    return raw?.attributes ?? [];
+  }
+
+  function r20AttrInt(char: BridgeCharacter, name: string): number {
+    const a = r20Attrs(char).find(a => a.name === name);
     return a ? (parseInt(a.current, 10) || 0) : 0;
   }
 
-  function attrMax(attributes: Roll20Attribute[], name: string, fallback: number): number {
-    const a = attributes.find(a => a.name === name);
-    if (a && a.max) return parseInt(a.max, 10) || fallback;
-    return fallback;
+  function r20AttrText(char: BridgeCharacter, name: string): string {
+    return r20Attrs(char).find(a => a.name === name)?.current ?? '';
   }
 
-  function attrText(attributes: Roll20Attribute[], name: string): string {
-    return attributes.find(a => a.name === name)?.current ?? '';
-  }
-
-  function parseDisciplines(attributes: Roll20Attribute[]): { type: string; level: number }[] {
+  function parseDisciplines(char: BridgeCharacter): { type: string; level: number }[] {
+    const attrs = r20Attrs(char);
     const prefix = 'repeating_disciplines_';
     const suffix = '_discipline';
-    return attributes
+    return attrs
       .filter(a =>
         a.name.startsWith(prefix) &&
         a.name.endsWith(suffix) &&
@@ -109,7 +82,7 @@
       )
       .map(a => {
         const id = a.name.slice(prefix.length, -suffix.length);
-        const nameAttr = attributes.find(x => x.name === `${prefix}${id}_discipline_name`);
+        const nameAttr = attrs.find(x => x.name === `${prefix}${id}_discipline_name`);
         return {
           type: nameAttr?.current ?? '',
           level: parseInt(a.current, 10) || 0,
@@ -132,8 +105,8 @@
   function toggleAttrs(id: string) { expandedAttrs = toggleSet(expandedAttrs, id); }
   function toggleInfo(id: string)  { expandedInfo  = toggleSet(expandedInfo,  id); }
 
-  function isPC(char: Roll20Character): boolean {
-    return char.controlled_by.trim() !== '';
+  function isPC(char: BridgeCharacter): boolean {
+    return char.controlled_by !== null && char.controlled_by.trim() !== '';
   }
 
   function timeSince(d: Date): string {
@@ -142,7 +115,7 @@
   }
 
   function refresh() {
-    invoke('refresh_roll20_data');
+    bridgeRefresh();
   }
 </script>
 
@@ -150,8 +123,10 @@
   <!-- Toolbar -->
   <div class="toolbar">
     <div class="status">
-      <div class="status-dot" class:connected></div>
-      {connected ? 'Connected to Roll20' : 'Not connected'}
+      <span class="source-pip" class:connected={bridge.connections.roll20}></span>
+      <span class="source-label">R20</span>
+      <span class="source-pip" class:connected={bridge.connections.foundry}></span>
+      <span class="source-label">Foundry</span>
     </div>
     {#if connected && lastSync}
       <span class="sync-time">last sync {timeSince(lastSync)}</span>
@@ -171,55 +146,85 @@
 
   {#if !connected}
     <div class="setup-guide">
-      <p class="guide-title">Browser extension not connected</p>
-      <p class="guide-sub">Install the Roll20 bridge extension once, then open your game and this panel connects automatically.</p>
+      <p class="guide-title">No bridge connected</p>
+      <p class="guide-sub">Choose your VTT and follow the one-time setup. Once installed, both bridges run side by side — connect to either or both.</p>
 
-      <ol class="steps">
-        <li class="step">
-          <div class="step-body">
-            <span class="step-heading">Download the extension</span>
-            <span class="step-text">Go to the vtmtools <strong>Releases</strong> page on GitHub and download <code>vtmtools-extension.zip</code>.</span>
-          </div>
-        </li>
-        <li class="step">
-          <div class="step-body">
-            <span class="step-heading">Extract the zip</span>
-            <span class="step-text">Right-click the downloaded file and choose <em>Extract All</em> (Windows) or double-click it (Mac/Linux). Remember where you put the folder.</span>
-          </div>
-        </li>
-        <li class="step">
-          <div class="step-body">
-            <span class="step-heading">Open Chrome extensions</span>
-            <span class="step-text">In Chrome, click the address bar, type this, and press Enter:</span>
-            <div class="url-row">
-              <code class="url-block">chrome://extensions</code>
-              <button class="btn-copy" onclick={copyExtensionsUrl}>
-                {urlCopied ? 'copied!' : 'copy'}
-              </button>
+      <details class="bridge-section" open>
+        <summary><strong>Roll20</strong> — install browser extension</summary>
+        <ol class="steps">
+          <li class="step">
+            <div class="step-body">
+              <span class="step-heading">Download the extension</span>
+              <span class="step-text">Go to the vtmtools <strong>Releases</strong> page on GitHub and download <code>vtmtools-extension.zip</code>.</span>
             </div>
-          </div>
-        </li>
-        <li class="step">
-          <div class="step-body">
-            <span class="step-heading">Turn on Developer Mode</span>
-            <span class="step-text">In the top-right corner of that page, flip the <em>Developer mode</em> toggle on. A new row of buttons will appear.</span>
-          </div>
-        </li>
-        <li class="step">
-          <div class="step-body">
-            <span class="step-heading">Load the extension</span>
-            <span class="step-text">Click <em>Load unpacked</em>, then select the folder you extracted in step 2.</span>
-          </div>
-        </li>
-        <li class="step">
-          <div class="step-body">
-            <span class="step-heading">Open your Roll20 game</span>
-            <span class="step-text">Navigate to your game on Roll20. Once the editor loads, this panel will connect on its own.</span>
-          </div>
-        </li>
-      </ol>
+          </li>
+          <li class="step">
+            <div class="step-body">
+              <span class="step-heading">Extract the zip</span>
+              <span class="step-text">Right-click the downloaded file and choose <em>Extract All</em> (Windows) or double-click it (Mac/Linux). Remember where you put the folder.</span>
+            </div>
+          </li>
+          <li class="step">
+            <div class="step-body">
+              <span class="step-heading">Open Chrome extensions</span>
+              <span class="step-text">In Chrome, click the address bar, type this, and press Enter:</span>
+              <div class="url-row">
+                <code class="url-block">chrome://extensions</code>
+                <button class="btn-copy" onclick={copyExtensionsUrl}>
+                  {urlCopied ? 'copied!' : 'copy'}
+                </button>
+              </div>
+            </div>
+          </li>
+          <li class="step">
+            <div class="step-body">
+              <span class="step-heading">Turn on Developer Mode</span>
+              <span class="step-text">In the top-right corner of that page, flip the <em>Developer mode</em> toggle on. A new row of buttons will appear.</span>
+            </div>
+          </li>
+          <li class="step">
+            <div class="step-body">
+              <span class="step-heading">Load the extension</span>
+              <span class="step-text">Click <em>Load unpacked</em>, then select the folder you extracted in step 2.</span>
+            </div>
+          </li>
+          <li class="step">
+            <div class="step-body">
+              <span class="step-heading">Open your Roll20 game</span>
+              <span class="step-text">Navigate to your game on Roll20. Once the editor loads, this panel will connect on its own.</span>
+            </div>
+          </li>
+        </ol>
+      </details>
 
-      <p class="guide-note">You only need to do this once. After that, just open Roll20 and vtmtools connects automatically.</p>
+      <details class="bridge-section">
+        <summary><strong>FoundryVTT</strong> — install module + accept cert</summary>
+        <ol class="steps">
+          <li class="step">
+            <div class="step-body">
+              <span class="step-heading">Install the module</span>
+              <span class="step-text">In Foundry's setup, <em>Add-on Modules → Install Module</em>, paste this manifest URL:</span>
+              <div class="url-row">
+                <code class="url-block">https://github.com/Hampternt/vtmtools/releases/latest/download/module.json</code>
+              </div>
+            </div>
+          </li>
+          <li class="step">
+            <div class="step-body">
+              <span class="step-heading">Accept the cert (one time)</span>
+              <span class="step-text">In the same browser you use for Foundry, visit <code>https://localhost:7424</code>, click <em>Advanced → Proceed</em>. The browser remembers it.</span>
+            </div>
+          </li>
+          <li class="step">
+            <div class="step-body">
+              <span class="step-heading">Enable in your world</span>
+              <span class="step-text">Manage Modules → enable <em>vtmtools Desktop Bridge</em>. Reload the world. Only your GM browser opens the connection.</span>
+            </div>
+          </li>
+        </ol>
+      </details>
+
+      <p class="guide-note">You only need to do this once per VTT.</p>
     </div>
   {:else if characters.length === 0}
     <div class="disconnected-banner">
@@ -228,43 +233,44 @@
     </div>
   {:else}
     <div class="char-grid" bind:this={gridEl} style={densityVars}>
-      {#each characters as char (char.id)}
-        {@const healthMax    = attrMax(char.attributes, ATTR.healthMax, 5)}
-        {@const healthSup    = attr(char.attributes, ATTR.healthSup)}
-        {@const healthAgg    = attr(char.attributes, ATTR.healthAgg)}
+      {#each characters as char (char.source + ':' + char.source_id)}
+        {@const charKey      = char.source + ':' + char.source_id}
+        {@const healthMax    = char.health?.max ?? 5}
+        {@const healthSup    = char.health?.superficial ?? 0}
+        {@const healthAgg    = char.health?.aggravated ?? 0}
         {@const healthOk     = Math.max(0, healthMax - healthSup - healthAgg)}
-        {@const wpMax        = attrMax(char.attributes, ATTR.willpowerMax, 5)}
-        {@const wpSup        = attr(char.attributes, ATTR.willpowerSup)}
-        {@const wpAgg        = attr(char.attributes, ATTR.willpowerAgg)}
+        {@const wpMax        = char.willpower?.max ?? 5}
+        {@const wpSup        = char.willpower?.superficial ?? 0}
+        {@const wpAgg        = char.willpower?.aggravated ?? 0}
         {@const wpOk         = Math.max(0, wpMax - wpSup - wpAgg)}
-        {@const hunger       = attr(char.attributes, ATTR.hunger)}
-        {@const humanity     = attr(char.attributes, ATTR.humanity)}
-        {@const bp           = attr(char.attributes, ATTR.bloodPotency)}
-        {@const stains       = attr(char.attributes, 'humanity_stains')}
-        {@const clan         = attrText(char.attributes, 'clan')}
-        {@const disciplines  = parseDisciplines(char.attributes)}
-        {@const strAttr      = attr(char.attributes, 'strength')}
-        {@const dexAttr      = attr(char.attributes, 'dexterity')}
-        {@const staAttr      = attr(char.attributes, 'stamina')}
-        {@const chaAttr      = attr(char.attributes, 'charisma')}
-        {@const manAttr      = attr(char.attributes, 'manipulation')}
-        {@const comAttr      = attr(char.attributes, 'composure')}
-        {@const intAttr      = attr(char.attributes, 'intelligence')}
-        {@const witAttr      = attr(char.attributes, 'wits')}
-        {@const resAttr      = attr(char.attributes, 'resolve')}
-        {@const bane         = attrText(char.attributes, 'bane')}
-        {@const baneSeverity = attrText(char.attributes, 'blood_bane_severity')}
-        {@const ambition     = attrText(char.attributes, 'ambition')}
-        {@const desire       = attrText(char.attributes, 'desire')}
-        {@const predator     = attrText(char.attributes, 'predator')}
-        {@const xpEarned     = attr(char.attributes, 'experience')}
-        {@const xpSpent      = attr(char.attributes, 'experience_spent')}
-        {@const sire         = attrText(char.attributes, 'sire')}
-        {@const ageTrue      = attr(char.attributes, 'age_true')}
-        {@const ageApparent  = attr(char.attributes, 'age_apparent')}
-        {@const tenets       = attrText(char.attributes, 'tenets')}
-        {@const notes        = attrText(char.attributes, 'notes')}
-        {@const compulsions  = attrText(char.attributes, 'compulsions')}
+        {@const hunger       = char.hunger ?? 0}
+        {@const humanity     = char.humanity ?? 0}
+        {@const bp           = char.blood_potency ?? 0}
+        {@const stains       = char.humanity_stains ?? 0}
+        {@const clan         = r20AttrText(char, 'clan')}
+        {@const disciplines  = parseDisciplines(char)}
+        {@const strAttr      = r20AttrInt(char, 'strength')}
+        {@const dexAttr      = r20AttrInt(char, 'dexterity')}
+        {@const staAttr      = r20AttrInt(char, 'stamina')}
+        {@const chaAttr      = r20AttrInt(char, 'charisma')}
+        {@const manAttr      = r20AttrInt(char, 'manipulation')}
+        {@const comAttr      = r20AttrInt(char, 'composure')}
+        {@const intAttr      = r20AttrInt(char, 'intelligence')}
+        {@const witAttr      = r20AttrInt(char, 'wits')}
+        {@const resAttr      = r20AttrInt(char, 'resolve')}
+        {@const bane         = r20AttrText(char, 'bane')}
+        {@const baneSeverity = r20AttrText(char, 'blood_bane_severity')}
+        {@const ambition     = r20AttrText(char, 'ambition')}
+        {@const desire       = r20AttrText(char, 'desire')}
+        {@const predator     = r20AttrText(char, 'predator')}
+        {@const xpEarned     = r20AttrInt(char, 'experience')}
+        {@const xpSpent      = r20AttrInt(char, 'experience_spent')}
+        {@const sire         = r20AttrText(char, 'sire')}
+        {@const ageTrue      = r20AttrInt(char, 'age_true')}
+        {@const ageApparent  = r20AttrInt(char, 'age_apparent')}
+        {@const tenets       = r20AttrText(char, 'tenets')}
+        {@const notes        = r20AttrText(char, 'notes')}
+        {@const compulsions  = r20AttrText(char, 'compulsions')}
 
         <div class="char-card">
 
@@ -352,7 +358,7 @@
           {/if}
 
           <!-- ── Collapsible: core attributes + bane ─────────────────────── -->
-          {#if expandedAttrs.has(char.id)}
+          {#if expandedAttrs.has(charKey)}
             <div class="card-section">
               <div class="attr-grid">
                 <div class="attr-cell"><span class="attr-name">Str</span><span class="attr-val">{strAttr}</span></div>
@@ -375,7 +381,7 @@
           {/if}
 
           <!-- ── Collapsible: narrative info ─────────────────────────────── -->
-          {#if expandedInfo.has(char.id)}
+          {#if expandedInfo.has(charKey)}
             <div class="card-section">
               {#if ambition}
                 <div class="info-row">
@@ -438,28 +444,33 @@
 
           <!-- ── Footer ──────────────────────────────────────────────────── -->
           <div class="card-footer">
-            <button class="section-toggle" onclick={() => toggleAttrs(char.id)}>
-              attrs {expandedAttrs.has(char.id) ? '▴' : '▾'}
+            <button class="section-toggle" onclick={() => toggleAttrs(charKey)}>
+              attrs {expandedAttrs.has(charKey) ? '▴' : '▾'}
             </button>
-            <button class="section-toggle" onclick={() => toggleInfo(char.id)}>
-              info {expandedInfo.has(char.id) ? '▴' : '▾'}
+            <button class="section-toggle" onclick={() => toggleInfo(charKey)}>
+              info {expandedInfo.has(charKey) ? '▴' : '▾'}
             </button>
             <div class="footer-spacer"></div>
-            <button class="raw-toggle" onclick={() => toggleRaw(char.id)}>
-              raw {expandedRaw.has(char.id) ? '▴' : '▾'}
+            <button class="raw-toggle" onclick={() => toggleRaw(charKey)}>
+              raw {expandedRaw.has(charKey) ? '▴' : '▾'}
             </button>
           </div>
 
-          {#if expandedRaw.has(char.id)}
+          {#if expandedRaw.has(charKey)}
             <div class="raw-panel">
-              {#each char.attributes as a}
-                <div class="raw-row">
-                  <span class="raw-name">{a.name}</span>
-                  <span class="raw-val">{a.current}{a.max ? ' / ' + a.max : ''}</span>
-                </div>
-              {/each}
-              {#if char.attributes.length === 0}
-                <span class="raw-empty">No attributes loaded</span>
+              {#if char.source === 'roll20'}
+                {@const r20 = r20Attrs(char)}
+                {#each r20 as a}
+                  <div class="raw-row">
+                    <span class="raw-name">{a.name}</span>
+                    <span class="raw-val">{a.current}{a.max ? ' / ' + a.max : ''}</span>
+                  </div>
+                {/each}
+                {#if r20.length === 0}
+                  <span class="raw-empty">No attributes loaded</span>
+                {/if}
+              {:else}
+                <pre class="raw-json">{JSON.stringify(char.raw, null, 2)}</pre>
               {/if}
             </div>
           {/if}
@@ -495,16 +506,49 @@
     font-size: 0.85rem;
     color: var(--text-secondary);
   }
-  .status-dot {
+  .source-pip {
+    display: inline-block;
     width: 8px;
     height: 8px;
     border-radius: 50%;
     background: var(--text-ghost);
     flex-shrink: 0;
   }
-  .status-dot.connected {
+  .source-pip.connected {
     background: #4caf50;
     box-shadow: 0 0 5px #4caf5066;
+  }
+  .source-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-right: 0.4rem;
+  }
+  .bridge-section {
+    margin: 0.75rem 0;
+    border: 1px solid var(--border-faint);
+    border-radius: 5px;
+    padding: 0.65rem 0.85rem;
+  }
+  .bridge-section summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-label);
+    margin-bottom: 0.5rem;
+    user-select: none;
+  }
+  .bridge-section summary strong {
+    color: var(--accent);
+  }
+  .raw-json {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    background: var(--bg-sunken);
+    border-radius: 3px;
+    padding: 0.5rem;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
   .sync-time { font-size: 0.75rem; color: var(--text-ghost); }
   .spacer { flex: 1; }

@@ -1,12 +1,13 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
   import ResonanceSlider from '$lib/components/ResonanceSlider.svelte';
   import TemperamentConfigComponent from '$lib/components/TemperamentConfig.svelte';
   import ResultCard from '$lib/components/ResultCard.svelte';
   import RollHistory from '$lib/components/RollHistory.svelte';
   import { publishEvent } from '../store/toolEvents';
-  import type { RollConfig, ResonanceRollResult, HistoryEntry, Roll20Character, Roll20Attribute } from '../types';
+  import { bridge, anyConnected, sourceLabel } from '../store/bridge.svelte';
+  import { refresh as bridgeRefresh, setAttribute } from '$lib/bridge/api';
+  import type { RollConfig, ResonanceRollResult, HistoryEntry, BridgeCharacter, Roll20Raw } from '../types';
 
   // ── Roll config ──────────────────────────────────────────────────────────────
   let config: RollConfig = $state({
@@ -29,35 +30,32 @@
   let rollHistory: HistoryEntry[] = $state([]);
   let nextId = 0;
 
-  // ── Roll20 state ─────────────────────────────────────────────────────────────
-  let connected      = $state(false);
-  let characters     = $state<Roll20Character[]>([]);
-  let selectedCharId = $state<string | null>(null);
-  let selectorOpen   = $state(false);
-  let applyState     = $state<'idle' | 'applying' | 'applied' | 'error'>('idle');
+  // ── Bridge state (multi-source) ──────────────────────────────────────────────
+  // Selected character keyed by `<source>:<source_id>` since IDs from
+  // different sources may technically collide.
+  let selectedKey   = $state<string | null>(null);
+  let selectorOpen  = $state(false);
+  let applyState    = $state<'idle' | 'applying' | 'applied' | 'error'>('idle');
 
-  const selectedChar = $derived(characters.find(c => c.id === selectedCharId) ?? null);
+  const charKey = (c: BridgeCharacter) => `${c.source}:${c.source_id}`;
+  const connected = $derived(anyConnected());
+  const characters = $derived(bridge.characters);
+  const selectedChar = $derived(characters.find(c => charKey(c) === selectedKey) ?? null);
 
   $effect(() => {
-    invoke<boolean>('get_roll20_status').then(s => { connected = s; });
-    invoke<Roll20Character[]>('get_roll20_characters').then(c => { characters = c; });
-
-    const unlisteners = [
-      listen<void>('roll20://connected',    () => { connected = true; }),
-      listen<void>('roll20://disconnected', () => { connected = false; selectedCharId = null; }),
-      listen<Roll20Character[]>('roll20://characters-updated', (e) => {
-        characters = e.payload;
-        if (selectedCharId && !e.payload.some(c => c.id === selectedCharId)) {
-          selectedCharId = null;
-        }
-      }),
-    ];
-    return () => { unlisteners.forEach(p => p.then(u => u())); };
+    if (selectedKey && !characters.some(c => charKey(c) === selectedKey)) {
+      selectedKey = null;
+    }
   });
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
-  function attrText(attributes: Roll20Attribute[], name: string): string {
-    return attributes.find(a => a.name === name)?.current ?? '';
+  /// Reads a named attribute from a Roll20 character's raw blob. Returns
+  /// '' for non-Roll20 characters or attributes that don't exist on the
+  /// sheet — Foundry character display omits clan/resonance for now.
+  function r20Attr(char: BridgeCharacter, name: string): string {
+    if (char.source !== 'roll20') return '';
+    const raw = char.raw as Roll20Raw | null;
+    return raw?.attributes?.find(a => a.name === name)?.current ?? '';
   }
 
   // ── Resonance probability math ───────────────────────────────────────────────
@@ -120,14 +118,15 @@
   }
 
   async function applyToCharacter() {
-    if (!result?.resonanceType || !selectedCharId) return;
+    if (!result?.resonanceType || !selectedChar) return;
     applyState = 'applying';
     try {
-      await invoke('set_roll20_attribute', {
-        characterId: selectedCharId,
-        name: 'resonance',
-        value: result.resonanceType,
-      });
+      await setAttribute(
+        selectedChar.source,
+        selectedChar.source_id,
+        'resonance',
+        result.resonanceType,
+      );
       applyState = 'applied';
       setTimeout(() => { applyState = 'idle'; }, 1800);
     } catch {
@@ -136,8 +135,8 @@
     }
   }
 
-  function selectChar(id: string) {
-    selectedCharId = id;
+  function selectChar(key: string) {
+    selectedKey = key;
     selectorOpen = false;
   }
 </script>
@@ -154,28 +153,30 @@
         <h3>Target character</h3>
 
         {#if !connected}
-          <div class="r20-status r20-disconnected">
-            <span class="r20-dot"></span>
-            <span>Not connected to Roll20</span>
+          <div class="bridge-status bridge-disconnected">
+            <span class="bridge-dot"></span>
+            <span>Not connected to any VTT bridge</span>
           </div>
         {:else if characters.length === 0}
-          <div class="r20-status r20-empty">
+          <div class="bridge-status bridge-empty">
             No characters loaded —
-            <button class="link-btn" onclick={() => invoke('refresh_roll20_data')}>refresh</button>
+            <button class="link-btn" onclick={() => bridgeRefresh()}>refresh</button>
           </div>
         {:else}
           <!-- Medium / wide: horizontal wrapping card strip -->
           <div class="char-strip">
-            {#each characters as char (char.id)}
-              {@const clan = attrText(char.attributes, 'clan')}
-              {@const res  = attrText(char.attributes, 'resonance')}
+            {#each characters as char (charKey(char))}
+              {@const key  = charKey(char)}
+              {@const clan = r20Attr(char, 'clan')}
+              {@const res  = r20Attr(char, 'resonance')}
               <button
                 class="char-card"
-                class:char-card--selected={char.id === selectedCharId}
+                class:char-card--selected={key === selectedKey}
                 data-res={res || null}
-                onclick={() => selectChar(char.id)}
+                onclick={() => selectChar(key)}
               >
                 <span class="char-name">{char.name}</span>
+                <span class="char-source">{sourceLabel(char.source)}</span>
                 {#if clan}<span class="char-clan">{clan}</span>{/if}
                 {#if res}<span class="char-res">{res}</span>{/if}
               </button>
@@ -192,7 +193,7 @@
               {#if selectedChar}
                 <span class="sel-dot"></span>
                 <span class="sel-name">{selectedChar.name}</span>
-                <span class="sel-clan">{attrText(selectedChar.attributes, 'clan')}</span>
+                <span class="sel-clan">{r20Attr(selectedChar, 'clan') || sourceLabel(selectedChar.source)}</span>
               {:else}
                 <span class="sel-placeholder">Choose character…</span>
               {/if}
@@ -203,20 +204,24 @@
               <button class="selector-backdrop" onclick={() => { selectorOpen = false; }} aria-label="Close picker"></button>
               <div class="selector-dropdown">
                 <div class="dropdown-header">Select character</div>
-                {#each characters as char (char.id)}
-                  {@const clan = attrText(char.attributes, 'clan')}
-                  {@const res  = attrText(char.attributes, 'resonance')}
+                {#each characters as char (charKey(char))}
+                  {@const key  = charKey(char)}
+                  {@const clan = r20Attr(char, 'clan')}
+                  {@const res  = r20Attr(char, 'resonance')}
                   <button
                     class="drop-item"
-                    class:drop-item--selected={char.id === selectedCharId}
-                    onclick={() => selectChar(char.id)}
+                    class:drop-item--selected={key === selectedKey}
+                    onclick={() => selectChar(key)}
                   >
                     <div class="drop-item-body">
-                      <span class="drop-name">{char.name}</span>
+                      <span class="drop-name">
+                        {char.name}
+                        <span class="drop-source">[{sourceLabel(char.source)}]</span>
+                      </span>
                       {#if clan}<span class="drop-clan">{clan}</span>{/if}
                       {#if res}<span class="drop-res">{res}</span>{/if}
                     </div>
-                    {#if char.id === selectedCharId}<span class="drop-check">✓</span>{/if}
+                    {#if key === selectedKey}<span class="drop-check">✓</span>{/if}
                   </button>
                 {/each}
               </div>
@@ -234,7 +239,7 @@
       <!-- ── Result + Apply (above config) ── -->
       {#if result}
         <ResultCard {result} />
-        {#if selectedCharId && result.resonanceType}
+        {#if selectedChar && result.resonanceType}
           <div class="apply-row">
             <button
               class="apply-btn"
@@ -246,7 +251,7 @@
               {applyState === 'applying' ? 'Applying…'
                : applyState === 'applied' ? '✓ Applied'
                : applyState === 'error' ? '✗ Failed — retry'
-               : `✓ Apply to ${selectedChar?.name ?? 'character'}`}
+               : `✓ Apply to ${selectedChar.name}`}
             </button>
           </div>
         {/if}
@@ -347,13 +352,13 @@
   }
 
   /* ── Roll20 connection states ── */
-  .r20-status {
+  .bridge-status {
     font-size: 0.8rem; display: flex; align-items: center;
     gap: 0.4rem; padding: 0.35rem 0; margin-bottom: 0.75rem;
   }
-  .r20-disconnected { color: var(--text-muted); opacity: 0.45; }
-  .r20-empty        { color: var(--text-secondary); }
-  .r20-dot {
+  .bridge-disconnected{ color: var(--text-muted); opacity: 0.45; }
+  .bridge-empty{ color: var(--text-secondary); }
+  .bridge-dot {
     width: 0.45rem; height: 0.45rem; border-radius: 50%;
     background: var(--text-muted); flex-shrink: 0;
   }
@@ -393,6 +398,7 @@
   .char-card[data-res="Choleric"]   { border-left-color: var(--accent-amber); }
   .char-card[data-res="Sanguine"]   { border-left-color: var(--accent); }
   .char-name { font-size: 0.8rem; color: var(--text-primary); font-weight: bold; }
+  .char-source { font-size: 0.6rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
   .char-clan { font-size: 0.7rem; color: var(--text-secondary); }
   .char-res  { font-size: 0.65rem; color: var(--accent); }
 
@@ -444,6 +450,7 @@
   .drop-item--selected { border-color: var(--accent); background: var(--bg-active); }
   .drop-item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.05rem; }
   .drop-name  { font-size: 0.78rem; color: var(--text-primary); font-weight: bold; }
+  .drop-source { font-size: 0.6rem; color: var(--text-muted); margin-left: 0.3rem; font-weight: normal; }
   .drop-clan  { font-size: 0.65rem; color: var(--text-secondary); }
   .drop-res   { font-size: 0.62rem; color: var(--accent); }
   .drop-check { font-size: 0.75rem; color: var(--accent); flex-shrink: 0; }
