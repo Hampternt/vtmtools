@@ -4,6 +4,7 @@
 // inbound updates through actor.update / createEmbeddedDocuments.
 
 import { actorToWire, hookActorChanges } from "./translate.js";
+import { handlers } from "./foundry-actions/index.js";
 
 const BRIDGE_URL = "wss://localhost:7424";
 const MODULE_ID = "vtmtools-bridge";
@@ -75,75 +76,17 @@ async function handleInbound(msg) {
     pushAllActors();
     return;
   }
-  if (msg.type === "update_actor") {
-    const actor = game.actors.get(msg.actor_id);
-    if (!actor) return;
-    await actor.update({ [msg.path]: msg.value });
+  const handler = handlers[msg.type];
+  if (!handler) {
+    console.warn(`[${MODULE_ID}] unknown inbound type:`, msg.type);
     return;
   }
-  if (msg.type === "create_item") {
-    const actor = game.actors.get(msg.actor_id);
-    if (!actor) return;
-    if (msg.replace_existing) {
-      const existing = actor.items.filter((i) => i.type === msg.item_type);
-      if (existing.length) {
-        await actor.deleteEmbeddedDocuments(
-          "Item",
-          existing.map((i) => i.id),
-        );
-      }
-    }
-    await actor.createEmbeddedDocuments("Item", [
-      { type: msg.item_type, name: msg.item_name },
-    ]);
-    return;
+  try {
+    await handler(msg);
+  } catch (err) {
+    console.error(`[${MODULE_ID}] handler ${msg.type} threw:`, err);
+    ui.notifications?.error(`vtmtools: ${msg.type} failed — ${err.message}`);
   }
-  if (msg.type === "apply_dyscrasia") {
-    const actor = game.actors.get(msg.actor_id);
-    if (!actor) return;
-
-    // (1) Delete prior dyscrasia merits. Filter is name-prefix-based —
-    // any feature Item with featuretype="merit" whose name starts with
-    // "Dyscrasia: " is treated as tool-managed and clobbered. Documented
-    // limitation in spec §2.
-    const existing = actor.items.filter(
-      (i) =>
-        i.type === "feature" &&
-        i.system?.featuretype === "merit" &&
-        typeof i.name === "string" &&
-        i.name.startsWith("Dyscrasia: "),
-    );
-    if (msg.replace_existing && existing.length) {
-      await actor.deleteEmbeddedDocuments(
-        "Item",
-        existing.map((i) => i.id),
-      );
-    }
-
-    // (2) Create the new dyscrasia merit.
-    await actor.createEmbeddedDocuments("Item", [
-      {
-        type: "feature",
-        name: `Dyscrasia: ${msg.dyscrasia_name}`,
-        system: {
-          featuretype: "merit",
-          description: msg.merit_description_html,
-          points: 0,
-        },
-      },
-    ]);
-
-    // (3) Append timestamped audit line to private notes. Empty notes →
-    // bare line; existing content → newline-prefixed append.
-    const current = actor.system?.privatenotes ?? "";
-    const next =
-      current.trim() === ""
-        ? msg.notes_line
-        : `${current}\n${msg.notes_line}`;
-    await actor.update({ "system.privatenotes": next });
-    return;
-  }
-  console.warn(`[${MODULE_ID}] unknown inbound type:`, msg.type);
 }
 
 // Tiny status pip in the player list footer so the GM sees connection
