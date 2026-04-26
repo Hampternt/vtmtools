@@ -26,7 +26,7 @@ pub fn build_create_item_simple(actor_id: &str, item_type: &str, item_name: &str
 
 pub fn build_apply_dyscrasia(actor_id: &str, payload: &str) -> Result<Value, String> {
     let payload: ApplyDyscrasiaPayload = serde_json::from_str(payload)
-        .map_err(|e| format!("foundry/apply_dyscrasia: invalid payload: {e}"))?;
+        .map_err(|e| format!("foundry/actor.apply_dyscrasia: invalid payload: {e}"))?;
     let merit_description_html =
         render_merit_description(&payload.description, &payload.bonus);
     let applied_at = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
@@ -35,7 +35,7 @@ pub fn build_apply_dyscrasia(actor_id: &str, payload: &str) -> Result<Value, Str
         payload.dyscrasia_name, payload.resonance_type
     );
     Ok(json!({
-        "type": "apply_dyscrasia",
+        "type": "actor.apply_dyscrasia",
         "actor_id": actor_id,
         "dyscrasia_name": payload.dyscrasia_name,
         "resonance_type": payload.resonance_type,
@@ -103,7 +103,7 @@ mod tests {
     fn dyscrasia_happy_path_shape() {
         let payload = payload_json("Wax", "Choleric", "Crystallized blood.", "+1 Composure");
         let out = build_apply_dyscrasia("actor-abc", &payload).expect("happy path");
-        assert_eq!(out["type"], "apply_dyscrasia");
+        assert_eq!(out["type"], "actor.apply_dyscrasia");
         assert_eq!(out["actor_id"], "actor-abc");
         assert_eq!(out["dyscrasia_name"], "Wax");
         assert_eq!(out["resonance_type"], "Choleric");
@@ -149,7 +149,7 @@ mod tests {
         assert!(result.is_err(), "malformed payload must return Err, not panic");
         let msg = result.unwrap_err();
         assert!(
-            msg.starts_with("foundry/apply_dyscrasia: invalid payload:"),
+            msg.starts_with("foundry/actor.apply_dyscrasia: invalid payload:"),
             "error message must use module-prefixed convention, got: {msg}"
         );
     }
