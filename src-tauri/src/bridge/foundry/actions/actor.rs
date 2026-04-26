@@ -16,7 +16,7 @@ pub fn build_update_field(actor_id: &str, path: &str, value: Value) -> Value {
 
 pub fn build_create_item_simple(actor_id: &str, item_type: &str, item_name: &str) -> Value {
     json!({
-        "type": "create_item",
+        "type": "actor.create_item_simple",
         "actor_id": actor_id,
         "item_type": item_type,
         "item_name": item_name,
@@ -87,6 +87,16 @@ mod tests {
         assert_eq!(out["actor_id"], "actor-xyz");
         assert_eq!(out["path"], "system.hunger.value");
         assert_eq!(out["value"], 3);
+    }
+
+    #[test]
+    fn create_item_simple_shape() {
+        let out = build_create_item_simple("actor-xyz", "resonance", "Choleric");
+        assert_eq!(out["type"], "actor.create_item_simple");
+        assert_eq!(out["actor_id"], "actor-xyz");
+        assert_eq!(out["item_type"], "resonance");
+        assert_eq!(out["item_name"], "Choleric");
+        assert_eq!(out["replace_existing"], true);
     }
 
     #[test]

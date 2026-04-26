@@ -69,6 +69,6 @@ async function applyDyscrasia(msg) {
 
 export const handlers = {
   "actor.update_field": wireExecutor(updateField),  // was: update_actor
-  create_item: wireExecutor(createItemSimple),
+  "actor.create_item_simple": wireExecutor(createItemSimple),  // was: create_item
   apply_dyscrasia: applyDyscrasia,
 };
