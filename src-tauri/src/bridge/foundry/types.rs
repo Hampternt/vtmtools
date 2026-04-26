@@ -22,3 +22,17 @@ pub struct FoundryActor {
     /// docs/reference/foundry-vtm5e-paths.md.
     pub system: serde_json::Value,
 }
+
+/// Frontend → Tauri payload for applying a dyscrasia to a Foundry
+/// actor. Sent JSON-encoded as the `value: String` arg of
+/// `bridge_set_attribute` when `name == "dyscrasia"`. The Foundry
+/// source impl parses this back into the typed struct, stamps the
+/// timestamp, renders the merit description HTML, and emits the
+/// `apply_dyscrasia` wire shape.
+#[derive(Debug, Deserialize)]
+pub struct ApplyDyscrasiaPayload {
+    pub dyscrasia_name: String,
+    pub resonance_type: String,
+    pub description: String,
+    pub bonus: String,
+}

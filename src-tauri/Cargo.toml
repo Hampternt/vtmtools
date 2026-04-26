@@ -34,3 +34,6 @@ rcgen = "0.13"
 tokio-rustls = "0.26"
 rustls-pemfile = "2"
 
+[dev-dependencies]
+regex = "1"
+
