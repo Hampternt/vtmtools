@@ -6,6 +6,7 @@
 // (per-source connected flag, outbound tx, merged characters map) lives
 // in BridgeState.
 
+pub mod commands;
 pub mod roll20;
 pub mod source;
 pub mod tls;

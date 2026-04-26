@@ -5,9 +5,13 @@ mod bridge;
 
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use tauri::Manager;
+
+use crate::bridge::source::BridgeSource;
+use crate::bridge::types::SourceKind;
 
 pub struct DbState(pub Arc<SqlitePool>);
 
@@ -36,14 +40,26 @@ pub fn run() {
                     .expect("Failed to seed advantages");
                 handle.manage(DbState(Arc::new(pool)));
 
-                // Roll20 WebSocket integration
-                let roll20_state = Arc::new(bridge::roll20::Roll20State::new());
-                let roll20_state_for_ws = Arc::clone(&roll20_state);
-                let handle_for_ws = handle.clone();
-                handle.manage(bridge::roll20::Roll20Conn(roll20_state));
-                tauri::async_runtime::spawn(
-                    bridge::roll20::start_ws_server(roll20_state_for_ws, handle_for_ws)
-                );
+                // Bridge layer — sources registered here, accept loops spawned.
+                let mut sources: HashMap<SourceKind, Arc<dyn BridgeSource>> = HashMap::new();
+                sources.insert(SourceKind::Roll20, Arc::new(bridge::roll20::Roll20Source));
+                // Foundry source registers in Task 9.
+
+                let foundry_tls = match bridge::tls::ensure_cert(&app_data_dir).await {
+                    Ok(acc) => Some(acc),
+                    Err(e) => {
+                        eprintln!("[bridge] TLS init failed (Foundry wss disabled): {e}");
+                        None
+                    }
+                };
+
+                let bridge_state = Arc::new(bridge::BridgeState::new(sources));
+                handle.manage(bridge::BridgeConn(Arc::clone(&bridge_state)));
+                tauri::async_runtime::spawn(bridge::start_servers(
+                    bridge_state,
+                    handle.clone(),
+                    foundry_tls,
+                ));
             });
             Ok(())
         })
@@ -55,11 +71,10 @@ pub fn run() {
             db::dyscrasia::delete_dyscrasia,
             db::dyscrasia::roll_random_dyscrasia,
             tools::export::export_result_to_md,
-            bridge::roll20::commands::get_roll20_characters,
-            bridge::roll20::commands::get_roll20_status,
-            bridge::roll20::commands::refresh_roll20_data,
-            bridge::roll20::commands::send_roll20_chat,
-            bridge::roll20::commands::set_roll20_attribute,
+            bridge::commands::bridge_get_characters,
+            bridge::commands::bridge_get_status,
+            bridge::commands::bridge_refresh,
+            bridge::commands::bridge_set_attribute,
             db::chronicle::list_chronicles,
             db::chronicle::get_chronicle,
             db::chronicle::create_chronicle,
