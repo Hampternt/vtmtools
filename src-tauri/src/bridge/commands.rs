@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tauri::State;
 
-use crate::bridge::types::{CanonicalCharacter, SourceKind};
+use crate::bridge::types::{CanonicalCharacter, SourceInfo, SourceKind};
 use crate::bridge::BridgeConn;
 
 /// Returns per-source connection state. Sources without a connected
@@ -70,6 +70,19 @@ pub async fn bridge_refresh(
         }
     }
     Ok(())
+}
+
+/// Returns the captured Hello metadata for a connected source, or None if
+/// the source is not currently connected. Async to match the existing
+/// bridge command surface (none of these have I/O — the async signature
+/// is consistency, not necessity).
+#[tauri::command]
+pub async fn bridge_get_source_info(
+    conn: State<'_, BridgeConn>,
+    source: SourceKind,
+) -> Result<Option<SourceInfo>, String> {
+    let info = conn.0.source_info.lock().await;
+    Ok(info.get(&source).cloned())
 }
 
 async fn send_to_source(

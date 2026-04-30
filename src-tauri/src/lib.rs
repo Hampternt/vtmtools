@@ -75,6 +75,7 @@ pub fn run() {
             bridge::commands::bridge_get_status,
             bridge::commands::bridge_refresh,
             bridge::commands::bridge_set_attribute,
+            bridge::commands::bridge_get_source_info,
             db::chronicle::list_chronicles,
             db::chronicle::get_chronicle,
             db::chronicle::create_chronicle,
