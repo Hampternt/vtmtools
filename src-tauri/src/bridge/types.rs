@@ -45,9 +45,11 @@ impl CanonicalCharacter {
 }
 
 /// Per-source connection metadata captured from the source's Hello frame.
-/// Populated by the source's `handle_inbound` impl on Hello receipt; cleared
-/// on disconnect by the bridge's connection-cleanup path. Not persisted.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Populated by `bridge::handle_connection` on Hello receipt (pre-trait,
+/// because `BridgeSource::handle_inbound` is stateless and cannot write to
+/// `BridgeState`); cleared by the same function's disconnect-cleanup block.
+/// Not persisted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceInfo {
     pub world_id: Option<String>,
