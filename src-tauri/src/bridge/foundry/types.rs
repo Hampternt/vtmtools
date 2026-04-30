@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// Inbound messages from the Foundry module. Module sends `actors` on
-/// initial connect (from `pushAllActors`) and `actor_update` on
-/// updateActor / createActor / deleteActor hooks.
 /// Inbound messages from the Foundry module.
 ///
 /// Hello fields are all `Option<…>` for backward compatibility with 0.1.0

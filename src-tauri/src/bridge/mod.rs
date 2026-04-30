@@ -197,38 +197,41 @@ async fn handle_connection<S>(
         // Foundry-only: capture Hello metadata into BridgeState::source_info
         // before delegating to the (stateless) BridgeSource trait, and route
         // Error envelopes as Tauri events without trait dispatch.
+        //
+        // Typed deserialization: the field shapes are pinned by FoundryInbound
+        // — a future rename in that enum becomes a compile error here, not a
+        // silent runtime drop. The clone is negligible (Hello/Error frames
+        // are infrequent and small); the trait handler will deserialize the
+        // same value again in the unhandled branches, which is fine.
         if kind == SourceKind::Foundry {
-            if let Some("hello") = parsed.get("type").and_then(|t| t.as_str()) {
-                let info = SourceInfo {
-                    world_id: parsed.get("world_id").and_then(|v| v.as_str()).map(String::from),
-                    world_title: parsed.get("world_title").and_then(|v| v.as_str()).map(String::from),
-                    system_id: parsed.get("system_id").and_then(|v| v.as_str()).map(String::from),
-                    system_version: parsed.get("system_version").and_then(|v| v.as_str()).map(String::from),
-                    protocol_version: parsed
-                        .get("protocol_version")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as u32,
-                    capabilities: parsed
-                        .get("capabilities")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|x| x.as_str().map(String::from))
-                                .collect()
-                        })
-                        .unwrap_or_else(|| vec!["actors".to_string()]),
-                };
-                let mut store = state.source_info.lock().await;
-                store.insert(kind, info);
-            }
-            if let Some("error") = parsed.get("type").and_then(|t| t.as_str()) {
-                let payload = serde_json::json!({
-                    "refers_to": parsed.get("refers_to").and_then(|v| v.as_str()).unwrap_or(""),
-                    "code":      parsed.get("code").and_then(|v| v.as_str()).unwrap_or("unknown"),
-                    "message":   parsed.get("message").and_then(|v| v.as_str()).unwrap_or(""),
-                });
-                let _ = handle.emit("bridge://foundry/error", payload);
-                continue;
+            match serde_json::from_value::<crate::bridge::foundry::types::FoundryInbound>(parsed.clone()) {
+                Ok(crate::bridge::foundry::types::FoundryInbound::Hello {
+                    protocol_version, world_id, world_title,
+                    system_id, system_version, capabilities,
+                }) => {
+                    let info = SourceInfo {
+                        world_id,
+                        world_title,
+                        system_id,
+                        system_version,
+                        protocol_version: protocol_version.unwrap_or(0),
+                        capabilities: capabilities.unwrap_or_else(|| vec!["actors".to_string()]),
+                    };
+                    let mut store = state.source_info.lock().await;
+                    store.insert(kind, info);
+                }
+                Ok(crate::bridge::foundry::types::FoundryInbound::Error {
+                    refers_to, code, message, ..
+                }) => {
+                    let payload = serde_json::json!({
+                        "refers_to": refers_to,
+                        "code":      code,
+                        "message":   message,
+                    });
+                    let _ = handle.emit("bridge://foundry/error", payload);
+                    continue;
+                }
+                Ok(_) | Err(_) => {} // Actors/ActorUpdate handled below by handle_inbound; deserialization errors logged there.
             }
         }
 
