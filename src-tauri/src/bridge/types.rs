@@ -43,3 +43,17 @@ impl CanonicalCharacter {
         format!("{}:{}", self.source.as_str(), self.source_id)
     }
 }
+
+/// Per-source connection metadata captured from the source's Hello frame.
+/// Populated by the source's `handle_inbound` impl on Hello receipt; cleared
+/// on disconnect by the bridge's connection-cleanup path. Not persisted.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceInfo {
+    pub world_id: Option<String>,
+    pub world_title: Option<String>,
+    pub system_id: Option<String>,
+    pub system_version: Option<String>,
+    pub protocol_version: u32,
+    pub capabilities: Vec<String>,
+}
