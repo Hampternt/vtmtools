@@ -32,6 +32,138 @@ fn str_to_source(s: &str) -> Option<SourceKind> {
     }
 }
 
+async fn db_save(
+    pool: &SqlitePool,
+    canonical: &CanonicalCharacter,
+    foundry_world: Option<String>,
+) -> Result<i64, String> {
+    let canonical_json = serde_json::to_string(canonical)
+        .map_err(|e| format!("db/saved_character.save: serialize failed: {e}"))?;
+    let result = sqlx::query(
+        "INSERT INTO saved_characters
+         (source, source_id, foundry_world, name, canonical_json)
+         VALUES (?, ?, ?, ?, ?)"
+    )
+    .bind(source_to_str(&canonical.source))
+    .bind(&canonical.source_id)
+    .bind(&foundry_world)
+    .bind(&canonical.name)
+    .bind(&canonical_json)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("UNIQUE") {
+            "db/saved_character.save: already saved; use update".to_string()
+        } else {
+            format!("db/saved_character.save: {msg}")
+        }
+    })?;
+    Ok(result.last_insert_rowid())
+}
+
+#[tauri::command]
+pub async fn save_character(
+    pool: tauri::State<'_, crate::DbState>,
+    canonical: CanonicalCharacter,
+    foundry_world: Option<String>,
+) -> Result<i64, String> {
+    db_save(&pool.0, &canonical, foundry_world).await
+}
+
+async fn db_list(pool: &SqlitePool) -> Result<Vec<SavedCharacter>, String> {
+    let rows = sqlx::query(
+        "SELECT id, source, source_id, foundry_world, name, canonical_json,
+                saved_at, last_updated_at
+         FROM saved_characters
+         ORDER BY id ASC"
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("db/saved_character.list: {e}"))?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        let source_str: String = r.get("source");
+        let source = str_to_source(&source_str)
+            .ok_or_else(|| format!("db/saved_character.list: unknown source '{source_str}'"))?;
+        let canonical_json: String = r.get("canonical_json");
+        let canonical: CanonicalCharacter = serde_json::from_str(&canonical_json)
+            .map_err(|e| format!("db/saved_character.list: deserialize failed: {e}"))?;
+        out.push(SavedCharacter {
+            id: r.get("id"),
+            source,
+            source_id: r.get("source_id"),
+            foundry_world: r.get("foundry_world"),
+            name: r.get("name"),
+            canonical,
+            saved_at: r.get("saved_at"),
+            last_updated_at: r.get("last_updated_at"),
+        });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn list_saved_characters(
+    pool: tauri::State<'_, crate::DbState>,
+) -> Result<Vec<SavedCharacter>, String> {
+    db_list(&pool.0).await
+}
+
+async fn db_update(
+    pool: &SqlitePool,
+    id: i64,
+    canonical: &CanonicalCharacter,
+) -> Result<(), String> {
+    let canonical_json = serde_json::to_string(canonical)
+        .map_err(|e| format!("db/saved_character.update: serialize failed: {e}"))?;
+    let result = sqlx::query(
+        "UPDATE saved_characters
+         SET canonical_json = ?, name = ?, last_updated_at = datetime('now')
+         WHERE id = ?"
+    )
+    .bind(&canonical_json)
+    .bind(&canonical.name)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/saved_character.update: {e}"))?;
+    if result.rows_affected() == 0 {
+        return Err("db/saved_character.update: not found".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn update_saved_character(
+    pool: tauri::State<'_, crate::DbState>,
+    id: i64,
+    canonical: CanonicalCharacter,
+) -> Result<(), String> {
+    db_update(&pool.0, id, &canonical).await
+}
+
+async fn db_delete(pool: &SqlitePool, id: i64) -> Result<(), String> {
+    let result = sqlx::query("DELETE FROM saved_characters WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("db/saved_character.delete: {e}"))?;
+    if result.rows_affected() == 0 {
+        return Err("db/saved_character.delete: not found".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_saved_character(
+    pool: tauri::State<'_, crate::DbState>,
+    id: i64,
+) -> Result<(), String> {
+    db_delete(&pool.0, id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,5 +196,84 @@ mod tests {
     #[tokio::test]
     async fn migrations_apply_cleanly() {
         let _pool = fresh_pool().await;
+    }
+
+    #[tokio::test]
+    async fn save_inserts_and_returns_id() {
+        let pool = fresh_pool().await;
+        let canonical = sample_canonical();
+        let id = db_save(&pool, &canonical, Some("Chronicles of Chicago".into())).await.unwrap();
+        assert!(id > 0);
+        let row_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM saved_characters")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(row_count, 1);
+    }
+
+    #[tokio::test]
+    async fn save_twice_for_same_source_pair_errors() {
+        let pool = fresh_pool().await;
+        let canonical = sample_canonical();
+        db_save(&pool, &canonical, None).await.unwrap();
+        let err = db_save(&pool, &canonical, None).await.unwrap_err();
+        assert!(err.contains("already saved"), "expected 'already saved' in: {err}");
+    }
+
+    #[tokio::test]
+    async fn list_returns_rows_ordered_by_id() {
+        let pool = fresh_pool().await;
+        // Insert two rows directly to avoid coupling this test to db_save.
+        for sid in &["a", "b"] {
+            sqlx::query(
+                "INSERT INTO saved_characters
+                 (source, source_id, foundry_world, name, canonical_json)
+                 VALUES ('foundry', ?, NULL, 'X', '{\"source\":\"foundry\",\"source_id\":\"x\",\"name\":\"X\",\"controlled_by\":null,\"hunger\":null,\"health\":null,\"willpower\":null,\"humanity\":null,\"humanity_stains\":null,\"blood_potency\":null,\"raw\":{}}')"
+            )
+            .bind(sid)
+            .execute(&pool).await.unwrap();
+        }
+        let list = db_list(&pool).await.unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list[0].id < list[1].id);
+    }
+
+    #[tokio::test]
+    async fn update_overwrites_canonical_and_bumps_last_updated() {
+        let pool = fresh_pool().await;
+        let canonical = sample_canonical();
+        let id = db_save(&pool, &canonical, None).await.unwrap();
+
+        let mut new_canonical = canonical.clone();
+        new_canonical.hunger = Some(5);
+        db_update(&pool, id, &new_canonical).await.unwrap();
+
+        let list = db_list(&pool).await.unwrap();
+        assert_eq!(list[0].canonical.hunger, Some(5));
+        // saved_at should be unchanged; last_updated_at should be present (bumped).
+        assert!(!list[0].last_updated_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_missing_id_errors() {
+        let pool = fresh_pool().await;
+        let canonical = sample_canonical();
+        let err = db_update(&pool, 9999, &canonical).await.unwrap_err();
+        assert!(err.contains("not found"), "expected 'not found' in: {err}");
+    }
+
+    #[tokio::test]
+    async fn delete_removes_row() {
+        let pool = fresh_pool().await;
+        let canonical = sample_canonical();
+        let id = db_save(&pool, &canonical, None).await.unwrap();
+        db_delete(&pool, id).await.unwrap();
+        let list = db_list(&pool).await.unwrap();
+        assert!(list.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_missing_id_errors() {
+        let pool = fresh_pool().await;
+        let err = db_delete(&pool, 9999).await.unwrap_err();
+        assert!(err.contains("not found"), "expected 'not found' in: {err}");
     }
 }
