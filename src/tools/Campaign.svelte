@@ -1,12 +1,27 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { bridge, anyConnected } from '../store/bridge.svelte';
+  import { savedCharacters } from '../store/savedCharacters.svelte';
   import { refresh as bridgeRefresh } from '$lib/bridge/api';
+  import SourceAttributionChip from '$lib/components/SourceAttributionChip.svelte';
   import type { BridgeCharacter, Roll20Raw, Roll20RawAttribute } from '../types';
 
   // ── State ───────────────────────────────────────────────────────────────
   const connected  = $derived(anyConnected());
   const characters = $derived(bridge.characters);
   const lastSync   = $derived(bridge.lastSync);
+
+  // Live characters paired with their saved-counterpart (if any). The
+  // findMatch helper handles snake_case (live) vs camelCase (saved)
+  // mapping internally, so we just pass the BridgeCharacter through.
+  const liveWithMatches = $derived(
+    characters.map(live => ({
+      live,
+      saved: savedCharacters.findMatch(live),
+    })),
+  );
+
+  onMount(() => { void savedCharacters.ensureLoaded(); });
   let expandedRaw   = $state<Set<string>>(new Set());
   let expandedAttrs = $state<Set<string>>(new Set());
   let expandedInfo  = $state<Set<string>>(new Set());
@@ -233,7 +248,9 @@
     </div>
   {:else}
     <div class="char-grid" bind:this={gridEl} style={densityVars}>
-      {#each characters as char (char.source + ':' + char.source_id)}
+      {#each liveWithMatches as item (item.live.source + ':' + item.live.source_id)}
+        {@const char         = item.live}
+        {@const saved        = item.saved}
         {@const charKey      = char.source + ':' + char.source_id}
         {@const healthMax    = char.health?.max ?? 5}
         {@const healthSup    = char.health?.superficial ?? 0}
@@ -442,6 +459,31 @@
             </div>
           {/if}
 
+          <!-- ── Save row (source chip + Save/Update) ────────────────────── -->
+          <div class="save-row">
+            <SourceAttributionChip source={char.source} />
+            <div class="save-actions">
+              {#if saved}
+                <button
+                  type="button"
+                  class="btn-save"
+                  onclick={() => savedCharacters.update(saved.id, char)}
+                  disabled={savedCharacters.loading}
+                >Update saved</button>
+              {:else}
+                <button
+                  type="button"
+                  class="btn-save"
+                  onclick={() => savedCharacters.save(
+                    char,
+                    char.source === 'foundry' ? (bridge.sourceInfo.foundry?.worldTitle ?? null) : null,
+                  )}
+                  disabled={savedCharacters.loading}
+                >Save locally</button>
+              {/if}
+            </div>
+          </div>
+
           <!-- ── Footer ──────────────────────────────────────────────────── -->
           <div class="card-footer">
             <button class="section-toggle" onclick={() => toggleAttrs(charKey)}>
@@ -479,6 +521,38 @@
       {/each}
     </div>
   {/if}
+
+  <!-- ── Saved section ────────────────────────────────────────────────── -->
+  <section class="saved-section">
+    <h2 class="section-title">Saved · {savedCharacters.list.length} characters</h2>
+    {#if savedCharacters.loading}
+      <p class="muted">Loading…</p>
+    {:else if savedCharacters.error}
+      <p class="err">{savedCharacters.error}</p>
+    {:else if savedCharacters.list.length === 0}
+      <p class="muted">No saved characters yet. Click "Save locally" on a live character to save a snapshot.</p>
+    {:else}
+      <div class="char-grid">
+        {#each savedCharacters.list as saved (saved.id)}
+          <article class="saved-card">
+            <header class="saved-header">
+              <strong class="saved-name">{saved.name}</strong>
+            </header>
+            <SourceAttributionChip source={saved.source} worldTitle={saved.foundryWorld} />
+            <div class="saved-meta">saved {saved.savedAt}</div>
+            <div class="saved-actions">
+              <button
+                type="button"
+                class="btn-save"
+                onclick={() => savedCharacters.delete(saved.id)}
+                disabled={savedCharacters.loading}
+              >Delete</button>
+            </div>
+          </article>
+        {/each}
+      </div>
+    {/if}
+  </section>
 </div>
 
 <style>
@@ -1082,4 +1156,84 @@
   .raw-name  { color: var(--text-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .raw-val   { color: var(--accent); flex-shrink: 0; }
   .raw-empty { font-size: 0.72rem; color: var(--text-ghost); font-style: italic; }
+
+  /* ── Save row on live cards ───────────────────────────────────────────── */
+  .save-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.9rem;
+    border-top: 1px solid var(--border-faint);
+  }
+  .save-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 0.4rem;
+  }
+  .btn-save {
+    background: var(--bg-input);
+    border: 1px solid var(--border-surface);
+    color: var(--text-secondary);
+    padding: 0.25rem 0.65rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-save:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--text-primary);
+  }
+  .btn-save:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  /* ── Saved section ────────────────────────────────────────────────────── */
+  .saved-section {
+    margin-top: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .section-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-label);
+    margin: 0;
+  }
+  .muted { font-size: 0.85rem; color: var(--text-muted); margin: 0; }
+  .err   { font-size: 0.85rem; color: var(--accent-amber); margin: 0; }
+
+  .saved-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-card);
+    border-radius: 7px;
+    padding: 0.7rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .saved-card:hover { border-color: var(--border-surface); }
+  .saved-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .saved-name {
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    font-weight: 600;
+    word-break: break-word;
+  }
+  .saved-meta {
+    font-size: 0.72rem;
+    color: var(--text-ghost);
+  }
+  .saved-actions {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.2rem;
+  }
 </style>
