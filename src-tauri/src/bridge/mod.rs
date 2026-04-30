@@ -25,7 +25,7 @@ use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::bridge::source::BridgeSource;
-use crate::bridge::types::{CanonicalCharacter, SourceKind};
+use crate::bridge::types::{CanonicalCharacter, SourceInfo, SourceKind};
 
 pub struct ConnectionInfo {
     pub connected: bool,
@@ -35,7 +35,7 @@ pub struct ConnectionInfo {
 pub struct BridgeState {
     pub characters: Mutex<HashMap<String, CanonicalCharacter>>,
     pub connections: Mutex<HashMap<SourceKind, ConnectionInfo>>,
-    pub source_info: Mutex<HashMap<SourceKind, crate::bridge::types::SourceInfo>>,
+    pub source_info: Mutex<HashMap<SourceKind, SourceInfo>>,
     pub sources: HashMap<SourceKind, Arc<dyn BridgeSource>>,
 }
 
@@ -193,6 +193,45 @@ async fn handle_connection<S>(
                 continue;
             }
         };
+
+        // Foundry-only: capture Hello metadata into BridgeState::source_info
+        // before delegating to the (stateless) BridgeSource trait, and route
+        // Error envelopes as Tauri events without trait dispatch.
+        if kind == SourceKind::Foundry {
+            if let Some("hello") = parsed.get("type").and_then(|t| t.as_str()) {
+                let info = SourceInfo {
+                    world_id: parsed.get("world_id").and_then(|v| v.as_str()).map(String::from),
+                    world_title: parsed.get("world_title").and_then(|v| v.as_str()).map(String::from),
+                    system_id: parsed.get("system_id").and_then(|v| v.as_str()).map(String::from),
+                    system_version: parsed.get("system_version").and_then(|v| v.as_str()).map(String::from),
+                    protocol_version: parsed
+                        .get("protocol_version")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32,
+                    capabilities: parsed
+                        .get("capabilities")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_else(|| vec!["actors".to_string()]),
+                };
+                let mut store = state.source_info.lock().await;
+                store.insert(kind, info);
+            }
+            if let Some("error") = parsed.get("type").and_then(|t| t.as_str()) {
+                let payload = serde_json::json!({
+                    "refers_to": parsed.get("refers_to").and_then(|v| v.as_str()).unwrap_or(""),
+                    "code":      parsed.get("code").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                    "message":   parsed.get("message").and_then(|v| v.as_str()).unwrap_or(""),
+                });
+                let _ = handle.emit("bridge://foundry/error", payload);
+                continue;
+            }
+        }
+
         match source.handle_inbound(parsed).await {
             Ok(updated) if !updated.is_empty() => {
                 let mut chars = state.characters.lock().await;

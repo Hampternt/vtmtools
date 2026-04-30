@@ -22,7 +22,12 @@ impl BridgeSource for FoundrySource {
         let actors = match parsed {
             FoundryInbound::Actors { actors } => actors,
             FoundryInbound::ActorUpdate { actor } => vec![actor],
-            FoundryInbound::Hello => return Ok(vec![]),
+            // Hello metadata is captured pre-trait in bridge::handle_connection;
+            // the trait method just returns no characters. Same for Error: the
+            // pre-trait layer routes errors as Tauri events; this arm is
+            // exhaustiveness completeness only.
+            FoundryInbound::Hello { .. } => return Ok(vec![]),
+            FoundryInbound::Error { .. } => return Ok(vec![]),
         };
         Ok(actors.iter().map(translate::to_canonical).collect())
     }

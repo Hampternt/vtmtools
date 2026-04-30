@@ -3,14 +3,32 @@ use serde::{Deserialize, Serialize};
 /// Inbound messages from the Foundry module. Module sends `actors` on
 /// initial connect (from `pushAllActors`) and `actor_update` on
 /// updateActor / createActor / deleteActor hooks.
+/// Inbound messages from the Foundry module.
+///
+/// Hello fields are all `Option<…>` for backward compatibility with 0.1.0
+/// modules that send `{ "type": "hello" }` with no payload. Missing
+/// `protocol_version` is treated by the desktop as `0` (legacy); missing
+/// `capabilities` defaults to `["actors"]` (preserves always-send-actors).
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FoundryInbound {
     Actors { actors: Vec<FoundryActor> },
     ActorUpdate { actor: FoundryActor },
-    /// Module hello — no character data, just confirms it connected
-    /// and registered the GM gate. Translated to an empty Vec.
-    Hello,
+    Hello {
+        #[serde(default)] protocol_version: Option<u32>,
+        #[serde(default)] world_id: Option<String>,
+        #[serde(default)] world_title: Option<String>,
+        #[serde(default)] system_id: Option<String>,
+        #[serde(default)] system_version: Option<String>,
+        #[serde(default)] capabilities: Option<Vec<String>>,
+    },
+    /// Module-side handler threw; surfaced to the GM via toast.
+    Error {
+        refers_to: String,
+        #[serde(default)] request_id: Option<String>,
+        code: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
