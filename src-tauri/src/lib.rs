@@ -65,6 +65,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             tools::resonance::roll_resonance,
+            tools::skill_check::roll_skill_check,
             db::dyscrasia::list_dyscrasias,
             db::dyscrasia::add_dyscrasia,
             db::dyscrasia::update_dyscrasia,
