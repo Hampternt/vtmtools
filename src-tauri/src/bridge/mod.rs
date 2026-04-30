@@ -35,6 +35,7 @@ pub struct ConnectionInfo {
 pub struct BridgeState {
     pub characters: Mutex<HashMap<String, CanonicalCharacter>>,
     pub connections: Mutex<HashMap<SourceKind, ConnectionInfo>>,
+    pub source_info: Mutex<HashMap<SourceKind, crate::bridge::types::SourceInfo>>,
     pub sources: HashMap<SourceKind, Arc<dyn BridgeSource>>,
 }
 
@@ -50,6 +51,7 @@ impl BridgeState {
         Self {
             characters: Mutex::new(HashMap::new()),
             connections: Mutex::new(connections),
+            source_info: Mutex::new(HashMap::new()),
             sources,
         }
     }
@@ -213,6 +215,10 @@ async fn handle_connection<S>(
             kind,
             ConnectionInfo { connected: false, outbound_tx: None },
         );
+    }
+    {
+        let mut info = state.source_info.lock().await;
+        info.remove(&kind);
     }
     let _ = handle.emit(&format!("bridge://{}/disconnected", kind.as_str()), ());
 }
