@@ -4,6 +4,15 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { BridgeCharacter, SourceKind } from '../../types';
 
+export interface SourceInfo {
+  worldId: string | null;
+  worldTitle: string | null;
+  systemId: string | null;
+  systemVersion: string | null;
+  protocolVersion: number;
+  capabilities: string[];
+}
+
 export const getStatus = (): Promise<Record<SourceKind, boolean>> =>
   invoke<Record<SourceKind, boolean>>('bridge_get_status');
 
@@ -20,3 +29,6 @@ export const setAttribute = (
   value: string,
 ): Promise<void> =>
   invoke<void>('bridge_set_attribute', { source, sourceId, name, value });
+
+export const bridgeGetSourceInfo = (source: SourceKind): Promise<SourceInfo | null> =>
+  invoke<SourceInfo | null>('bridge_get_source_info', { source });
