@@ -4,6 +4,9 @@
   import { savedCharacters } from '../store/savedCharacters.svelte';
   import { refresh as bridgeRefresh } from '$lib/bridge/api';
   import SourceAttributionChip from '$lib/components/SourceAttributionChip.svelte';
+  import CompareModal from '$lib/components/CompareModal.svelte';
+  import { diffCharacter } from '$lib/saved-characters/diff';
+  import type { SavedCharacter } from '$lib/saved-characters/api';
   import type { BridgeCharacter, Roll20Raw, Roll20RawAttribute } from '../types';
 
   // ── State ───────────────────────────────────────────────────────────────
@@ -20,6 +23,29 @@
       saved: savedCharacters.findMatch(live),
     })),
   );
+
+  // Drift detection: for every live character with a saved match, compute
+  // whether diffCharacter() reports any non-empty entries. Keyed by
+  // `${source}:${source_id}` (BridgeCharacter is snake_case).
+  const drifts = $derived(new Map<string, boolean>(
+    liveWithMatches
+      .filter(({ saved }) => saved !== undefined)
+      .map(({ live, saved }) => [
+        `${live.source}:${live.source_id}`,
+        diffCharacter(saved!.canonical, live).length > 0,
+      ]),
+  ));
+
+  function hasDrift(live: BridgeCharacter): boolean {
+    return drifts.get(`${live.source}:${live.source_id}`) ?? false;
+  }
+
+  // Compare-modal state.
+  let comparing = $state<{ saved: SavedCharacter; live: BridgeCharacter } | null>(null);
+  function openCompare(saved: SavedCharacter, live: BridgeCharacter) {
+    comparing = { saved, live };
+  }
+  function closeCompare() { comparing = null; }
 
   onMount(() => { void savedCharacters.ensureLoaded(); });
   let expandedRaw   = $state<Set<string>>(new Set());
@@ -295,9 +321,14 @@
           <div class="card-header">
             <div class="header-line">
               <span class="char-name">{char.name}</span>
-              <span class="badge" class:pc={isPC(char)} class:npc={!isPC(char)}>
-                {isPC(char) ? 'PC' : 'NPC'}
-              </span>
+              <div class="header-badges">
+                {#if saved && hasDrift(char)}
+                  <span class="drift-badge" title="Live differs from saved snapshot">drift</span>
+                {/if}
+                <span class="badge" class:pc={isPC(char)} class:npc={!isPC(char)}>
+                  {isPC(char) ? 'PC' : 'NPC'}
+                </span>
+              </div>
             </div>
             <div class="header-line">
               {#if clan}<span class="char-clan">{clan}</span>{:else}<span></span>{/if}
@@ -467,6 +498,11 @@
                 <button
                   type="button"
                   class="btn-save"
+                  onclick={() => openCompare(saved, char)}
+                >Compare</button>
+                <button
+                  type="button"
+                  class="btn-save"
                   onclick={() => savedCharacters.update(saved.id, char)}
                   disabled={savedCharacters.loading}
                 >Update saved</button>
@@ -553,6 +589,14 @@
       </div>
     {/if}
   </section>
+
+  {#if comparing}
+    <CompareModal
+      saved={comparing.saved}
+      live={comparing.live}
+      onClose={closeCompare}
+    />
+  {/if}
 </div>
 
 <style>
@@ -856,6 +900,24 @@
   }
   .badge.pc  { background: #2a1515; color: var(--accent);  border: 1px solid #3a1e1e; }
   .badge.npc { background: #151528; color: #7986cb; border: 1px solid #1e1e3a; }
+
+  .header-badges {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-shrink: 0;
+  }
+  .drift-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    background: color-mix(in oklab, var(--accent-amber) 20%, transparent);
+    color: var(--accent-amber);
+    flex-shrink: 0;
+  }
 
   .bp-pill {
     display: flex;
