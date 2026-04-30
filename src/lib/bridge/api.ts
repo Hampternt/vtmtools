@@ -4,6 +4,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { BridgeCharacter, SourceKind } from '../../types';
 
+export type { BridgeCharacter, SourceKind };
+
 export interface SourceInfo {
   worldId: string | null;
   worldTitle: string | null;
