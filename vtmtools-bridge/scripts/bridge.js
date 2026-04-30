@@ -3,8 +3,9 @@
 // running on the same machine. Sends actor data on hooks, applies
 // inbound updates through actor.update / createEmbeddedDocuments.
 
-import { actorToWire, hookActorChanges } from "./translate.js";
 import { handlers } from "./foundry-actions/index.js";
+import * as bridgeUmbrella from "./foundry-actions/bridge.js";
+import { actorToWire } from "./translate.js";
 
 const BRIDGE_URL = "wss://localhost:7424";
 const MODULE_ID = "vtmtools-bridge";
@@ -26,12 +27,27 @@ function connect() {
 
   socket = new WebSocket(BRIDGE_URL);
 
-  socket.addEventListener("open", () => {
+  socket.addEventListener("open", async () => {
     console.log(`[${MODULE_ID}] connected to ${BRIDGE_URL}`);
     reconnectDelay = 1000;
-    socket.send(JSON.stringify({ type: "hello" }));
-    pushAllActors();
-    hookActorChanges(socket);
+    bridgeUmbrella.setSocket(socket);
+    socket.send(JSON.stringify({
+      type: "hello",
+      protocol_version: 1,
+      world_id: game.world?.id ?? null,
+      world_title: game.world?.title ?? null,
+      system_id: game.system?.id ?? null,
+      system_version: game.system?.version ?? null,
+      capabilities: ["actors"],
+    }));
+    // Auto-subscribe `actors` to preserve today's always-send-actors
+    // semantics. Future tools may send `bridge.subscribe` for other
+    // collections; the desktop never has to manage `actors`.
+    try {
+      await bridgeUmbrella.handleSubscribe({ collection: "actors" });
+    } catch (err) {
+      console.error(`[${MODULE_ID}] actors auto-subscribe failed:`, err);
+    }
     updateStatusPip(true);
   });
 
@@ -42,6 +58,7 @@ function connect() {
   });
 
   socket.addEventListener("close", () => {
+    bridgeUmbrella.clearAll();
     socket = null;
     updateStatusPip(false);
     console.log(`[${MODULE_ID}] disconnected — retrying in ${reconnectDelay}ms`);
@@ -68,7 +85,7 @@ function pushAllActors() {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
   const actors = game.actors.contents.map(actorToWire);
   socket.send(JSON.stringify({ type: "actors", actors }));
-  console.log(`[${MODULE_ID}] pushed ${actors.length} actors`);
+  console.log(`[${MODULE_ID}] pushed ${actors.length} actors (refresh)`);
 }
 
 async function handleInbound(msg) {
@@ -86,6 +103,17 @@ async function handleInbound(msg) {
   } catch (err) {
     console.error(`[${MODULE_ID}] handler ${msg.type} threw:`, err);
     ui.notifications?.error(`vtmtools: ${msg.type} failed — ${err.message}`);
+    // Send error envelope back to desktop.
+    const code = err.message?.split(":")[0] || "unknown";
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({
+        type: "error",
+        refers_to: msg.type,
+        request_id: null,
+        code,
+        message: String(err.message ?? err),
+      }));
+    }
   }
 }
 

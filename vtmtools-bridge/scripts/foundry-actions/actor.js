@@ -1,6 +1,39 @@
 // Foundry actor.* helper executors.
 // See docs/superpowers/specs/2026-04-26-foundry-helper-library-roadmap.md.
 
+import { actorToWire, hookActorChanges } from "../translate.js";
+
+const MODULE_ID = "vtmtools-bridge";
+
+let _attached = null; // { socket } when attached, else null
+
+/**
+ * The actors subscriber. Encapsulates the "push initial actors + hook
+ * future changes" behavior previously inlined in bridge.js's open handler.
+ *
+ * INVARIANT: attach() pushes the initial Actors frame BEFORE registering
+ * hooks, ensuring the desktop never sees an ActorUpdate without the prior
+ * Actors snapshot. Calling detach() unregisters the active flag; the
+ * socket is not closed (bridge.js owns the socket lifecycle). Full hook
+ * unregister is a translate.js follow-up if needed.
+ */
+export const actorsSubscriber = {
+  attach(socket) {
+    if (_attached) return;
+    if (socket?.readyState === WebSocket.OPEN) {
+      const actors = game.actors.contents.map(actorToWire);
+      socket.send(JSON.stringify({ type: "actors", actors }));
+      console.log(`[${MODULE_ID}] actorsSubscriber: pushed ${actors.length} actors`);
+    }
+    hookActorChanges(socket);
+    _attached = { socket };
+  },
+
+  detach() {
+    _attached = null;
+  },
+};
+
 const wireExecutor = (fn) => async (msg) => {
   const actor = game.actors.get(msg.actor_id);
   if (!actor) {
