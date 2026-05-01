@@ -3,6 +3,11 @@
 
 const MODULE_ID = "vtmtools-bridge";
 
+// Build-marker so we can confirm the loaded code matches the latest source.
+// If you don't see this line in the Foundry console after a reload, the
+// browser is serving a cached older copy of game.js.
+console.log(`[${MODULE_ID}] game.js loaded — build SELECTORS-STRING-DIAG-1`);
+
 async function rollV5Pool(msg) {
   const actor = game.actors.get(msg.actor_id);
   if (!actor) {
@@ -29,20 +34,23 @@ async function rollV5Pool(msg) {
     return;
   }
 
-  await WOD5E.api.RollFromDataset({
-    dataset: {
-      valuePaths: paths.join(" "),
-      label,
-      difficulty: msg.difficulty,
-      selectDialog: false, // never pop the GM dialog from outside Foundry
-      advancedDice,
-      // WoD5e's _onConfirmRoll calls `dataset.selectors.split(...)` —
-      // it wants the pre-split string, not the array. Same convention
-      // as valuePaths: space-separated string in, array out internally.
-      selectors: (msg.selectors ?? []).join(" "),
-    },
-    actor,
-  });
+  // WoD5e's _onConfirmRoll calls `dataset.selectors.split(...)` — it wants
+  // the pre-split string, not the array. Same convention as valuePaths:
+  // space-separated string in, array out internally.
+  const dataset = {
+    valuePaths: paths.join(" "),
+    label,
+    difficulty: msg.difficulty,
+    selectDialog: false, // never pop the GM dialog from outside Foundry
+    advancedDice,
+    selectors: (msg.selectors ?? []).join(" "),
+  };
+  console.log(
+    `[${MODULE_ID}] game.roll_v5_pool dispatch:`,
+    `selectors typeof=${typeof dataset.selectors} value=${JSON.stringify(dataset.selectors)}`,
+    `valuePaths=${JSON.stringify(dataset.valuePaths)}`,
+  );
+  await WOD5E.api.RollFromDataset({ dataset, actor });
 }
 
 async function postChatAsActor(msg) {
