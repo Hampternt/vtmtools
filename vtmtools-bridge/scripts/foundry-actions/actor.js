@@ -47,6 +47,15 @@ async function updateField(actor, msg) {
   await actor.update({ [msg.path]: msg.value });
 }
 
+async function updateItemField(actor, msg) {
+  const item = actor.items.get(msg.item_id);
+  if (!item) {
+    console.warn(`[vtmtools-bridge] item not found on actor ${msg.actor_id}: ${msg.item_id}`);
+    return;
+  }
+  await item.update({ [msg.path]: msg.value });
+}
+
 async function createItemSimple(actor, msg) {
   if (msg.replace_existing) {
     const existing = actor.items.filter((i) => i.type === msg.item_type);
@@ -134,6 +143,7 @@ async function applyDyscrasia(msg) {
 
 export const handlers = {
   "actor.update_field": wireExecutor(updateField),
+  "actor.update_item_field": wireExecutor(updateItemField),
   "actor.create_item_simple": wireExecutor(createItemSimple),
   "actor.delete_item_by_id": wireExecutor(deleteItemById),
   "actor.delete_items_by_prefix": wireExecutor(deleteItemsByPrefix),

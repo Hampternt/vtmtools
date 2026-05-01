@@ -14,6 +14,21 @@ pub fn build_update_field(actor_id: &str, path: &str, value: Value) -> Value {
     })
 }
 
+pub fn build_update_item_field(
+    actor_id: &str,
+    item_id: &str,
+    path: &str,
+    value: Value,
+) -> Value {
+    json!({
+        "type": "actor.update_item_field",
+        "actor_id": actor_id,
+        "item_id": item_id,
+        "path": path,
+        "value": value,
+    })
+}
+
 pub fn build_create_item_simple(actor_id: &str, item_type: &str, item_name: &str) -> Value {
     json!({
         "type": "actor.create_item_simple",
@@ -288,6 +303,29 @@ mod tests {
         assert_eq!(out["type"], "actor.delete_item_by_id");
         assert_eq!(out["actor_id"], "actor-xyz");
         assert_eq!(out["item_id"], "item-abc");
+    }
+
+    #[test]
+    fn update_item_field_shape() {
+        let out = build_update_item_field("actor-xyz", "item-abc", "system.points", json!(3));
+        assert_eq!(out["type"], "actor.update_item_field");
+        assert_eq!(out["actor_id"], "actor-xyz");
+        assert_eq!(out["item_id"], "item-abc");
+        assert_eq!(out["path"], "system.points");
+        assert_eq!(out["value"], 3);
+    }
+
+    #[test]
+    fn update_item_field_supports_string_value() {
+        let out = build_update_item_field("a", "i", "name", json!("Renamed Merit"));
+        assert_eq!(out["value"], "Renamed Merit");
+    }
+
+    #[test]
+    fn update_item_field_supports_nested_path() {
+        let out = build_update_item_field("a", "i", "system.featuretype", json!("flaw"));
+        assert_eq!(out["path"], "system.featuretype");
+        assert_eq!(out["value"], "flaw");
     }
 
     #[test]

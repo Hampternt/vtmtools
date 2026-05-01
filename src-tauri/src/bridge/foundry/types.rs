@@ -107,6 +107,18 @@ pub struct DeleteItemByIdPayload {
     pub item_id: String,
 }
 
+/// Payload for actor.update_item_field wire message. `path` is a
+/// dot-namespaced field path on the embedded Item document (e.g.
+/// "system.points", "name", "system.featuretype"). Frontend tools
+/// use this to edit merits, flaws, etc. in place.
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct UpdateItemFieldPayload {
+    pub item_id: String,
+    pub path: String,
+    pub value: serde_json::Value,
+}
+
 /// Input for the `trigger_foundry_roll` Tauri command (frontend → Rust).
 /// Becomes the source of the outbound `game.roll_v5_pool` envelope.
 /// Empty `value_paths` is allowed — `[]` + `advanced_dice: 1` is a rouse check.
