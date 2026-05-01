@@ -13,6 +13,14 @@ export function actorToWire(actor) {
     name: actor.name,
     owner: pickPlayerOwner(actor),
     system: actor.system,
+    // Embedded item documents (merits, flaws, backgrounds, weapons,
+    // disciplines, resonance, specialties, etc.). Each carries its own
+    // `system` and `effects`. Filtering happens downstream — see
+    // src/lib/foundry/raw.ts.
+    items: actor.items.contents.map((i) => i.toObject()),
+    // Actor-level ActiveEffect documents. Item-attached effects ride
+    // along inside `items[].effects` and are NOT duplicated here.
+    effects: actor.effects.contents.map((e) => e.toObject()),
   };
 }
 

@@ -36,6 +36,17 @@ pub struct FoundryActor {
     /// Raw `actor.system` blob — translate.rs picks paths verified in
     /// docs/reference/foundry-vtm5e-paths.md.
     pub system: serde_json::Value,
+    /// Embedded item documents (`actor.items.contents.map(i => i.toObject())`).
+    /// Each item is a full Foundry Document source, including its own
+    /// `system` and embedded `effects`. Defaults to `Value::Null` for
+    /// payloads from pre-0.4.0 modules.
+    #[serde(default)]
+    pub items: serde_json::Value,
+    /// Actor-level ActiveEffect documents (`actor.effects.contents.map(e => e.toObject())`).
+    /// Item-attached effects are nested inside `items[].effects` and arrive
+    /// via `items` instead. Defaults to `Value::Null` for pre-0.4.0 payloads.
+    #[serde(default)]
+    pub effects: serde_json::Value,
 }
 
 /// Frontend → Tauri payload for applying a dyscrasia to a Foundry
@@ -119,4 +130,47 @@ pub struct PostChatAsActorInput {
     pub content: String,
     pub flavor: Option<String>,
     pub roll_mode: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn foundry_actor_deserializes_with_items_and_effects() {
+        let wire = r#"{
+            "id": "abc",
+            "name": "Jesper",
+            "owner": null,
+            "system": { "hunger": { "value": 1 } },
+            "items": [
+                { "_id": "i1", "type": "feature", "name": "Iron Will",
+                  "system": { "featuretype": "merit", "points": 2 },
+                  "effects": [] }
+            ],
+            "effects": [
+                { "_id": "e1", "name": "Bonus", "disabled": false, "changes": [] }
+            ]
+        }"#;
+
+        let actor: FoundryActor = serde_json::from_str(wire).expect("parses");
+        assert_eq!(actor.id, "abc");
+        assert!(actor.items.is_array(), "items must be an array");
+        assert_eq!(actor.items.as_array().unwrap().len(), 1);
+        assert_eq!(actor.items[0]["system"]["featuretype"], "merit");
+        assert_eq!(actor.effects.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn foundry_actor_deserializes_without_items_and_effects_legacy() {
+        // Legacy 0.3.0 module sends only id/name/owner/system. After the
+        // wire bump, those payloads must still deserialize — items and
+        // effects default to Value::Null via #[serde(default)].
+        let wire = r#"{
+            "id": "abc", "name": "Jesper", "owner": null,
+            "system": {}
+        }"#;
+        let actor: FoundryActor = serde_json::from_str(wire).expect("legacy parses");
+        assert_eq!(actor.id, "abc");
+    }
 }

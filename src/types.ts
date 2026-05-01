@@ -97,6 +97,49 @@ export interface Roll20Raw {
 }
 
 // ---------------------------------------------------------------------------
+// Foundry source-specific raw shapes (when BridgeCharacter.source === 'foundry').
+// Mirrors the wire shape produced by vtmtools-bridge/scripts/translate.js
+// and FoundryActor in src-tauri/src/bridge/foundry/types.rs.
+// ---------------------------------------------------------------------------
+
+export interface FoundryActiveEffectChange {
+  key: string;
+  mode: number;        // 0=custom, 1=multiply, 2=add, 3=downgrade, 4=upgrade, 5=override
+  value: string;
+  priority?: number | null;
+}
+
+export interface FoundryActiveEffect {
+  _id: string;
+  name: string;
+  disabled: boolean;
+  transfer?: boolean;  // when true on an item-attached effect, copies to the parent actor
+  origin?: string | null;
+  changes: FoundryActiveEffectChange[];
+  // Foundry includes more (duration, statuses, img, etc.) — left as
+  // index-signature for extension; consumers cast as needed.
+  [k: string]: unknown;
+}
+
+export interface FoundryItem {
+  _id: string;
+  type: string;        // "feature" | "weapon" | "discipline" | "resonance" | "speciality" | ...
+  name: string;
+  system: Record<string, unknown>;     // type-specific schema; for features: { featuretype, points, description, bonuses?, ... }
+  effects: FoundryActiveEffect[];
+  [k: string]: unknown;
+}
+
+export interface FoundryRaw {
+  id: string;
+  name: string;
+  owner: string | null;
+  system: Record<string, unknown>;
+  items: FoundryItem[];
+  effects: FoundryActiveEffect[];
+}
+
+// ---------------------------------------------------------------------------
 // Domains Manager / Chronicle graph types
 // ---------------------------------------------------------------------------
 
