@@ -8,6 +8,12 @@
   import { diffCharacter } from '$lib/saved-characters/diff';
   import type { SavedCharacter } from '$lib/saved-characters/api';
   import type { BridgeCharacter, Roll20Raw, Roll20RawAttribute } from '../types';
+  import {
+    foundryFeatures,
+    foundryEffects,
+    foundryItemEffects,
+    foundryEffectIsActive,
+  } from '$lib/foundry/raw';
 
   // ── State ───────────────────────────────────────────────────────────────
   const connected  = $derived(anyConnected());
@@ -51,6 +57,7 @@
   let expandedRaw   = $state<Set<string>>(new Set());
   let expandedAttrs = $state<Set<string>>(new Set());
   let expandedInfo  = $state<Set<string>>(new Set());
+  let expandedFeats = $state<Set<string>>(new Set());
   let urlCopied     = $state(false);
 
   type Density = 'auto' | 's' | 'm' | 'l';
@@ -145,6 +152,7 @@
   function toggleRaw(id: string)   { expandedRaw   = toggleSet(expandedRaw,   id); }
   function toggleAttrs(id: string) { expandedAttrs = toggleSet(expandedAttrs, id); }
   function toggleInfo(id: string)  { expandedInfo  = toggleSet(expandedInfo,  id); }
+  function toggleFeats(id: string) { expandedFeats = toggleSet(expandedFeats, id); }
 
   function isPC(char: BridgeCharacter): boolean {
     return char.controlled_by !== null && char.controlled_by.trim() !== '';
@@ -314,6 +322,11 @@
         {@const tenets       = r20AttrText(char, 'tenets')}
         {@const notes        = r20AttrText(char, 'notes')}
         {@const compulsions  = r20AttrText(char, 'compulsions')}
+        {@const merits       = foundryFeatures(char, 'merit')}
+        {@const flaws        = foundryFeatures(char, 'flaw')}
+        {@const backgrounds  = foundryFeatures(char, 'background')}
+        {@const boons        = foundryFeatures(char, 'boon')}
+        {@const actorFx      = foundryEffects(char)}
 
         <div class="char-card">
 
@@ -490,6 +503,88 @@
             </div>
           {/if}
 
+          <!-- ── Collapsible: feats (merits/flaws/backgrounds/boons + actor effects) ── -->
+          {#if expandedFeats.has(charKey)}
+            <div class="card-section">
+              {#if merits.length > 0}
+                <div class="feat-row">
+                  <span class="stat-label">Merits</span>
+                  <div class="feat-chips">
+                    {#each merits as m}
+                      {@const points = (m.system?.points as number | undefined) ?? 0}
+                      {@const itemFx = foundryItemEffects(m).filter(foundryEffectIsActive)}
+                      <span class="feat-chip merit" title={itemFx.length > 0 ? `${itemFx.length} active modifier(s)` : ''}>
+                        <span class="feat-name">{m.name}</span>
+                        {#if points > 0}<span class="feat-dots">{'•'.repeat(Math.min(points, 5))}</span>{/if}
+                        {#if itemFx.length > 0}<span class="feat-fx-badge">+{itemFx.length}</span>{/if}
+                      </span>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              {#if flaws.length > 0}
+                <div class="feat-row">
+                  <span class="stat-label">Flaws</span>
+                  <div class="feat-chips">
+                    {#each flaws as f}
+                      {@const points = (f.system?.points as number | undefined) ?? 0}
+                      {@const itemFx = foundryItemEffects(f).filter(foundryEffectIsActive)}
+                      <span class="feat-chip flaw" title={itemFx.length > 0 ? `${itemFx.length} active modifier(s)` : ''}>
+                        <span class="feat-name">{f.name}</span>
+                        {#if points > 0}<span class="feat-dots">{'•'.repeat(Math.min(points, 5))}</span>{/if}
+                        {#if itemFx.length > 0}<span class="feat-fx-badge">+{itemFx.length}</span>{/if}
+                      </span>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              {#if backgrounds.length > 0}
+                <div class="feat-row">
+                  <span class="stat-label">Backgrounds</span>
+                  <div class="feat-chips">
+                    {#each backgrounds as b}
+                      {@const points = (b.system?.points as number | undefined) ?? 0}
+                      <span class="feat-chip background">
+                        <span class="feat-name">{b.name}</span>
+                        {#if points > 0}<span class="feat-dots">{'•'.repeat(Math.min(points, 5))}</span>{/if}
+                      </span>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              {#if boons.length > 0}
+                <div class="feat-row">
+                  <span class="stat-label">Boons</span>
+                  <div class="feat-chips">
+                    {#each boons as bn}
+                      <span class="feat-chip boon">
+                        <span class="feat-name">{bn.name}</span>
+                      </span>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              {#if actorFx.length > 0}
+                <div class="feat-row">
+                  <span class="stat-label">Active modifiers (actor)</span>
+                  <div class="feat-chips">
+                    {#each actorFx as e}
+                      {@const active = foundryEffectIsActive(e)}
+                      <span class="feat-chip effect" class:disabled={!active}
+                            title={e.changes?.map(c => `${c.key} mode=${c.mode} value=${c.value}`).join('\n') ?? ''}>
+                        <span class="feat-name">{e.name}</span>
+                        <span class="feat-fx-badge">{e.changes?.length ?? 0}</span>
+                      </span>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              {#if merits.length === 0 && flaws.length === 0 && backgrounds.length === 0 && boons.length === 0 && actorFx.length === 0}
+                <span class="feat-empty">No merits, flaws, backgrounds, or modifiers on this character.</span>
+              {/if}
+            </div>
+          {/if}
+
           <!-- ── Save row (source chip + Save/Update) ────────────────────── -->
           <div class="save-row">
             <SourceAttributionChip source={char.source} />
@@ -527,6 +622,9 @@
             </button>
             <button class="section-toggle" onclick={() => toggleInfo(charKey)}>
               info {expandedInfo.has(charKey) ? '▴' : '▾'}
+            </button>
+            <button class="section-toggle" onclick={() => toggleFeats(charKey)}>
+              feats {expandedFeats.has(charKey) ? '▴' : '▾'}
             </button>
             <div class="footer-spacer"></div>
             <button class="raw-toggle" onclick={() => toggleRaw(charKey)}>
@@ -1157,6 +1255,55 @@
     color: var(--text-muted);
     font-style: italic;
     line-height: 1.4;
+  }
+
+  /* ── Feats (merits/flaws/backgrounds/boons + actor effects) ───────────── */
+  .feat-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .feat-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+  .feat-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    background: var(--bg-sunken);
+    border: 1px solid var(--border-faint);
+    border-radius: 4px;
+    padding: 0.15rem 0.5rem;
+  }
+  .feat-chip.merit      { border-color: color-mix(in srgb, var(--accent) 40%, var(--border-faint)); }
+  .feat-chip.flaw       { border-color: color-mix(in srgb, var(--accent-amber) 40%, var(--border-faint)); color: var(--accent-amber); }
+  .feat-chip.background { border-color: var(--border-surface); }
+  .feat-chip.boon       { border-color: color-mix(in srgb, var(--accent-bright) 30%, var(--border-faint)); }
+  .feat-chip.effect.disabled { opacity: 0.45; }
+  .feat-name {
+    font-weight: 500;
+  }
+  .feat-dots {
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    font-size: 0.7rem;
+  }
+  .feat-fx-badge {
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: var(--accent-bright);
+    padding: 0.05rem 0.25rem;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--accent-bright) 10%, transparent);
+  }
+  .feat-empty {
+    font-size: 0.78rem;
+    color: var(--text-ghost);
+    font-style: italic;
   }
 
   /* Info rows */
