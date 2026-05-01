@@ -73,6 +73,19 @@ in `ARCHITECTURE.md` §10 — do not "fix" them.
 - Never commit without running `./scripts/verify.sh` first.
 - Never call `invoke(...)` directly from a Svelte component — use the
   typed wrapper in `src/lib/**/api.ts` (`ARCHITECTURE.md` §4).
+- Roadmap tracking lives in GitHub Issues + the "vtmtools roadmap"
+  Project board (https://github.com/users/Hampternt/projects/3).
+  Create / modify issues only when the user explicitly asks ("add a
+  feature for X to the roadmap", "open an issue for this task").
+  Never auto-create issues from detecting completed work.
+- Project-board granularity: only **feature-level** parent issues go
+  on the board. Subtask issues created during plan execution stay
+  off the board — link them from the parent feature's body as a
+  ` - [ ] #N` task list instead. The board's job is the wide-angle
+  view; per-task tracking happens inside the parent issue.
+- When committing work that maps to an open GitHub issue, propose
+  `Closes #N` in the commit-message footer. The user closes the
+  issue or merges the PR.
 
 ## Pointers
 
