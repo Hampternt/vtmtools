@@ -31,6 +31,21 @@ This document names and describes every source of data in VTM Tools where data c
 
 **Currently used by:** Resonance Roller (via `roll_resonance` command). All dice logic runs on the backend.
 
+**Note:** A separate backend dice library lives at `src-tauri/src/shared/v5/` — the V5 Dice Helpers (see below). It implements pool-build / roll / interpret / compare / `skill_check` for VTM 5e attribute-skill checks (hunger dice, messy criticals, bestial fails). It is *not* used by the resonance dice path; the two libraries are peers.
+
+---
+
+## V5 Dice Helpers
+
+**Direction:** Internal (backend library; no shipped UI consumer yet)
+**What it is:** A backend dice library for VTM 5e skill-check mechanics, separate from the Resonance Dice Engine. Lives at `src-tauri/src/shared/v5/` (`pool.rs`, `dice.rs`, `interpret.rs`, `difficulty.rs`, `message.rs`, `skill_check.rs`).
+
+**Surface:**
+- Pure-Rust composables: `build_pool`, `roll_pool`, `interpret`, `compare`, `format_skill_check`.
+- One Tauri command: `roll_skill_check` (registered; typed wrapper in `src/lib/v5/api.ts`).
+
+**Currently used by:** No UI consumer. Phase 3 features (#9 roll-source toggle here-vs-Foundry, #11 hunger/remorse/contested rolls) will compose these primitives. Shipped now per the character-tooling roadmap so dependent features can land without an upfront library task.
+
 ---
 
 ## Resonance Roll Result
@@ -96,6 +111,22 @@ This document names and describes every source of data in VTM Tools where data c
 
 ---
 
+## Saved Characters Store
+
+**Direction:** Both (app reads and writes)
+**What it is:** SQLite `saved_characters` table holding canonical snapshots of bridge-imported characters. Persisted independently of live VTT state, so saved characters survive bridge disconnects and provide the "before" side of the saved-vs-live drift comparison surfaced in the Campaign tool.
+
+**Data carried per row:** id, source attribution (Roll20 / Foundry — origin chip in the UI), source id, the canonical `BridgeCharacter` payload (snake_case at the IPC boundary), and timestamps.
+
+**Behavior:**
+- Nothing is seeded; rows arrive only from explicit GM Save actions in the Campaign tool.
+- Update overwrites the canonical payload; Delete removes the row outright.
+- The Compare flow in the Campaign tool diffs a saved row's canonical payload against the merged Bridge Live Feed and renders a per-path before/after plus a specialty-list comparator.
+
+**Currently used by:** Campaign tool (Save / Update / Delete actions; drift badge; Compare modal).
+
+---
+
 ## Bridge Live Feed
 
 **Direction:** Input (VTT browser → app)
@@ -143,7 +174,16 @@ Both sources are translated at the bridge layer into a `CanonicalCharacter` with
 
 **Note:** The Roll20-only `Send Chat` operation from the pre-bridge era was dropped during the cutover (no frontend consumer). The wire protocol still allows it; the typed wrapper does not expose it.
 
-**Currently used by:** Resonance Roller (writes resonance result back to a selected character's sheet — works against either source).
+### Foundry `game.*` umbrella (FHL Phase 2)
+
+In addition to per-attribute writes, the Foundry path exposes a second outbound family — the `game.*` helper umbrella from the [Foundry Helper Library roadmap](../superpowers/specs/2026-04-26-foundry-helper-library-roadmap.md):
+
+- **`game.roll_v5_pool`** — issue a V5 dice roll into Foundry chat by delegating to the WoD5e roll API (`WOD5E.api.RollFromDataset` for full pools, direct `WOD5E.api.Roll` for the empty-pool / rouse-check case). Hunger, messy criticals, rouse, and bestial fails are handled by Foundry's own implementation; vtmtools is a thin shim. Tauri command: `trigger_foundry_roll`.
+- **`game.post_chat_as_actor`** — post a non-roll chat message attributed to a Foundry actor via `ChatMessage.create` + `getSpeaker`. Tauri command: `post_foundry_chat`.
+
+Frontend wrappers live in `src/lib/foundry-chat/api.ts`. Foundry-only — Roll20 has no equivalent.
+
+**Currently used by:** Resonance Roller (writes resonance result back to a selected character's sheet — works against either source); Foundry Test tool (dev surface that exercises the `game.*` helpers end-to-end while downstream consumers are still planned).
 
 ---
 
@@ -224,12 +264,12 @@ Both sources are translated at the bridge layer into a `CanonicalCharacter` with
        └─────────────────────┘         └───────────────────────────┘
 
 
-┌──────────────────────────────────────────┐
-│           Dyscrasia Store (SQLite)        │
-│  ← seeded on startup                     │
-│  ← custom entries via Dyscrasia Manager  │
-│  → queried by Resonance Roller           │
-│  → browsed by Dyscrasia Manager          │
+┌──────────────────────────────────────────┐    ┌──────────────────────────────────────────┐
+│           Dyscrasia Store (SQLite)        │    │      Saved Characters Store (SQLite)     │
+│  ← seeded on startup (ADR 0002)          │    │  ← Save / Update / Delete from Campaign  │
+│  ← custom entries via Dyscrasia Manager  │    │  → diffed vs. Bridge Live Feed in        │
+│  → queried by Resonance Roller           │    │    Campaign's Compare modal              │
+│  → browsed by Dyscrasia Manager          │    └──────────────────────────────────────────┘
 └──────────────────────────────────────────┘
 
 
@@ -243,9 +283,11 @@ Backend ──── Tauri Event Bridge ────→ Frontend
 |-------------------------|-----------------|------------|------------------|
 | GM Roll Config          | Input           | In-memory  | Frontend         |
 | Dice Engine             | Internal        | None       | Backend          |
+| V5 Dice Helpers         | Internal        | None       | Backend          |
 | Resonance Roll Result   | Output/Internal | In-memory  | Backend→Frontend |
 | Dyscrasia Store         | Both            | SQLite     | Backend          |
 | Chronicle Store         | Both            | SQLite     | Backend          |
+| Saved Characters Store  | Both            | SQLite     | Backend          |
 | Bridge Live Feed        | Input           | In-memory  | VTT→Backend      |
 | Bridge Writeback        | Output          | None       | Backend→VTT      |
 | Markdown Export         | Output          | Filesystem | Backend          |

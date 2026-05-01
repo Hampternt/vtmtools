@@ -1,6 +1,12 @@
 {
   "elements": [
     {
+      "label": "Storyteller",
+      "type": "Actor",
+      "description": "The GM / Storyteller using the desktop app. Configures roll settings, triggers rolls, manages dyscrasias and chronicle data, and monitors the coterie via the Campaign viewer.",
+      "tags": ["actor", "user"]
+    },
+    {
       "label": "GM Roll Config",
       "type": "Data Source",
       "description": "The settings the Storyteller configures before making a resonance roll. Temperament settings (dice count, highest/lowest, thresholds) and resonance weights (per-type likelihood sliders). Ephemeral — resets on app restart.",
@@ -12,7 +18,7 @@
     {
       "label": "Dice Engine",
       "type": "Data Source",
-      "description": "The random number generation backend. Takes a GM Roll Config and produces raw roll results. Handles temperament rolls (d10 pool, advantage/disadvantage), weighted resonance type picks, and acute checks (9–10 on a d10).",
+      "description": "Resonance-domain RNG backend (`shared/dice.rs`, `shared/resonance.rs`). Takes a GM Roll Config and produces raw roll results — temperament dice (d10 pool with advantage/disadvantage), weighted resonance type picks, and acute checks (9–10 on a d10). Distinct from `shared/v5/` (the V5 skill-check helper library — backend-only, no shipped UI consumer yet).",
       "tags": ["internal", "backend"],
       "Direction": "Internal",
       "Storage": "None",
@@ -21,38 +27,65 @@
     {
       "label": "Resonance Roll Result",
       "type": "Data Source",
-      "description": "The complete outcome of a single resonance roll. Carries all temperament dice, the selected die, temperament tier, resonance type, acute check, and an optional attached dyscrasia. The main product of the Resonance Roller that flows outward to exports, Roll20, and the event bus.",
+      "description": "The complete outcome of a single resonance roll. Carries all temperament dice, the selected die, temperament tier, resonance type, acute check, and an optional attached dyscrasia. The main product of the Resonance Roller that flows outward to exports, the bridge writeback path (Roll20 sheets and Foundry actors), and the event bus.",
       "tags": ["output", "internal"],
       "Direction": "Output / Internal",
       "Storage": "In-memory",
       "Layer": "Backend → Frontend"
     },
     {
+      "label": "Roll History",
+      "type": "Data Source",
+      "description": "In-memory list of past resonance roll results for the current session. Displayed in the Resonance Roller UI. Resets when the app restarts.",
+      "tags": ["internal", "ephemeral"],
+      "Direction": "Internal",
+      "Storage": "In-memory",
+      "Layer": "Frontend"
+    },
+    {
       "label": "Dyscrasia Store",
       "type": "Data Source",
-      "description": "SQLite database table holding all dyscrasia entries — built-in V5 sourcebook entries (re-seeded on every startup) and user-created custom entries. Each entry has a resonance type, name, description, bonus, and custom flag.",
+      "description": "SQLite database table holding all dyscrasia entries — built-in V5 sourcebook entries (re-seeded on every startup per ADR 0002) and user-created custom entries. Each entry has a resonance type, name, description, bonus, and custom flag.",
       "tags": ["input", "output", "persistent"],
       "Direction": "Both",
       "Storage": "SQLite",
       "Layer": "Backend"
     },
     {
-      "label": "Roll20 Live Feed",
+      "label": "Chronicle Store",
       "type": "Data Source",
-      "description": "Live character data streaming from a Roll20 game session via the browser extension. Carries character ID, name, controlled-by, and all sheet attributes. Data arrives as debounced whole-character snapshots (200ms batching of per-attribute Firebase events).",
-      "tags": ["input", "live", "external"],
-      "Direction": "Input",
-      "Storage": "In-memory",
-      "Layer": "Extension → Backend"
+      "description": "SQLite tables (chronicles, nodes, edges) holding all user-authored game state — areas, characters, businesses, merits, influence, and typed relationships. No seeding; fully user-authored.",
+      "tags": ["input", "output", "persistent"],
+      "Direction": "Both",
+      "Storage": "SQLite",
+      "Layer": "Backend"
     },
     {
-      "label": "Roll20 Writeback",
+      "label": "Saved Characters Store",
       "type": "Data Source",
-      "description": "Data pushed from the desktop app back into Roll20 character sheets. Supports three operations: Set Attribute (write a single value), Send Chat (inject a chat message), and Refresh (request fresh character snapshots).",
-      "tags": ["output", "external"],
+      "description": "SQLite `saved_characters` table holding canonical snapshots of bridge-imported characters. Each row carries a source attribution (Roll20 / Foundry), the canonical character payload, and timestamps. Persisted independently of live VTT state, so saved characters survive bridge disconnects and let the Compare flow surface drift between saved and live.",
+      "tags": ["input", "output", "persistent"],
+      "Direction": "Both",
+      "Storage": "SQLite",
+      "Layer": "Backend"
+    },
+    {
+      "label": "Bridge Live Feed",
+      "type": "Data Source",
+      "description": "Live character data streaming from one or more VTT sessions, normalized into a source-agnostic `CanonicalCharacter` shape with shared fields (hunger, health, willpower, humanity, blood potency) plus a per-source `raw` blob. Cache key is `<source>:<source_id>`. The frontend store consumes this uniformly regardless of whether the source is Roll20 or Foundry. See ADR 0006.",
+      "tags": ["input", "live", "external", "multi-source"],
+      "Direction": "Input",
+      "Storage": "In-memory",
+      "Layer": "Backend"
+    },
+    {
+      "label": "Bridge Writeback",
+      "type": "Data Source",
+      "description": "Outbound traffic from the desktop app into a connected VTT. Three families today: (1) `bridge_set_attribute(source, source_id, name, value)` — generic per-character writes; Roll20 maps to sheet attributes, Foundry maps to `actor.update` or item create/delete via the `actor.*` helper umbrella; (2) `game.roll_v5_pool` and `game.post_chat_as_actor` — Foundry-only `game.*` umbrella helpers (FHL Phase 2) that issue dice rolls into Foundry chat or post actor-attributed chat lines via the WoD5e roll API; (3) `bridge_refresh` — request fresh snapshots.",
+      "tags": ["output", "external", "multi-source"],
       "Direction": "Output",
       "Storage": "None",
-      "Layer": "Backend → Extension"
+      "Layer": "Backend → VTT"
     },
     {
       "label": "Markdown Export",
@@ -66,7 +99,7 @@
     {
       "label": "Tool Event Bus",
       "type": "Infrastructure",
-      "description": "Svelte store that lets tools broadcast events to each other without direct coupling. Currently carries resonance_result events (temperament, resonance type, acute status, dyscrasia name). Designed as the decoupling layer for future cross-tool features.",
+      "description": "Svelte store that lets tools broadcast events to each other without direct coupling. Currently carries `resonance_result` events (temperament, resonance type, acute status, dyscrasia name). Designed as the decoupling layer for future cross-tool features.",
       "tags": ["internal", "bus"],
       "Direction": "Internal",
       "Storage": "In-memory",
@@ -75,25 +108,34 @@
     {
       "label": "Tauri Event Bridge",
       "type": "Infrastructure",
-      "description": "Event channel carrying real-time updates from the Rust backend to the Svelte frontend using Tauri's built-in event system. Emits roll20://connected, roll20://disconnected, and roll20://characters-updated events. Distinct from the Tool Event Bus — this is backend-to-frontend, not tool-to-tool.",
+      "description": "Event channel carrying real-time updates from the Rust backend to the Svelte frontend using Tauri's built-in event system. Emits `bridge://roll20/connected`, `bridge://roll20/disconnected`, `bridge://foundry/connected`, `bridge://foundry/disconnected`, and `bridge://characters-updated` (carrying the merged `Vec<CanonicalCharacter>` across all sources). Distinct from the Tool Event Bus — this is backend-to-frontend, not tool-to-tool.",
       "tags": ["internal", "bridge"],
       "Direction": "Internal",
       "Storage": "None",
       "Layer": "Backend → Frontend"
     },
     {
-      "label": "WebSocket Bridge",
+      "label": "Roll20 WS Listener",
       "type": "Infrastructure",
-      "description": "Local WebSocket server on 127.0.0.1:7423 that connects the Tauri desktop app to the Chrome extension running inside Roll20. Accepts one connection at a time. Carries both inbound (Live Feed) and outbound (Writeback) traffic.",
-      "tags": ["internal", "bridge"],
+      "description": "Plain WebSocket server on `ws://127.0.0.1:7423` that connects the Tauri desktop app to the Roll20 Chrome extension. At most one extension session at a time. Carries both inbound (Roll20 live feed) and outbound (Roll20 writeback) traffic. Preserves the pre-bridge wire protocol byte-for-byte so the existing extension keeps working.",
+      "tags": ["internal", "bridge", "roll20"],
       "Direction": "Bidirectional",
       "Storage": "None",
       "Layer": "Backend ↔ Extension"
     },
     {
+      "label": "Foundry WSS Listener",
+      "type": "Infrastructure",
+      "description": "TLS WebSocket server on `wss://127.0.0.1:7424` that connects the Tauri desktop app to the Foundry `vtmtools-bridge` module. wss is non-optional — Foundry is commonly served over HTTPS and browsers block ws://localhost from HTTPS pages as mixed content. Self-signed `localhost` cert generated by `rcgen` on first launch and persisted in the app data dir; the GM accepts the cert warning once per browser. Carries the dot-namespaced wire protocol (`actor.*`, `game.*`) plus extended Hello (protocol_version, capabilities, world_id), `bridge.subscribe`/`bridge.unsubscribe`, and a structured error envelope (Plan 0 consolidation).",
+      "tags": ["internal", "bridge", "foundry", "tls"],
+      "Direction": "Bidirectional",
+      "Storage": "None",
+      "Layer": "Backend ↔ Foundry module"
+    },
+    {
       "label": "Resonance Roller",
       "type": "Tool",
-      "description": "The main resonance rolling tool. Consumes GM Roll Config, drives the Dice Engine, displays results, and distributes them to exports, Roll20, and the event bus. Also queries the Dyscrasia Store on Acute results.",
+      "description": "The main resonance rolling tool. Consumes GM Roll Config, drives the Dice Engine, displays results, and distributes them to exports, bridge writeback, and the event bus. Also queries the Dyscrasia Store on Acute results. Reads the merged bridge live feed for character selection (works against either source).",
       "tags": ["tool", "frontend"]
     },
     {
@@ -105,202 +147,262 @@
     {
       "label": "Campaign Viewer",
       "type": "Tool",
-      "description": "Live Roll20 character stat display. Shows hunger, health, willpower, humanity, and blood potency for all connected characters in real time.",
+      "description": "Live VTT character stat display. Shows hunger, health, willpower, humanity, and blood potency for all bridge-connected characters in real time across both Roll20 and Foundry. Also hosts the Saved Characters surface — Save/Update/Delete actions persist canonical snapshots into the Saved Characters Store, and a built-in Compare modal diffs saved-vs-live (drift badge per card; per-path before/after plus specialty-list comparison in modal).",
       "tags": ["tool", "frontend"]
-    },
-    {
-      "label": "Roll20 Game Session",
-      "type": "External System",
-      "description": "The Roll20 browser-based virtual tabletop where the actual VTM game is played. Source of all live character data. The browser extension runs inside this page.",
-      "tags": ["external"]
-    },
-    {
-      "label": "Browser Extension",
-      "type": "External System",
-      "description": "Chrome extension injected into Roll20 pages. Reads character data from Roll20's Backbone/Firebase data layer, debounces attribute changes, and relays snapshots to the desktop app. Also receives writeback commands.",
-      "tags": ["external", "extension"]
-    },
-    {
-      "label": "Storyteller",
-      "type": "Actor",
-      "description": "The GM / Storyteller using the desktop app. Configures roll settings, triggers rolls, manages dyscrasias, and monitors the coterie via the Campaign viewer.",
-      "tags": ["actor", "user"]
-    },
-    {
-      "label": "Roll History",
-      "type": "Data Source",
-      "description": "In-memory list of past resonance roll results for the current session. Displayed in the Resonance Roller UI. Resets when the app restarts.",
-      "tags": ["internal", "ephemeral"],
-      "Direction": "Internal",
-      "Storage": "In-memory",
-      "Layer": "Frontend"
-    },
-    {
-      "label": "Chronicle Store",
-      "type": "Data Source",
-      "description": "SQLite tables (chronicles, nodes, edges) holding all user-authored game state — areas, characters, businesses, merits, influence, and typed relationships.",
-      "tags": ["input", "output", "persistent"],
-      "Direction": "Both",
-      "Storage": "SQLite",
-      "Layer": "Backend"
     },
     {
       "label": "Domains Manager",
       "type": "Tool",
       "description": "Hierarchical chronicle tracker. Lets the Storyteller model a game's territories, institutions, characters, and relationships as a graph of typed nodes connected by typed edges.",
       "tags": ["tool", "frontend"]
+    },
+    {
+      "label": "Foundry Test Tool",
+      "type": "Tool",
+      "description": "Dev/QA surface for the Foundry `game.*` helpers (FHL Phase 2). Lets the operator pick a Foundry actor from the bridge live feed and exercise `game.roll_v5_pool` and `game.post_chat_as_actor` end-to-end. Not a player-facing tool; exists to smoke-test the helper umbrella while downstream consumers (#9 roll-source toggle, #11 hunger/remorse/contested) are still planned.",
+      "tags": ["tool", "frontend", "dev"]
+    },
+    {
+      "label": "Roll20 Game Session",
+      "type": "External System",
+      "description": "The Roll20 browser-based virtual tabletop where the actual VTM game is played when running on Roll20. Source of all live Roll20 character data. The Roll20 extension runs inside this page.",
+      "tags": ["external", "roll20"]
+    },
+    {
+      "label": "Foundry World",
+      "type": "External System",
+      "description": "A Foundry VTT world running with the WoD5e (vtm5e) system installed. Source of all live Foundry actor data. Can be hosted anywhere (Forge, Molten, self-hosted); only the GM's browser session connects to vtmtools.",
+      "tags": ["external", "foundry"]
+    },
+    {
+      "label": "Roll20 Extension",
+      "type": "External System",
+      "description": "Chrome extension injected into Roll20 pages. Reads character data from Roll20's Backbone/Firebase data layer, debounces per-attribute Firebase events into 200ms whole-character snapshots, and relays them to the desktop app over `ws://127.0.0.1:7423`. Also receives writeback commands.",
+      "tags": ["external", "extension", "roll20"]
+    },
+    {
+      "label": "Foundry Bridge Module",
+      "type": "External System",
+      "description": "The `vtmtools-bridge` Foundry module installed in the GM's world. Initialization is gated on `game.user.isGM` — only the GM's browser ever connects. Hooks `updateActor` / `createActor` / `deleteActor`; pushes the full actor list on `ready` then forwards individual changes. Receives outbound `actor.*` (sheet edits) and `game.*` (rolls + chat) wire messages and dispatches to the WoD5e API. Currently at module version 0.3.0 (Phase 2 game.* helpers shipped).",
+      "tags": ["external", "module", "foundry"]
     }
   ],
   "connections": [
     {
-      "from": "Storyteller",
-      "to": "GM Roll Config",
-      "type": "configures",
-      "direction": "directed"
+      "from": "Storyteller", "to": "GM Roll Config",
+      "type": "configures", "direction": "directed",
+      "label": "TemperamentConfig + ResonanceWeights",
+      "description": "GM dials in dice_count, take_highest, negligible/fleeting thresholds, and per-type SliderLevel positions via the Resonance Roller settings panel."
     },
     {
-      "from": "GM Roll Config",
-      "to": "Resonance Roller",
-      "type": "feeds",
-      "direction": "directed"
+      "from": "Storyteller", "to": "Resonance Roller",
+      "type": "triggers rolls", "direction": "directed",
+      "label": "click → invoke('roll_resonance', RollConfig)",
+      "description": "GM clicks Roll. Component calls the typed wrapper, which invokes the Tauri command."
     },
     {
-      "from": "Resonance Roller",
-      "to": "Dice Engine",
-      "type": "invokes",
-      "direction": "directed"
+      "from": "Storyteller", "to": "Dyscrasia Manager",
+      "type": "manages", "direction": "directed",
+      "label": "CRUD on DyscrasiaEntry",
+      "description": "Add / edit / delete / search / random-roll-by-type via the Manager UI."
     },
     {
-      "from": "Dice Engine",
-      "to": "Resonance Roll Result",
-      "type": "produces",
-      "direction": "directed"
+      "from": "Storyteller", "to": "Campaign Viewer",
+      "type": "manages and monitors", "direction": "directed",
+      "label": "Save / Update / Delete / Compare",
+      "description": "GM saves bridge-imported characters as canonical snapshots and opens the Compare modal to inspect saved-vs-live drift."
     },
     {
-      "from": "Resonance Roll Result",
-      "to": "Resonance Roller",
-      "type": "displayed by",
-      "direction": "directed"
+      "from": "Storyteller", "to": "Domains Manager",
+      "type": "manages", "direction": "directed",
+      "label": "CRUD on Chronicle / Node / Edge",
+      "description": "Author chronicles and the typed-graph nodes/edges that represent areas, characters, businesses, and relationships."
     },
     {
-      "from": "Resonance Roll Result",
-      "to": "Roll History",
-      "type": "stored in",
-      "direction": "directed"
+      "from": "Storyteller", "to": "Foundry Test Tool",
+      "type": "exercises (dev)", "direction": "directed",
+      "label": "fire test RollV5PoolInput / PostChatAsActorInput",
+      "description": "Dev surface; GM picks a Foundry actor and submits sample game.* envelopes to verify the helper umbrella end-to-end."
+    },
+
+    {
+      "from": "GM Roll Config", "to": "Resonance Roller",
+      "type": "feeds", "direction": "directed",
+      "label": "RollConfig { temperament, weights }",
+      "description": "Frontend builds a RollConfig from the settings panel state and passes it to the Tauri invocation."
     },
     {
-      "from": "Resonance Roll Result",
-      "to": "Tool Event Bus",
-      "type": "published to",
-      "direction": "directed"
+      "from": "Resonance Roller", "to": "Dice Engine",
+      "type": "invokes", "direction": "directed",
+      "label": "invoke('roll_resonance', { config: RollConfig }) → ResonanceRollResult",
+      "description": "Single Tauri command — all randomness runs on the backend."
     },
     {
-      "from": "Resonance Roll Result",
-      "to": "Markdown Export",
-      "type": "exported to",
-      "direction": "directed"
+      "from": "Dice Engine", "to": "Resonance Roll Result",
+      "type": "produces", "direction": "directed",
+      "label": "ResonanceRollResult",
+      "description": "{ temperament_dice: Vec<u8>, temperament_die: u8, temperament: Negligible|Fleeting|Intense, resonance_type?: enum, resonance_die?: u8, acute_die?: u8, is_acute: bool, dyscrasia?: DyscrasiaEntry }"
     },
     {
-      "from": "Resonance Roll Result",
-      "to": "Roll20 Writeback",
-      "type": "written back via",
-      "direction": "directed"
+      "from": "Resonance Roll Result", "to": "Resonance Roller",
+      "type": "displayed by", "direction": "directed",
+      "label": "ResonanceRollResult → result card",
+      "description": "Component renders dice, temperament tier, resonance type, acute status, and (if attached) the dyscrasia."
     },
     {
-      "from": "Resonance Roller",
-      "to": "Dyscrasia Store",
-      "type": "queries on Acute",
-      "direction": "directed"
+      "from": "Resonance Roll Result", "to": "Roll History",
+      "type": "stored in", "direction": "directed",
+      "label": "ResonanceRollResult appended",
+      "description": "In-memory list, reset on app restart."
     },
     {
-      "from": "Dyscrasia Manager",
-      "to": "Dyscrasia Store",
-      "type": "reads and writes",
-      "direction": "mutual"
+      "from": "Resonance Roll Result", "to": "Tool Event Bus",
+      "type": "published to", "direction": "directed",
+      "label": "{ type: 'resonance_result', temperament, resonance_type, is_acute, dyscrasia_name? }",
+      "description": "publishEvent() on the Svelte tool-events store — currently no subscribers, kept as the cross-tool decoupling seam."
     },
     {
-      "from": "Storyteller",
-      "to": "Dyscrasia Manager",
-      "type": "manages",
-      "direction": "directed"
+      "from": "Resonance Roll Result", "to": "Markdown Export",
+      "type": "exported to", "direction": "directed",
+      "label": "export_result_to_md(result) → ~/Documents/vtmtools/<timestamp>.md",
+      "description": "Tauri command writes a single timestamped file containing the full result + dyscrasia + export time."
     },
     {
-      "from": "Storyteller",
-      "to": "Campaign Viewer",
-      "type": "monitors",
-      "direction": "directed"
+      "from": "Resonance Roll Result", "to": "Bridge Writeback",
+      "type": "written back via", "direction": "directed",
+      "label": "bridge_set_attribute(source, source_id, name='resonance', value)",
+      "description": "Generic per-character write; per-source semantics (Roll20: sheet attribute write; Foundry: WoD5e Item create after deleting prior resonance items)."
     },
     {
-      "from": "Roll20 Game Session",
-      "to": "Browser Extension",
-      "type": "exposes data to",
-      "direction": "directed"
+      "from": "Resonance Roller", "to": "Dyscrasia Store",
+      "type": "queries on Acute", "direction": "directed",
+      "label": "roll_random_dyscrasia(resonance_type) → DyscrasiaEntry",
+      "description": "Fired only when is_acute = true; selects randomly from built-in + custom rows of the matching resonance type."
+    },
+
+    {
+      "from": "Dyscrasia Manager", "to": "Dyscrasia Store",
+      "type": "reads and writes", "direction": "mutual",
+      "label": "list/add/update/delete + roll_random_dyscrasia",
+      "description": "Five Tauri commands cover full CRUD + the random-by-type roll. DyscrasiaEntry { id, resonance_type, name, description, bonus, is_custom }."
     },
     {
-      "from": "Browser Extension",
-      "to": "WebSocket Bridge",
-      "type": "sends snapshots via",
-      "direction": "directed"
+      "from": "Domains Manager", "to": "Chronicle Store",
+      "type": "reads and writes", "direction": "mutual",
+      "label": "Chronicle / Node / Edge CRUD + tree queries",
+      "description": "20 Tauri commands across chronicle.rs, node.rs, edge.rs. Includes derived tree queries (parent_of, children_of, path_to_root, subtree) over the 'contains' edge type."
     },
     {
-      "from": "WebSocket Bridge",
-      "to": "Roll20 Live Feed",
-      "type": "delivers to",
-      "direction": "directed"
+      "from": "Campaign Viewer", "to": "Saved Characters Store",
+      "type": "reads and writes", "direction": "mutual",
+      "label": "SavedCharacter { id, source, source_id, payload: BridgeCharacter, created_at, updated_at }",
+      "description": "Four Tauri commands (save/list/update/delete) on the saved_characters SQLite table. payload is the canonical bridge shape captured at save time; the Compare modal diffs it against the current Bridge Live Feed."
+    },
+
+    {
+      "from": "Foundry Test Tool", "to": "Bridge Writeback",
+      "type": "exercises game.* helpers via", "direction": "directed",
+      "label": "trigger_foundry_roll(RollV5PoolInput) | post_foundry_chat(PostChatAsActorInput)",
+      "description": "Two Tauri commands behind src/lib/foundry-chat/api.ts. RollV5PoolInput { actor_id, value_paths, selectors?, difficulty?, label? }; PostChatAsActorInput { actor_id, content, roll_mode? }."
+    },
+
+    {
+      "from": "Roll20 Game Session", "to": "Roll20 Extension",
+      "type": "exposes data to", "direction": "directed",
+      "label": "Backbone models + per-attribute Firebase events",
+      "description": "Extension content script reads Roll20's internal Backbone data layer and listens to Firebase change events on each attribute."
     },
     {
-      "from": "Roll20 Live Feed",
-      "to": "Tauri Event Bridge",
-      "type": "emits via",
-      "direction": "directed"
+      "from": "Roll20 Extension", "to": "Roll20 WS Listener",
+      "type": "sends snapshots via", "direction": "directed",
+      "label": "InboundMsg::Characters | InboundMsg::CharacterUpdate (whole-character)",
+      "description": "Per-attribute events are debounced 200ms into a single whole-character JSON: { id, name, controlled_by, attributes: [{ name, current, max }, …] }."
     },
     {
-      "from": "Tauri Event Bridge",
-      "to": "Campaign Viewer",
-      "type": "updates",
-      "direction": "directed"
+      "from": "Roll20 WS Listener", "to": "Bridge Live Feed",
+      "type": "delivers to", "direction": "directed",
+      "label": "→ CanonicalCharacter (translated)",
+      "description": "Roll20Source::handle_inbound picks fields per docs/reference/roll20-bundle.md and writes a CanonicalCharacter into the merged cache keyed by 'roll20:<id>'."
     },
     {
-      "from": "Tauri Event Bridge",
-      "to": "Resonance Roller",
-      "type": "updates character list",
-      "direction": "directed"
+      "from": "Bridge Writeback", "to": "Roll20 WS Listener",
+      "type": "sends commands via", "direction": "directed",
+      "label": "{ type: 'set_attribute' | 'refresh', … }",
+      "description": "Outbound JSON frame built by Roll20Source::build_set_attribute / build_refresh."
     },
     {
-      "from": "Roll20 Writeback",
-      "to": "WebSocket Bridge",
-      "type": "sends commands via",
-      "direction": "directed"
+      "from": "Roll20 WS Listener", "to": "Roll20 Extension",
+      "type": "relays commands to", "direction": "directed",
+      "label": "outbound JSON frame",
+      "description": "Same wire shape the extension sends back; preserves the pre-bridge protocol byte-for-byte."
     },
     {
-      "from": "WebSocket Bridge",
-      "to": "Browser Extension",
-      "type": "relays commands to",
-      "direction": "directed"
+      "from": "Roll20 Extension", "to": "Roll20 Game Session",
+      "type": "writes back to", "direction": "directed",
+      "label": "Backbone setAttribute(name, value)",
+      "description": "Extension translates the wire frame into Roll20 Backbone setter calls; creates the attribute if missing."
+    },
+
+    {
+      "from": "Foundry World", "to": "Foundry Bridge Module",
+      "type": "exposes data to", "direction": "directed",
+      "label": "game.actors + updateActor / createActor / deleteActor hooks",
+      "description": "Module reads the actor list on 'ready' and forwards subsequent change events; runs in GM browser only (gated on game.user.isGM)."
     },
     {
-      "from": "Browser Extension",
-      "to": "Roll20 Game Session",
-      "type": "writes back to",
-      "direction": "directed"
+      "from": "Foundry Bridge Module", "to": "Foundry WSS Listener",
+      "type": "sends snapshots via", "direction": "directed",
+      "label": "FoundryInbound::Hello | Actors | ActorUpdate",
+      "description": "Hello carries protocol_version + capabilities + world_id (Plan 0 consolidation). Actors / ActorUpdate carry FoundryActor { id, name, owner, system: actor.system blob }. Frame uses TLS over wss://localhost:7424."
     },
     {
-      "from": "Storyteller",
-      "to": "Resonance Roller",
-      "type": "triggers rolls",
-      "direction": "directed"
+      "from": "Foundry WSS Listener", "to": "Bridge Live Feed",
+      "type": "delivers to", "direction": "directed",
+      "label": "→ CanonicalCharacter (translated from FoundryActor)",
+      "description": "FoundrySource::translate picks fields per docs/reference/foundry-vtm5e-paths.md (vampire/werewolf/hunter splat fields side-by-side). Cache key 'foundry:<id>'."
     },
     {
-      "from": "Storyteller",
-      "to": "Domains Manager",
-      "type": "manages",
-      "direction": "directed"
+      "from": "Bridge Writeback", "to": "Foundry WSS Listener",
+      "type": "sends commands via", "direction": "directed",
+      "label": "actor.* / game.* / refresh envelopes",
+      "description": "actor.update_field, actor.create_feature, actor.create_item_simple, actor.append_private_notes_line, actor.delete_items_by_prefix, actor.delete_item_by_id, actor.apply_dyscrasia, game.roll_v5_pool, game.post_chat_as_actor — each owns a typed Rust builder in bridge/foundry/actions/<umbrella>.rs."
     },
     {
-      "from": "Domains Manager",
-      "to": "Chronicle Store",
-      "type": "reads and writes",
-      "direction": "mutual"
+      "from": "Foundry WSS Listener", "to": "Foundry Bridge Module",
+      "type": "relays commands to", "direction": "directed",
+      "label": "dot-namespaced JSON frame { type: '<umbrella>.<verb>', … }",
+      "description": "bridge.js handler-map dispatch routes by msg.type prefix into foundry-actions/<umbrella>.js executors."
+    },
+    {
+      "from": "Foundry Bridge Module", "to": "Foundry World",
+      "type": "writes back to", "direction": "directed",
+      "label": "actor.update / createEmbeddedDocuments / ChatMessage.create / WOD5E.api.RollFromDataset",
+      "description": "Executors call the Foundry / WoD5e APIs directly; V5 dice mechanics (hunger, messy crit, rouse, bestial fail) delegated to WoD5e's roll machinery."
+    },
+
+    {
+      "from": "Bridge Live Feed", "to": "Tauri Event Bridge",
+      "type": "emits via", "direction": "directed",
+      "label": "emit('bridge://characters-updated', Vec<CanonicalCharacter>)",
+      "description": "Whole merged cache across all sources is pushed as the event payload — frontend re-renders from the full list, never from a diff."
+    },
+    {
+      "from": "Tauri Event Bridge", "to": "Campaign Viewer",
+      "type": "updates", "direction": "directed",
+      "label": "bridge://characters-updated → bridge.svelte.ts store",
+      "description": "Component subscribes to the typed bridge store (never listen() directly) and re-renders cards for all connected characters."
+    },
+    {
+      "from": "Tauri Event Bridge", "to": "Resonance Roller",
+      "type": "updates character list", "direction": "directed",
+      "label": "bridge://characters-updated → character picker",
+      "description": "Roller reads the merged store to populate the writeback target dropdown — works against any source."
+    },
+    {
+      "from": "Tauri Event Bridge", "to": "Foundry Test Tool",
+      "type": "updates Foundry character list", "direction": "directed",
+      "label": "bridge://characters-updated → filter(source === 'foundry')",
+      "description": "Test tool restricts the picker to Foundry actors because game.* helpers are Foundry-only."
     }
   ]
 }
