@@ -40,4 +40,10 @@ export const tools: Tool[] = [
     icon: '⚜',
     component: () => import('./tools/AdvantagesManager.svelte'),
   },
+  {
+    id: 'foundry-test',
+    label: 'Foundry Test',
+    icon: '🧪',
+    component: () => import('./tools/FoundryTest.svelte'),
+  },
 ];
