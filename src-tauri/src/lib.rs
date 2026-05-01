@@ -72,6 +72,8 @@ pub fn run() {
             db::dyscrasia::delete_dyscrasia,
             db::dyscrasia::roll_random_dyscrasia,
             tools::export::export_result_to_md,
+            tools::foundry_chat::trigger_foundry_roll,
+            tools::foundry_chat::post_foundry_chat,
             bridge::commands::bridge_get_characters,
             bridge::commands::bridge_get_status,
             bridge::commands::bridge_refresh,

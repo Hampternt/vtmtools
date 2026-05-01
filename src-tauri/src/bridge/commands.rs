@@ -85,7 +85,7 @@ pub async fn bridge_get_source_info(
     Ok(info.get(&source).cloned())
 }
 
-async fn send_to_source(
+pub(crate) async fn send_to_source(
     conn: &State<'_, BridgeConn>,
     kind: SourceKind,
     text: String,
