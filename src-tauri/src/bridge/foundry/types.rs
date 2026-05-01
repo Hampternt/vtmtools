@@ -95,3 +95,28 @@ pub struct DeleteItemsByPrefixPayload {
 pub struct DeleteItemByIdPayload {
     pub item_id: String,
 }
+
+/// Input for the `trigger_foundry_roll` Tauri command (frontend → Rust).
+/// Becomes the source of the outbound `game.roll_v5_pool` envelope.
+/// Empty `value_paths` is allowed — `[]` + `advanced_dice: 1` is a rouse check.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RollV5PoolInput {
+    pub actor_id: String,
+    pub value_paths: Vec<String>,
+    pub difficulty: u8,
+    pub flavor: Option<String>,
+    pub advanced_dice: Option<u8>,
+    pub selectors: Option<Vec<String>>,
+}
+
+/// Input for the `post_foundry_chat` Tauri command (frontend → Rust).
+/// Becomes the source of the outbound `game.post_chat_as_actor` envelope.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostChatAsActorInput {
+    pub actor_id: String,
+    pub content: String,
+    pub flavor: Option<String>,
+    pub roll_mode: Option<String>,
+}
