@@ -75,6 +75,8 @@ pub fn run() {
             tools::foundry_chat::trigger_foundry_roll,
             tools::foundry_chat::post_foundry_chat,
             tools::character::character_set_field,
+            tools::character::character_add_advantage,
+            tools::character::character_remove_advantage,
             bridge::commands::bridge_get_characters,
             bridge::commands::bridge_get_status,
             bridge::commands::bridge_refresh,
