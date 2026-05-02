@@ -90,6 +90,58 @@ in `ARCHITECTURE.md` §10 — do not "fix" them.
   `Closes #N` in the commit-message footer. The user closes the
   issue or merges the PR.
 
+## Workflow overrides
+
+These rules override the default behavior of corresponding superpowers
+skills for this repo. The `using-superpowers` priority chain says
+"User's explicit instructions" are higher priority than skill
+defaults — these instructions ARE those user instructions, so they
+win. When a workflow override conflicts with a skill's checklist,
+follow the override.
+
+- **Spec supersedes brainstorming.** If a spec for the feature
+  already exists at `docs/superpowers/specs/*.md` (any file whose
+  name matches the feature topic), do **not** invoke
+  `superpowers:brainstorming`. Read the spec, write a 5-bullet
+  "what I understood" recap, list at most 3 ambiguity-only questions
+  grounded in things the spec genuinely doesn't answer, and once
+  resolved invoke `superpowers:writing-plans` directly. The spec
+  IS the approved design. Do not present sections for re-approval,
+  do not propose 2-3 alternative approaches, do not run the spec
+  self-review or user spec-review gates a second time. Skip the
+  brainstorming `<HARD-GATE>` — it exists to force *some* approved
+  design, and the spec already is one.
+- **Lean plan execution.** When executing a plan in this repo, do
+  **not** invoke `superpowers:subagent-driven-development`'s
+  per-task spec-compliance reviewer or per-task code-quality
+  reviewer subagents. Per task: dispatch ONE implementer subagent
+  with full task text + scene-setting context, run
+  `./scripts/verify.sh` after the implementer commits, then move
+  on. After ALL plan tasks are committed, run a SINGLE
+  `code-review:code-review` against the full branch diff. Plan
+  precision + `verify.sh` + final review provide the quality gates;
+  per-task reviewer subagents triple-bill for marginal catch on
+  the mostly-mechanical work in this repo (router wiring, typed
+  wrappers, schema migrations, IPC command registration). Use
+  `superpowers:executing-plans` (single-session, no per-task
+  fan-out) for plans whose tasks are tightly coupled, and the
+  one-implementer-per-task pattern above when tasks are
+  independent.
+- **TDD on demand.** Subagents executing plan tasks should NOT
+  auto-invoke `superpowers:test-driven-development`. The plan
+  task text itself states whether tests are required (look for
+  "tests: required" or an explicit test step). Default for
+  wiring / refactor / IPC-router / typed-wrapper tasks is no new
+  tests — `verify.sh` (`npm run check` + `cargo check` +
+  `cargo test` + frontend build) is the gate. Reserve TDD for
+  genuine logic: dice mechanics, V5 combat rules, bridge protocol
+  decoding, character data transforms.
+- **Plan tasks include `verify.sh` before any commit.** Already
+  in feedback memory; restating here so the rule lives next to
+  its enforcement context. Every plan task ending in a commit
+  must list `./scripts/verify.sh` as the step immediately before
+  the commit step.
+
 ## Pointers
 
 - Architecture: `ARCHITECTURE.md`

@@ -6,7 +6,23 @@
     type RollV5PoolInput,
     type PostChatAsActorInput,
   } from '$lib/foundry-chat/api';
-  import type { BridgeCharacter } from '../types';
+  import { characterSetField } from '$lib/character/api';
+  import type {
+    BridgeCharacter,
+    CanonicalFieldName,
+    WriteTarget,
+  } from '../types';
+
+  const CANONICAL_FIELDS: readonly CanonicalFieldName[] = [
+    'hunger',
+    'humanity',
+    'humanity_stains',
+    'blood_potency',
+    'health_superficial',
+    'health_aggravated',
+    'willpower_superficial',
+    'willpower_aggravated',
+  ] as const;
 
   // ── Last-action feedback ─────────────────────────────────────────────
   type ActionState =
@@ -141,6 +157,43 @@
     }
   }
 
+  // ── character.set_field form ─────────────────────────────────────────
+  let setFieldTarget: WriteTarget = $state('live');
+  let setFieldName: CanonicalFieldName = $state('hunger');
+  let setFieldValue: number = $state(3);
+
+  async function submitSetField() {
+    if (!selectedActorId) {
+      action = {
+        kind: 'err',
+        label: 'character_set_field',
+        message: 'Pick a Foundry actor first.',
+      };
+      return;
+    }
+    action = { kind: 'pending', label: 'character_set_field' };
+    try {
+      await characterSetField(
+        setFieldTarget,
+        'foundry',
+        selectedActorId,
+        setFieldName,
+        Number.isFinite(setFieldValue) ? setFieldValue : 0,
+      );
+      action = {
+        kind: 'ok',
+        label: `character_set_field (${setFieldTarget} ${setFieldName}=${setFieldValue})`,
+        at: new Date().toLocaleTimeString(),
+      };
+    } catch (e) {
+      action = {
+        kind: 'err',
+        label: 'character_set_field',
+        message: String(e),
+      };
+    }
+  }
+
   async function submitInvalidActor() {
     action = { kind: 'pending', label: 'trigger_foundry_roll (error path)' };
     try {
@@ -251,6 +304,39 @@
       <div class="actions">
         <button type="button" onclick={submitChat} disabled={action.kind === 'pending'}>
           Post chat
+        </button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>character.set_field</h2>
+      <p class="hint">
+        Routes a canonical field write to live (Foundry), saved DB, or both
+        (issue #6). Saved/both targets need a saved row for this actor.
+      </p>
+      <label>
+        <span class="label">target</span>
+        <select bind:value={setFieldTarget}>
+          <option value="live">live (Foundry only)</option>
+          <option value="saved">saved (DB only)</option>
+          <option value="both">both</option>
+        </select>
+      </label>
+      <label>
+        <span class="label">field</span>
+        <select bind:value={setFieldName}>
+          {#each CANONICAL_FIELDS as name (name)}
+            <option value={name}>{name}</option>
+          {/each}
+        </select>
+      </label>
+      <label>
+        <span class="label">value (integer)</span>
+        <input type="number" bind:value={setFieldValue} />
+      </label>
+      <div class="actions">
+        <button type="button" onclick={submitSetField} disabled={action.kind === 'pending'}>
+          Set field
         </button>
       </div>
     </div>
