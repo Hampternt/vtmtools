@@ -256,6 +256,66 @@
       if (busyAdvantageKey === key) busyAdvantageKey = null;
     }
   }
+
+  // ── Add advantage form ──────────────────────────────────────────────────
+
+  type AddFormState = {
+    charKey: string;
+    featuretype: FeatureType;
+    name: string;
+    points: number;
+    description: string;
+    submitting: boolean;
+  };
+
+  let addForm = $state<AddFormState | null>(null);
+
+  function startAdd(char: BridgeCharacter, featuretype: FeatureType) {
+    if (!advantageEditAllowed(char)) return;
+    addForm = {
+      charKey: `${char.source}:${char.source_id}`,
+      featuretype,
+      name: '',
+      points: 0,
+      description: '',
+      submitting: false,
+    };
+  }
+
+  function cancelAdd() { addForm = null; }
+
+  function isAddActive(char: BridgeCharacter, featuretype: FeatureType): boolean {
+    if (!addForm) return false;
+    return addForm.charKey === `${char.source}:${char.source_id}`
+        && addForm.featuretype === featuretype;
+  }
+
+  function addFormValid(form: AddFormState): boolean {
+    return form.name.trim().length > 0
+        && form.points >= 0
+        && form.points <= 10;
+  }
+
+  async function submitAdd(char: BridgeCharacter) {
+    if (!addForm) return;
+    if (!isAddActive(char, addForm.featuretype)) return;
+    if (!addFormValid(addForm)) return;
+    addForm.submitting = true;
+    try {
+      await characterAddAdvantage(
+        'live', char.source, char.source_id,
+        addForm.featuretype,
+        addForm.name.trim(),
+        addForm.description,
+        addForm.points,
+      );
+      addForm = null;
+    } catch (e) {
+      console.error('[Campaign] characterAddAdvantage failed:', e);
+      window.alert(String(e));
+      if (addForm) addForm.submitting = false;
+    }
+  }
 </script>
 
 {#snippet stepper(char: BridgeCharacter, field: CanonicalFieldName, current: number)}
@@ -307,6 +367,70 @@
       title={`Remove ${featuretype}`}
       aria-label={`Remove ${featuretype} ${item.name}`}
     >×</button>
+  {/if}
+{/snippet}
+
+{#snippet addBtn(char: BridgeCharacter, featuretype: FeatureType)}
+  {#if advantageEditAllowed(char) && !isAddActive(char, featuretype)}
+    <button
+      type="button"
+      class="feat-chip add-chip"
+      onclick={() => startAdd(char, featuretype)}
+      title={`Add ${featuretype}`}
+    >+ Add {featuretype}</button>
+  {/if}
+{/snippet}
+
+{#snippet addForm_(char: BridgeCharacter, featuretype: FeatureType)}
+  {#if addForm && isAddActive(char, featuretype)}
+    <form
+      class="add-form"
+      onsubmit={(e) => { e.preventDefault(); void submitAdd(char); }}
+    >
+      <div class="form-row">
+        <label for={`add-name-${addForm.charKey}-${featuretype}`}>Name</label>
+        <input
+          id={`add-name-${addForm.charKey}-${featuretype}`}
+          type="text"
+          bind:value={addForm.name}
+          maxlength="120"
+          required
+          autofocus
+        />
+      </div>
+      <div class="form-row">
+        <label for={`add-points-${addForm.charKey}-${featuretype}`}>Points</label>
+        <input
+          id={`add-points-${addForm.charKey}-${featuretype}`}
+          type="number"
+          min="0"
+          max="10"
+          bind:value={addForm.points}
+        />
+      </div>
+      <div class="form-row">
+        <label for={`add-desc-${addForm.charKey}-${featuretype}`}>Description</label>
+        <textarea
+          id={`add-desc-${addForm.charKey}-${featuretype}`}
+          bind:value={addForm.description}
+          rows="2"
+        ></textarea>
+      </div>
+      <div class="form-actions">
+        <button
+          type="submit"
+          class="btn-save"
+          disabled={!addFormValid(addForm) || addForm.submitting}
+          aria-busy={addForm.submitting}
+        >Add</button>
+        <button
+          type="button"
+          class="btn-save"
+          onclick={cancelAdd}
+          disabled={addForm.submitting}
+        >Cancel</button>
+      </div>
+    </form>
   {/if}
 {/snippet}
 
@@ -685,7 +809,7 @@
           <!-- ── Collapsible: feats (merits/flaws/backgrounds/boons + actor effects) ── -->
           {#if expandedFeats.has(charKey)}
             <div class="card-section">
-              {#if merits.length > 0}
+              {#if merits.length > 0 || advantageEditAllowed(char)}
                 <div class="feat-row">
                   <span class="stat-label">Merits</span>
                   <div class="feat-chips">
@@ -699,10 +823,12 @@
                         {@render chipRemoveBtn(char, 'merit', m)}
                       </span>
                     {/each}
+                    {@render addBtn(char, 'merit')}
                   </div>
+                  {@render addForm_(char, 'merit')}
                 </div>
               {/if}
-              {#if flaws.length > 0}
+              {#if flaws.length > 0 || advantageEditAllowed(char)}
                 <div class="feat-row">
                   <span class="stat-label">Flaws</span>
                   <div class="feat-chips">
@@ -716,10 +842,12 @@
                         {@render chipRemoveBtn(char, 'flaw', f)}
                       </span>
                     {/each}
+                    {@render addBtn(char, 'flaw')}
                   </div>
+                  {@render addForm_(char, 'flaw')}
                 </div>
               {/if}
-              {#if backgrounds.length > 0}
+              {#if backgrounds.length > 0 || advantageEditAllowed(char)}
                 <div class="feat-row">
                   <span class="stat-label">Backgrounds</span>
                   <div class="feat-chips">
@@ -731,10 +859,12 @@
                         {@render chipRemoveBtn(char, 'background', b)}
                       </span>
                     {/each}
+                    {@render addBtn(char, 'background')}
                   </div>
+                  {@render addForm_(char, 'background')}
                 </div>
               {/if}
-              {#if boons.length > 0}
+              {#if boons.length > 0 || advantageEditAllowed(char)}
                 <div class="feat-row">
                   <span class="stat-label">Boons</span>
                   <div class="feat-chips">
@@ -744,7 +874,9 @@
                         {@render chipRemoveBtn(char, 'boon', bn)}
                       </span>
                     {/each}
+                    {@render addBtn(char, 'boon')}
                   </div>
+                  {@render addForm_(char, 'boon')}
                 </div>
               {/if}
               {#if actorFx.length > 0}
@@ -1593,6 +1725,61 @@
   .chip-remove-btn[aria-busy="true"] {
     opacity: 0.4;
     cursor: wait;
+  }
+  /* ── Add-advantage chip + inline form (#8) ───────────────────────────── */
+  .feat-chip.add-chip {
+    background: transparent;
+    border-style: dashed;
+    border-color: var(--border-surface);
+    color: var(--text-ghost);
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .feat-chip.add-chip:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .add-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+    padding: 0.5rem;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border-faint);
+    border-radius: 5px;
+  }
+  .form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .form-row label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-ghost);
+    font-weight: 600;
+  }
+  .form-row input,
+  .form-row textarea {
+    background: var(--bg-input);
+    border: 1px solid var(--border-faint);
+    border-radius: 3px;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    font-family: inherit;
+  }
+  .form-row input:focus,
+  .form-row textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .form-actions {
+    display: flex;
+    gap: 0.4rem;
+    justify-content: flex-end;
   }
   .feat-empty {
     font-size: 0.78rem;
