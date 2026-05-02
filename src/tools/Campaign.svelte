@@ -478,14 +478,26 @@
 
           <!-- ── Health track ────────────────────────────────────────────── -->
           <div class="track-row">
-            <div class="track-boxes">
-              {#each Array.from({ length: healthMax }, (_, i) => i) as i}
-                <div
-                  class="box"
-                  class:superficial={i >= healthOk && i < healthOk + healthSup}
-                  class:aggravated={i >= healthOk + healthSup}
-                ></div>
-              {/each}
+            <div class="track-cluster">
+              <div class="track-boxes">
+                {#each Array.from({ length: healthMax }, (_, i) => i) as i}
+                  <div
+                    class="box"
+                    class:superficial={i >= healthOk && i < healthOk + healthSup}
+                    class:aggravated={i >= healthOk + healthSup}
+                  ></div>
+                {/each}
+              </div>
+              <div class="track-controls">
+                <div class="ctrl-row">
+                  <span class="ctrl-label" title="Superficial">Sup</span>
+                  {@render stepper(char, 'health_superficial', healthSup)}
+                </div>
+                <div class="ctrl-row">
+                  <span class="ctrl-label" title="Aggravated">Agg</span>
+                  {@render stepper(char, 'health_aggravated', healthAgg)}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1319,6 +1331,19 @@
   .track-row {
     padding: 0.2rem var(--card-pad, 0.6rem);
     border-bottom: 1px solid var(--border-faint);
+  }
+
+  .track-cluster {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .track-cluster .track-boxes { flex: 1; }
+  .track-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    flex-shrink: 0;
   }
 
 
