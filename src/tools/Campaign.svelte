@@ -232,7 +232,11 @@
   {@const tooltip   = allowed
     ? ''
     : 'Roll20 live editing not supported (Phase 2.5)'}
-  <span class="stat-stepper" class:roll20-blocked={!allowed}>
+  <span
+    class="stat-stepper"
+    class:roll20-blocked={!allowed}
+    aria-disabled={!allowed}
+  >
     <button
       type="button"
       class="step-btn"
