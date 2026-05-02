@@ -235,6 +235,121 @@ pub async fn delete_character_modifier(
     db_delete(&pool.0, id).await
 }
 
+pub(crate) async fn db_set_active(pool: &SqlitePool, id: i64, value: bool) -> Result<(), String> {
+    let result = sqlx::query(
+        "UPDATE character_modifiers SET is_active = ?, updated_at = datetime('now') WHERE id = ?"
+    )
+    .bind(value as i64)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/modifier.set_active: {e}"))?;
+    if result.rows_affected() == 0 {
+        return Err("db/modifier.set_active: not found".to_string());
+    }
+    Ok(())
+}
+
+pub(crate) async fn db_set_hidden(pool: &SqlitePool, id: i64, value: bool) -> Result<(), String> {
+    let result = sqlx::query(
+        "UPDATE character_modifiers SET is_hidden = ?, updated_at = datetime('now') WHERE id = ?"
+    )
+    .bind(value as i64)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/modifier.set_hidden: {e}"))?;
+    if result.rows_affected() == 0 {
+        return Err("db/modifier.set_hidden: not found".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_modifier_active(
+    pool: tauri::State<'_, crate::DbState>,
+    id: i64,
+    is_active: bool,
+) -> Result<(), String> {
+    db_set_active(&pool.0, id, is_active).await
+}
+
+#[tauri::command]
+pub async fn set_modifier_hidden(
+    pool: tauri::State<'_, crate::DbState>,
+    id: i64,
+    is_hidden: bool,
+) -> Result<(), String> {
+    db_set_hidden(&pool.0, id, is_hidden).await
+}
+
+/// Idempotent upsert. If a row exists for (source, source_id, binding=Advantage{item_id}),
+/// returns it unchanged. Otherwise inserts with empty effects, is_active=false,
+/// is_hidden=false. Spec §8.2.
+pub(crate) async fn db_materialize_advantage(
+    pool: &SqlitePool,
+    source: &SourceKind,
+    source_id: &str,
+    item_id: &str,
+    name: &str,
+    description: &str,
+) -> Result<CharacterModifier, String> {
+    if name.trim().is_empty() {
+        return Err("db/modifier.materialize: empty name".to_string());
+    }
+
+    let existing = sqlx::query(
+        "SELECT id FROM character_modifiers
+         WHERE source = ? AND source_id = ?
+           AND json_extract(binding_json, '$.kind') = 'advantage'
+           AND json_extract(binding_json, '$.item_id') = ?
+         LIMIT 1"
+    )
+    .bind(source_to_str(source))
+    .bind(source_id)
+    .bind(item_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("db/modifier.materialize: {e}"))?;
+
+    if let Some(row) = existing {
+        let id: i64 = row.get("id");
+        return db_get(pool, id).await;
+    }
+
+    // Build the binding JSON inline (the enum's tag/snake_case variant rename is
+    // the source of truth for the literal we write here).
+    let binding_json = format!("{{\"kind\":\"advantage\",\"item_id\":{}}}",
+        serde_json::to_string(item_id).map_err(|e| format!("db/modifier.materialize: encode item_id: {e}"))?);
+
+    let result = sqlx::query(
+        "INSERT INTO character_modifiers
+         (source, source_id, name, description, effects_json, binding_json, tags_json)
+         VALUES (?, ?, ?, ?, '[]', ?, '[]')"
+    )
+    .bind(source_to_str(source))
+    .bind(source_id)
+    .bind(name)
+    .bind(description)
+    .bind(&binding_json)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/modifier.materialize: {e}"))?;
+    db_get(pool, result.last_insert_rowid()).await
+}
+
+#[tauri::command]
+pub async fn materialize_advantage_modifier(
+    pool: tauri::State<'_, crate::DbState>,
+    source: SourceKind,
+    source_id: String,
+    item_id: String,
+    name: String,
+    description: String,
+) -> Result<CharacterModifier, String> {
+    db_materialize_advantage(&pool.0, &source, &source_id, &item_id, &name, &description).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,5 +511,126 @@ mod tests {
         let pool = fresh_pool().await;
         let err = db_delete(&pool, 9999).await.unwrap_err();
         assert!(err.contains("not found"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn set_active_flips_flag() {
+        let pool = fresh_pool().await;
+        let m = db_add(&pool, sample_new("abc")).await.unwrap();
+        assert!(!m.is_active);
+        db_set_active(&pool, m.id, true).await.unwrap();
+        let after = db_get(&pool, m.id).await.unwrap();
+        assert!(after.is_active);
+        db_set_active(&pool, m.id, false).await.unwrap();
+        let after = db_get(&pool, m.id).await.unwrap();
+        assert!(!after.is_active);
+    }
+
+    #[tokio::test]
+    async fn set_active_missing_id_errors() {
+        let pool = fresh_pool().await;
+        let err = db_set_active(&pool, 9999, true).await.unwrap_err();
+        assert!(err.contains("not found"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn set_hidden_flips_flag() {
+        let pool = fresh_pool().await;
+        let m = db_add(&pool, sample_new("abc")).await.unwrap();
+        assert!(!m.is_hidden);
+        db_set_hidden(&pool, m.id, true).await.unwrap();
+        let after = db_get(&pool, m.id).await.unwrap();
+        assert!(after.is_hidden);
+    }
+
+    #[tokio::test]
+    async fn set_hidden_missing_id_errors() {
+        let pool = fresh_pool().await;
+        let err = db_set_hidden(&pool, 9999, true).await.unwrap_err();
+        assert!(err.contains("not found"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn materialize_inserts_when_absent() {
+        let pool = fresh_pool().await;
+        let m = db_materialize_advantage(
+            &pool, &SourceKind::Foundry, "char-1", "item-merit-1",
+            "Beautiful", "Looks bonus",
+        ).await.unwrap();
+        assert!(m.id > 0);
+        assert_eq!(m.name, "Beautiful");
+        assert_eq!(m.description, "Looks bonus");
+        assert!(m.effects.is_empty());
+        assert!(!m.is_active);
+        assert!(!m.is_hidden);
+        match &m.binding {
+            ModifierBinding::Advantage { item_id } => assert_eq!(item_id, "item-merit-1"),
+            other => panic!("expected Advantage binding, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn materialize_returns_existing_unchanged_when_present() {
+        let pool = fresh_pool().await;
+        let first = db_materialize_advantage(
+            &pool, &SourceKind::Foundry, "char-1", "item-merit-1",
+            "Beautiful", "Looks bonus",
+        ).await.unwrap();
+
+        // Mutate the row to verify the second call does NOT overwrite it.
+        db_set_active(&pool, first.id, true).await.unwrap();
+
+        // Calling materialize again with different name/description must NOT change the row.
+        let second = db_materialize_advantage(
+            &pool, &SourceKind::Foundry, "char-1", "item-merit-1",
+            "Different name", "Different description",
+        ).await.unwrap();
+
+        assert_eq!(second.id, first.id);
+        assert_eq!(second.name, "Beautiful");           // original preserved
+        assert_eq!(second.description, "Looks bonus");  // original preserved
+        assert!(second.is_active);                      // mutation preserved
+    }
+
+    #[tokio::test]
+    async fn materialize_distinguishes_by_character_and_by_item_id() {
+        let pool = fresh_pool().await;
+        let a = db_materialize_advantage(
+            &pool, &SourceKind::Foundry, "char-1", "item-x", "X", "x",
+        ).await.unwrap();
+        // Same item_id, different character → distinct row.
+        let b = db_materialize_advantage(
+            &pool, &SourceKind::Foundry, "char-2", "item-x", "X", "x",
+        ).await.unwrap();
+        // Same character, different item_id → distinct row.
+        let c = db_materialize_advantage(
+            &pool, &SourceKind::Foundry, "char-1", "item-y", "Y", "y",
+        ).await.unwrap();
+        assert_ne!(a.id, b.id);
+        assert_ne!(a.id, c.id);
+        assert_ne!(b.id, c.id);
+    }
+
+    #[tokio::test]
+    async fn materialize_allows_existing_free_modifiers_for_same_character() {
+        // No unique constraint per spec §5 rationale — a free-floating modifier
+        // and an advantage-bound modifier coexist freely.
+        let pool = fresh_pool().await;
+        let _free = db_add(&pool, sample_new("char-1")).await.unwrap();
+        let bound = db_materialize_advantage(
+            &pool, &SourceKind::Foundry, "char-1", "item-1", "Bound", "b",
+        ).await.unwrap();
+        let list = db_list(&pool, &SourceKind::Foundry, "char-1").await.unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list.iter().any(|m| m.id == bound.id));
+    }
+
+    #[tokio::test]
+    async fn materialize_rejects_empty_name() {
+        let pool = fresh_pool().await;
+        let err = db_materialize_advantage(
+            &pool, &SourceKind::Foundry, "char-1", "item-1", "", "desc",
+        ).await.unwrap_err();
+        assert!(err.contains("empty name"), "got: {err}");
     }
 }
