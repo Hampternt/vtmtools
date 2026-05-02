@@ -54,19 +54,13 @@ impl BridgeSource for FoundrySource {
 }
 
 fn canonical_to_path(name: &str) -> String {
-    match name {
-        "hunger" => "system.hunger.value",
-        "humanity" => "system.humanity.value",
-        "humanity_stains" => "system.humanity.stains",
-        "blood_potency" => "system.blood.potency",
-        "health_superficial" => "system.health.superficial",
-        "health_aggravated" => "system.health.aggravated",
-        "willpower_superficial" => "system.willpower.superficial",
-        "willpower_aggravated" => "system.willpower.aggravated",
-        other if other.starts_with("system.") => other,
-        other => other,
+    if let Some(p) = crate::shared::canonical_fields::canonical_to_foundry_path(name) {
+        return p.to_string();
     }
-    .to_string()
+    if name.starts_with("system.") {
+        return name.to_string();
+    }
+    name.to_string()
 }
 
 fn parse_value(s: &str) -> Value {
