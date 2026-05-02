@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tauri::State;
 
 use crate::bridge::types::{CanonicalCharacter, SourceInfo, SourceKind};
 use crate::bridge::BridgeConn;
+use crate::bridge::BridgeState;
 
 /// Returns per-source connection state. Sources without a connected
 /// client report `false`. The frontend uses this to render per-source
@@ -25,6 +27,28 @@ pub async fn bridge_get_characters(
     Ok(chars.values().cloned().collect())
 }
 
+/// Inner logic shared by the Tauri command and any non-IPC caller (the new
+/// character_set_field router). Operates directly on `Arc<BridgeState>` so
+/// callers don't need to hold a `State<'_, BridgeConn>`.
+pub(crate) async fn do_set_attribute(
+    state: &Arc<BridgeState>,
+    source: SourceKind,
+    source_id: String,
+    name: String,
+    value: String,
+) -> Result<(), String> {
+    let source_impl = state
+        .sources
+        .get(&source)
+        .cloned()
+        .ok_or_else(|| format!("source {} not registered", source.as_str()))?;
+    let payload = source_impl
+        .build_set_attribute(&source_id, &name, &value)
+        .map_err(|e| format!("bridge/set_attribute: {e}"))?;
+    let text = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
+    send_to_source_inner(state, source, text).await
+}
+
 /// Asks the named source to push attribute `name` = `value` for the given
 /// `source_id` (Roll20 → set_attribute on a sheet; Foundry → actor.update
 /// or item create depending on translation). No-op if the source isn't
@@ -37,17 +61,30 @@ pub async fn bridge_set_attribute(
     name: String,
     value: String,
 ) -> Result<(), String> {
-    let source_impl = conn
-        .0
-        .sources
-        .get(&source)
-        .cloned()
-        .ok_or_else(|| format!("source {} not registered", source.as_str()))?;
-    let payload = source_impl
-        .build_set_attribute(&source_id, &name, &value)
-        .map_err(|e| format!("bridge/set_attribute: {e}"))?;
-    let text = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
-    send_to_source(&conn, source, text).await
+    do_set_attribute(&conn.0, source, source_id, name, value).await
+}
+
+pub(crate) async fn send_to_source_inner(
+    state: &Arc<BridgeState>,
+    kind: SourceKind,
+    text: String,
+) -> Result<(), String> {
+    let tx = {
+        let conns = state.connections.lock().await;
+        conns.get(&kind).and_then(|c| c.outbound_tx.clone())
+    };
+    if let Some(tx) = tx {
+        tx.send(text).await.map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn send_to_source(
+    conn: &State<'_, BridgeConn>,
+    kind: SourceKind,
+    text: String,
+) -> Result<(), String> {
+    send_to_source_inner(&conn.0, kind, text).await
 }
 
 /// Asks one source — or all sources if `source` is `None` — to resend
@@ -83,21 +120,4 @@ pub async fn bridge_get_source_info(
 ) -> Result<Option<SourceInfo>, String> {
     let info = conn.0.source_info.lock().await;
     Ok(info.get(&source).cloned())
-}
-
-pub(crate) async fn send_to_source(
-    conn: &State<'_, BridgeConn>,
-    kind: SourceKind,
-    text: String,
-) -> Result<(), String> {
-    let tx = {
-        let conns = conn.0.connections.lock().await;
-        conns
-            .get(&kind)
-            .and_then(|c| c.outbound_tx.clone())
-    };
-    if let Some(tx) = tx {
-        tx.send(text).await.map_err(|e| e.to_string())?;
-    }
-    Ok(())
 }
