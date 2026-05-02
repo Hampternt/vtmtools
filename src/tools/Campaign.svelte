@@ -14,6 +14,8 @@
     foundryItemEffects,
     foundryEffectIsActive,
   } from '$lib/foundry/raw';
+  import { characterSetField } from '$lib/character/api';
+  import type { CanonicalFieldName } from '$lib/character/api';
 
   // ── State ───────────────────────────────────────────────────────────────
   const connected  = $derived(anyConnected());
@@ -58,6 +60,58 @@
   let expandedAttrs = $state<Set<string>>(new Set());
   let expandedInfo  = $state<Set<string>>(new Set());
   let expandedFeats = $state<Set<string>>(new Set());
+
+  // ── Stat editor (#7) ────────────────────────────────────────────────────
+
+  /// Per-field clamp ranges. Mirrors src-tauri/src/shared/canonical_fields.rs
+  /// expect_u8_in_range() bounds; keep the two in sync.
+  const FIELD_RANGES: Record<CanonicalFieldName, [number, number]> = {
+    hunger:                [0, 5],
+    humanity:              [0, 10],
+    humanity_stains:       [0, 10],
+    blood_potency:         [0, 10],
+    health_superficial:    [0, 20],
+    health_aggravated:     [0, 20],
+    willpower_superficial: [0, 20],
+    willpower_aggravated:  [0, 20],
+  };
+
+  /// True when the live card supports inline ±1 editing. Roll20 live editing
+  /// of canonical names is deferred to Phase 2.5 (router spec §2.8).
+  function liveEditAllowed(char: BridgeCharacter): boolean {
+    return char.source === 'foundry';
+  }
+
+  /// Identity for a per-field stepper: card key plus field name. Used to
+  /// scope the busy-disabled state to one button at a time.
+  function stepperKey(char: BridgeCharacter, field: CanonicalFieldName): string {
+    return `${char.source}:${char.source_id}:${field}`;
+  }
+
+  /// Which stepper is currently mid-IPC. Null when idle.
+  let busyKey = $state<string | null>(null);
+
+  async function tweakField(
+    char: BridgeCharacter,
+    field: CanonicalFieldName,
+    delta: number,
+    current: number,
+  ) {
+    const range = FIELD_RANGES[field];
+    const next  = Math.max(range[0], Math.min(range[1], current + delta));
+    if (next === current) return;
+    const key = stepperKey(char, field);
+    busyKey = key;
+    try {
+      await characterSetField('live', char.source, char.source_id, field, next);
+    } catch (e) {
+      console.error('[Campaign] characterSetField failed:', e);
+      window.alert(String(e));
+    } finally {
+      if (busyKey === key) busyKey = null;
+    }
+  }
+
   let urlCopied     = $state(false);
 
   type Density = 'auto' | 's' | 'm' | 'l';
@@ -167,6 +221,38 @@
     bridgeRefresh();
   }
 </script>
+
+{#snippet stepper(char: BridgeCharacter, field: CanonicalFieldName, current: number)}
+  {@const allowed   = liveEditAllowed(char)}
+  {@const key       = stepperKey(char, field)}
+  {@const busy      = busyKey === key}
+  {@const range     = FIELD_RANGES[field]}
+  {@const atFloor   = current <= range[0]}
+  {@const atCeiling = current >= range[1]}
+  {@const tooltip   = allowed
+    ? ''
+    : 'Roll20 live editing not supported (Phase 2.5)'}
+  <span class="stat-stepper" class:roll20-blocked={!allowed}>
+    <button
+      type="button"
+      class="step-btn"
+      onclick={() => tweakField(char, field, -1, current)}
+      disabled={!allowed || busy || atFloor}
+      aria-busy={busy}
+      title={tooltip}
+      aria-label={`Decrease ${field}`}
+    >−</button>
+    <button
+      type="button"
+      class="step-btn"
+      onclick={() => tweakField(char, field, +1, current)}
+      disabled={!allowed || busy || atCeiling}
+      aria-busy={busy}
+      title={tooltip}
+      aria-label={`Increase ${field}`}
+    >+</button>
+  </span>
+{/snippet}
 
 <div class="campaign">
   <!-- Toolbar -->
@@ -346,12 +432,15 @@
             <div class="header-line">
               {#if clan}<span class="char-clan">{clan}</span>{:else}<span></span>{/if}
               <div class="header-vitals">
-                <div class="hunger-drops">
-                  {#each dots(hunger, 5) as filled}
-                    <svg class="blood-drop" class:filled viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M12 2C12 2 4 14 4 20a8 8 0 0 0 16 0c0-6-8-18-8-18z" />
-                    </svg>
-                  {/each}
+                <div class="hunger-cluster">
+                  <div class="hunger-drops">
+                    {#each dots(hunger, 5) as filled}
+                      <svg class="blood-drop" class:filled viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2C12 2 4 14 4 20a8 8 0 0 0 16 0c0-6-8-18-8-18z" />
+                      </svg>
+                    {/each}
+                  </div>
+                  {@render stepper(char, 'hunger', hunger)}
                 </div>
                 <div class="bp-pill">
                   <span class="qs-label">BP</span>
@@ -1047,6 +1136,51 @@
     display: flex;
     align-items: center;
     gap: 0.25rem;
+  }
+  .hunger-cluster {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  /* ── Stat-editor stepper (#7) ────────────────────────────────────────── */
+  .stat-stepper {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+  }
+  .step-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    padding: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--text-muted);
+    background: var(--bg-input);
+    border: 1px solid var(--border-faint);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: color 0.1s, border-color 0.1s, background 0.1s, opacity 0.1s;
+    user-select: none;
+  }
+  .step-btn:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .step-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  .step-btn[aria-busy="true"] {
+    opacity: 0.55;
+    cursor: wait;
+  }
+  .stat-stepper.roll20-blocked .step-btn {
+    border-style: dashed;
   }
   .blood-drop {
     width: var(--drop-size, 1.6rem);
