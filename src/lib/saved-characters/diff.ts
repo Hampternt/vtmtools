@@ -124,6 +124,59 @@ export function diffSpecialties(
   return entries;
 }
 
+/** Build a map of (featuretype → Map<name, points>) from raw.items[] feature documents. */
+function collectAdvantages(raw: unknown): Record<string, Map<string, number>> {
+  const out: Record<string, Map<string, number>> = {
+    merit: new Map(), flaw: new Map(), background: new Map(), boon: new Map(),
+  };
+  const items = (raw as { items?: unknown[] } | null)?.items ?? [];
+  for (const item of items as Array<Record<string, unknown>>) {
+    if (item.type !== 'feature') continue;
+    const sys = item.system as Record<string, unknown> | undefined;
+    const ft = sys?.featuretype as string | undefined;
+    const name = item.name as string | undefined;
+    if (!ft || !(ft in out) || !name) continue;
+    const points = typeof sys?.points === 'number' ? sys.points : 0;
+    out[ft].set(name, points);
+  }
+  return out;
+}
+
+/**
+ * List comparator for advantage Items (merits/flaws/backgrounds/boons).
+ * Roll20 saves skip entirely (advantages live in repeating-section attrs,
+ * not feature documents). Matching key is `name` within `featuretype`,
+ * matching diffSpecialties' keying.
+ */
+export function diffAdvantages(
+  saved: BridgeCharacter,
+  live: BridgeCharacter,
+): DiffEntry[] {
+  if (saved.source !== 'foundry') return [];
+  const savedMap = collectAdvantages(saved.raw);
+  const liveMap  = collectAdvantages(live.raw);
+  const entries: DiffEntry[] = [];
+  for (const ft of ['merit', 'flaw', 'background', 'boon'] as const) {
+    const sv = savedMap[ft];
+    const lv = liveMap[ft];
+    const allNames = new Set([...sv.keys(), ...lv.keys()]);
+    for (const name of allNames) {
+      const before = sv.get(name);
+      const after  = lv.get(name);
+      const label  = `${cap(ft)}: ${name}`;
+      const key    = `${ft}.${name}`;
+      if (before === undefined && after !== undefined) {
+        entries.push({ key, label, before: '—', after: after > 0 ? `+ (${after})` : 'added' });
+      } else if (after === undefined && before !== undefined) {
+        entries.push({ key, label, before: before > 0 ? `(${before})` : 'present', after: '—' });
+      } else if (before !== after) {
+        entries.push({ key, label, before: String(before), after: String(after) });
+      }
+    }
+  }
+  return entries;
+}
+
 /**
  * Diff a saved character against a live one. Returns the changed entries
  * across canonical fields, Foundry skills/attributes, and specialties.
@@ -144,5 +197,5 @@ export function diffCharacter(
       before: before == null ? '—' : String(before),
       after:  after  == null ? '—' : String(after),
     }));
-  return [...pathDiffs, ...diffSpecialties(saved, live)];
+  return [...pathDiffs, ...diffSpecialties(saved, live), ...diffAdvantages(saved, live)];
 }
