@@ -164,6 +164,54 @@ pub async fn delete_saved_character(
     db_delete(&pool.0, id).await
 }
 
+pub(crate) async fn db_patch_field(
+    pool: &SqlitePool,
+    id: i64,
+    name: &str,
+    value: &serde_json::Value,
+) -> Result<(), String> {
+    let row = sqlx::query("SELECT canonical_json FROM saved_characters WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("db/saved_character.patch_field: {e}"))?
+        .ok_or_else(|| "db/saved_character.patch_field: not found".to_string())?;
+
+    let canonical_json: String = row.get("canonical_json");
+    let mut canonical: CanonicalCharacter = serde_json::from_str(&canonical_json)
+        .map_err(|e| format!("db/saved_character.patch_field: deserialize failed: {e}"))?;
+    crate::shared::canonical_fields::apply_canonical_field(&mut canonical, name, value)?;
+    let new_json = serde_json::to_string(&canonical)
+        .map_err(|e| format!("db/saved_character.patch_field: serialize failed: {e}"))?;
+
+    let result = sqlx::query(
+        "UPDATE saved_characters
+         SET canonical_json = ?, name = ?, last_updated_at = datetime('now')
+         WHERE id = ?",
+    )
+    .bind(&new_json)
+    .bind(&canonical.name)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/saved_character.patch_field: {e}"))?;
+
+    if result.rows_affected() == 0 {
+        return Err("db/saved_character.patch_field: not found".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn patch_saved_field(
+    pool: tauri::State<'_, crate::DbState>,
+    id: i64,
+    name: String,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    db_patch_field(&pool.0, id, &name, &value).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,5 +323,53 @@ mod tests {
         let pool = fresh_pool().await;
         let err = db_delete(&pool, 9999).await.unwrap_err();
         assert!(err.contains("not found"), "expected 'not found' in: {err}");
+    }
+
+    #[tokio::test]
+    async fn patch_field_updates_canonical_and_bumps_last_updated() {
+        let pool = fresh_pool().await;
+        let canonical = sample_canonical();
+        let id = db_save(&pool, &canonical, None).await.unwrap();
+
+        db_patch_field(&pool, id, "hunger", &serde_json::json!(4))
+            .await
+            .unwrap();
+
+        let list = db_list(&pool).await.unwrap();
+        assert_eq!(list[0].canonical.hunger, Some(4));
+        assert!(!list[0].last_updated_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn patch_field_missing_id_errors() {
+        let pool = fresh_pool().await;
+        let err = db_patch_field(&pool, 9999, "hunger", &serde_json::json!(0))
+            .await
+            .unwrap_err();
+        assert!(err.contains("not found"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn patch_field_unknown_name_errors() {
+        let pool = fresh_pool().await;
+        let canonical = sample_canonical();
+        let id = db_save(&pool, &canonical, None).await.unwrap();
+
+        let err = db_patch_field(&pool, id, "xyzzy", &serde_json::json!(0))
+            .await
+            .unwrap_err();
+        assert!(err.contains("unknown field 'xyzzy'"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn patch_field_type_mismatch_errors() {
+        let pool = fresh_pool().await;
+        let canonical = sample_canonical();
+        let id = db_save(&pool, &canonical, None).await.unwrap();
+
+        let err = db_patch_field(&pool, id, "hunger", &serde_json::json!("oops"))
+            .await
+            .unwrap_err();
+        assert!(err.contains("expects integer"), "got: {err}");
     }
 }
