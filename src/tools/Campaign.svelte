@@ -503,15 +503,27 @@
 
           <!-- ── Willpower track ─────────────────────────────────────────── -->
           <div class="track-row">
-            <div class="track-boxes">
-              {#each Array.from({ length: wpMax }, (_, i) => i) as i}
-                <div
-                  class="box willpower"
-                  class:filled={i < wpOk}
-                  class:superficial={i >= wpOk && i < wpOk + wpSup}
-                  class:aggravated={i >= wpOk + wpSup}
-                ></div>
-              {/each}
+            <div class="track-cluster">
+              <div class="track-boxes">
+                {#each Array.from({ length: wpMax }, (_, i) => i) as i}
+                  <div
+                    class="box willpower"
+                    class:filled={i < wpOk}
+                    class:superficial={i >= wpOk && i < wpOk + wpSup}
+                    class:aggravated={i >= wpOk + wpSup}
+                  ></div>
+                {/each}
+              </div>
+              <div class="track-controls">
+                <div class="ctrl-row">
+                  <span class="ctrl-label" title="Superficial">Sup</span>
+                  {@render stepper(char, 'willpower_superficial', wpSup)}
+                </div>
+                <div class="ctrl-row">
+                  <span class="ctrl-label" title="Aggravated">Agg</span>
+                  {@render stepper(char, 'willpower_aggravated', wpAgg)}
+                </div>
+              </div>
             </div>
           </div>
 
