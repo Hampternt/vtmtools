@@ -1718,8 +1718,14 @@
     justify-content: center;
     opacity: 0;
   }
-  .feat-chip:hover .chip-remove-btn {
+  .feat-chip:hover .chip-remove-btn,
+  .feat-chip:focus-within .chip-remove-btn {
     opacity: 1;
+  }
+  .chip-remove-btn:focus-visible {
+    opacity: 1;
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
   .chip-remove-btn:hover {
     color: var(--accent);
