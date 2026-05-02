@@ -14,6 +14,9 @@
     foundryItemEffects,
     foundryEffectIsActive,
   } from '$lib/foundry/raw';
+  import type { FoundryItem } from '../types';
+  import { characterRemoveAdvantage, characterAddAdvantage } from '$lib/character/api';
+  import type { FeatureType } from '$lib/character/api';
   import { characterSetField } from '$lib/character/api';
   import type { CanonicalFieldName } from '$lib/character/api';
 
@@ -220,6 +223,39 @@
   function refresh() {
     bridgeRefresh();
   }
+
+  // ── Advantage editor (#8) ────────────────────────────────────────────────
+
+  function advantageEditAllowed(char: BridgeCharacter): boolean {
+    return char.source === 'foundry';
+  }
+
+  let busyAdvantageKey = $state<string | null>(null);
+
+  function advantageBusyKey(char: BridgeCharacter, itemId: string): string {
+    return `${char.source}:${char.source_id}:${itemId}`;
+  }
+
+  async function removeAdvantage(
+    char: BridgeCharacter,
+    featuretype: FeatureType,
+    item: FoundryItem,
+  ) {
+    if (!advantageEditAllowed(char)) return;
+    if (!window.confirm(`Remove ${featuretype} '${item.name}'?`)) return;
+    const key = advantageBusyKey(char, item._id);
+    busyAdvantageKey = key;
+    try {
+      await characterRemoveAdvantage(
+        'live', char.source, char.source_id, featuretype, item._id,
+      );
+    } catch (e) {
+      console.error('[Campaign] characterRemoveAdvantage failed:', e);
+      window.alert(String(e));
+    } finally {
+      if (busyAdvantageKey === key) busyAdvantageKey = null;
+    }
+  }
 </script>
 
 {#snippet stepper(char: BridgeCharacter, field: CanonicalFieldName, current: number)}
@@ -256,6 +292,22 @@
       aria-label={`Increase ${field}`}
     >+</button>
   </span>
+{/snippet}
+
+{#snippet chipRemoveBtn(char: BridgeCharacter, featuretype: FeatureType, item: FoundryItem)}
+  {@const allowed = advantageEditAllowed(char)}
+  {@const busy    = busyAdvantageKey === advantageBusyKey(char, item._id)}
+  {#if allowed}
+    <button
+      type="button"
+      class="chip-remove-btn"
+      onclick={() => removeAdvantage(char, featuretype, item)}
+      disabled={busy}
+      aria-busy={busy}
+      title={`Remove ${featuretype}`}
+      aria-label={`Remove ${featuretype} ${item.name}`}
+    >×</button>
+  {/if}
 {/snippet}
 
 <div class="campaign">
@@ -644,6 +696,7 @@
                         <span class="feat-name">{m.name}</span>
                         {#if points > 0}<span class="feat-dots">{'•'.repeat(Math.min(points, 5))}</span>{/if}
                         {#if itemFx.length > 0}<span class="feat-fx-badge">+{itemFx.length}</span>{/if}
+                        {@render chipRemoveBtn(char, 'merit', m)}
                       </span>
                     {/each}
                   </div>
@@ -660,6 +713,7 @@
                         <span class="feat-name">{f.name}</span>
                         {#if points > 0}<span class="feat-dots">{'•'.repeat(Math.min(points, 5))}</span>{/if}
                         {#if itemFx.length > 0}<span class="feat-fx-badge">+{itemFx.length}</span>{/if}
+                        {@render chipRemoveBtn(char, 'flaw', f)}
                       </span>
                     {/each}
                   </div>
@@ -674,6 +728,7 @@
                       <span class="feat-chip background">
                         <span class="feat-name">{b.name}</span>
                         {#if points > 0}<span class="feat-dots">{'•'.repeat(Math.min(points, 5))}</span>{/if}
+                        {@render chipRemoveBtn(char, 'background', b)}
                       </span>
                     {/each}
                   </div>
@@ -686,6 +741,7 @@
                     {#each boons as bn}
                       <span class="feat-chip boon">
                         <span class="feat-name">{bn.name}</span>
+                        {@render chipRemoveBtn(char, 'boon', bn)}
                       </span>
                     {/each}
                   </div>
@@ -1504,6 +1560,39 @@
     padding: 0.05rem 0.25rem;
     border-radius: 2px;
     background: color-mix(in srgb, var(--accent-bright) 10%, transparent);
+  }
+  /* ── Chip remove button (#8) ─────────────────────────────────────────── */
+  .chip-remove-btn {
+    margin-left: 0.2rem;
+    width: 1rem;
+    height: 1rem;
+    padding: 0;
+    font-size: 0.85rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--text-ghost);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: color 0.1s, border-color 0.1s, background 0.1s, opacity 0.1s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+  }
+  .feat-chip:hover .chip-remove-btn {
+    opacity: 1;
+  }
+  .chip-remove-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+  }
+  .chip-remove-btn:disabled,
+  .chip-remove-btn[aria-busy="true"] {
+    opacity: 0.4;
+    cursor: wait;
   }
   .feat-empty {
     font-size: 0.78rem;
