@@ -465,6 +465,16 @@
               {/each}
             </div>
           </div>
+          <div class="conscience-controls">
+            <div class="ctrl-row">
+              <span class="ctrl-label">Humanity</span>
+              {@render stepper(char, 'humanity', humanity)}
+            </div>
+            <div class="ctrl-row">
+              <span class="ctrl-label">Stains</span>
+              {@render stepper(char, 'humanity_stains', stains)}
+            </div>
+          </div>
 
           <!-- ── Health track ────────────────────────────────────────────── -->
           <div class="track-row">
@@ -1234,6 +1244,26 @@
     height: 1px;
     background: #e07b00;
     transform: rotate(-12deg);
+  }
+  .conscience-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.25rem var(--card-pad, 0.6rem) 0.4rem;
+    border-bottom: 1px solid var(--border-faint);
+  }
+  .ctrl-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .ctrl-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-ghost);
+    font-weight: 600;
+    flex: 1;
   }
 
   /* ── Health / Willpower boxes ────────────────────────────────────────── */
