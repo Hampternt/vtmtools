@@ -202,6 +202,142 @@ pub(crate) async fn db_patch_field(
     Ok(())
 }
 
+/// Append a feature item to canonical.raw.items[]. Item shape matches what
+/// Foundry's actor.create_feature executor produces (type=feature,
+/// system.featuretype/description/points). The synthesized `_id` uses the
+/// `local-<uuid>` convention (router spec §2.3) — survives until the next
+/// "Update saved" replaces the blob with the live one.
+pub(crate) async fn db_add_advantage(
+    pool: &SqlitePool,
+    id: i64,
+    featuretype: &str,
+    name: &str,
+    description: &str,
+    points: i32,
+) -> Result<(), String> {
+    match featuretype {
+        "merit" | "flaw" | "background" | "boon" => {}
+        other => return Err(format!(
+            "db/saved_character.add_advantage: invalid featuretype: {other}"
+        )),
+    }
+
+    let row = sqlx::query("SELECT canonical_json FROM saved_characters WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("db/saved_character.add_advantage: {e}"))?
+        .ok_or_else(|| "db/saved_character.add_advantage: not found".to_string())?;
+
+    let canonical_json: String = row.get("canonical_json");
+    let mut canonical: CanonicalCharacter = serde_json::from_str(&canonical_json)
+        .map_err(|e| format!("db/saved_character.add_advantage: deserialize failed: {e}"))?;
+
+    let new_item = serde_json::json!({
+        "_id": format!("local-{}", uuid::Uuid::new_v4()),
+        "type": "feature",
+        "name": name,
+        "system": {
+            "featuretype": featuretype,
+            "description": description,
+            "points": points,
+        },
+        "effects": [],
+    });
+
+    let raw = canonical.raw.as_object_mut().ok_or_else(||
+        "db/saved_character.add_advantage: canonical.raw is not an object".to_string()
+    )?;
+    let items = raw.entry("items".to_string())
+        .or_insert_with(|| serde_json::Value::Array(vec![]));
+    let arr = items.as_array_mut().ok_or_else(||
+        "db/saved_character.add_advantage: canonical.raw.items is not an array".to_string()
+    )?;
+    arr.push(new_item);
+
+    let new_json = serde_json::to_string(&canonical)
+        .map_err(|e| format!("db/saved_character.add_advantage: serialize failed: {e}"))?;
+
+    let result = sqlx::query(
+        "UPDATE saved_characters
+         SET canonical_json = ?, last_updated_at = datetime('now')
+         WHERE id = ?",
+    )
+    .bind(&new_json)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/saved_character.add_advantage: {e}"))?;
+
+    if result.rows_affected() == 0 {
+        return Err("db/saved_character.add_advantage: not found".to_string());
+    }
+    Ok(())
+}
+
+/// Remove a feature item by `_id` AND `featuretype` (defense-in-depth so a
+/// UI bug can't accidentally delete a discipline document via a matching id).
+pub(crate) async fn db_remove_advantage(
+    pool: &SqlitePool,
+    id: i64,
+    featuretype: &str,
+    item_id: &str,
+) -> Result<(), String> {
+    let row = sqlx::query("SELECT canonical_json FROM saved_characters WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("db/saved_character.remove_advantage: {e}"))?
+        .ok_or_else(|| "db/saved_character.remove_advantage: not found".to_string())?;
+
+    let canonical_json: String = row.get("canonical_json");
+    let mut canonical: CanonicalCharacter = serde_json::from_str(&canonical_json)
+        .map_err(|e| format!("db/saved_character.remove_advantage: deserialize failed: {e}"))?;
+
+    let raw = canonical.raw.as_object_mut().ok_or_else(||
+        "db/saved_character.remove_advantage: canonical.raw is not an object".to_string()
+    )?;
+    let Some(items) = raw.get_mut("items").and_then(|v| v.as_array_mut()) else {
+        return Err(format!(
+            "db/saved_character.remove_advantage: no item with id '{item_id}'"
+        ));
+    };
+    let original_len = items.len();
+    items.retain(|item| {
+        let id_match = item.get("_id").and_then(|v| v.as_str()) == Some(item_id);
+        let ft_match = item
+            .get("system")
+            .and_then(|s| s.get("featuretype"))
+            .and_then(|v| v.as_str())
+            == Some(featuretype);
+        !(id_match && ft_match)
+    });
+    if items.len() == original_len {
+        return Err(format!(
+            "db/saved_character.remove_advantage: no {featuretype} with id '{item_id}'"
+        ));
+    }
+
+    let new_json = serde_json::to_string(&canonical)
+        .map_err(|e| format!("db/saved_character.remove_advantage: serialize failed: {e}"))?;
+
+    let result = sqlx::query(
+        "UPDATE saved_characters
+         SET canonical_json = ?, last_updated_at = datetime('now')
+         WHERE id = ?",
+    )
+    .bind(&new_json)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/saved_character.remove_advantage: {e}"))?;
+
+    if result.rows_affected() == 0 {
+        return Err("db/saved_character.remove_advantage: not found".to_string());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn patch_saved_field(
     pool: tauri::State<'_, crate::DbState>,
@@ -371,5 +507,136 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("expects integer"), "got: {err}");
+    }
+
+    // ── #8 advantage editor tests ────────────────────────────────────────
+
+    fn sample_canonical_with_items(items: serde_json::Value) -> CanonicalCharacter {
+        let mut c = sample_canonical();
+        c.raw = serde_json::json!({ "items": items });
+        c
+    }
+
+    async fn seed_with_canonical(pool: &SqlitePool, c: &CanonicalCharacter) -> i64 {
+        db_save(pool, c, None).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn add_advantage_happy_path_appends_item_with_local_uuid() {
+        let pool = fresh_pool().await;
+        let canonical = sample_canonical();
+        let id = db_save(&pool, &canonical, None).await.unwrap();
+
+        db_add_advantage(&pool, id, "merit", "Iron Will", "Strong-minded.", 2)
+            .await
+            .unwrap();
+
+        let list = db_list(&pool).await.unwrap();
+        let items = list[0].canonical.raw.get("items")
+            .and_then(|v| v.as_array())
+            .expect("items array");
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        let item_id = item.get("_id").and_then(|v| v.as_str()).unwrap();
+        assert!(item_id.starts_with("local-"), "got id: {item_id}");
+        assert_eq!(item.get("type").and_then(|v| v.as_str()), Some("feature"));
+        assert_eq!(item.get("name").and_then(|v| v.as_str()), Some("Iron Will"));
+        let sys = item.get("system").unwrap();
+        assert_eq!(sys.get("featuretype").and_then(|v| v.as_str()), Some("merit"));
+        assert_eq!(sys.get("description").and_then(|v| v.as_str()), Some("Strong-minded."));
+        assert_eq!(sys.get("points").and_then(|v| v.as_i64()), Some(2));
+    }
+
+    #[tokio::test]
+    async fn add_advantage_invalid_featuretype_errors() {
+        let pool = fresh_pool().await;
+        let id = db_save(&pool, &sample_canonical(), None).await.unwrap();
+        let err = db_add_advantage(&pool, id, "discipline", "X", "y", 1)
+            .await
+            .unwrap_err();
+        assert!(err.contains("invalid featuretype"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn add_advantage_missing_id_errors() {
+        let pool = fresh_pool().await;
+        let err = db_add_advantage(&pool, 9999, "merit", "X", "y", 1)
+            .await
+            .unwrap_err();
+        assert!(err.contains("not found"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn add_advantage_materializes_items_array_if_absent() {
+        // sample_canonical() has raw = json!({}), no items key. Must work.
+        let pool = fresh_pool().await;
+        let id = db_save(&pool, &sample_canonical(), None).await.unwrap();
+        db_add_advantage(&pool, id, "boon", "Owed Favor", "From Camarilla.", 3)
+            .await
+            .unwrap();
+        let list = db_list(&pool).await.unwrap();
+        let items = list[0].canonical.raw.get("items")
+            .and_then(|v| v.as_array())
+            .expect("items array");
+        assert_eq!(items.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn remove_advantage_happy_path() {
+        let pool = fresh_pool().await;
+        let canonical = sample_canonical_with_items(serde_json::json!([
+            { "_id": "item-keep",   "type": "feature", "name": "Keep",
+              "system": { "featuretype": "merit", "description": "k", "points": 1 },
+              "effects": [] },
+            { "_id": "item-remove", "type": "feature", "name": "Remove",
+              "system": { "featuretype": "merit", "description": "r", "points": 1 },
+              "effects": [] },
+        ]));
+        let id = seed_with_canonical(&pool, &canonical).await;
+
+        db_remove_advantage(&pool, id, "merit", "item-remove").await.unwrap();
+
+        let list = db_list(&pool).await.unwrap();
+        let items = list[0].canonical.raw.get("items")
+            .and_then(|v| v.as_array())
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].get("_id").and_then(|v| v.as_str()), Some("item-keep"));
+        assert!(!list[0].last_updated_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn remove_advantage_missing_id_errors() {
+        let pool = fresh_pool().await;
+        let canonical = sample_canonical_with_items(serde_json::json!([
+            { "_id": "item-1", "type": "feature", "name": "X",
+              "system": { "featuretype": "merit" }, "effects": [] },
+        ]));
+        let id = seed_with_canonical(&pool, &canonical).await;
+        let err = db_remove_advantage(&pool, id, "merit", "nonexistent").await.unwrap_err();
+        assert!(err.contains("no merit with id 'nonexistent'"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn remove_advantage_featuretype_mismatch_errors() {
+        // Defense-in-depth: if the UI passes the wrong featuretype, the id-match
+        // alone isn't enough — both must agree.
+        let pool = fresh_pool().await;
+        let canonical = sample_canonical_with_items(serde_json::json!([
+            { "_id": "item-1", "type": "feature", "name": "X",
+              "system": { "featuretype": "merit" }, "effects": [] },
+        ]));
+        let id = seed_with_canonical(&pool, &canonical).await;
+        let err = db_remove_advantage(&pool, id, "flaw", "item-1").await.unwrap_err();
+        assert!(err.contains("no flaw with id 'item-1'"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn remove_advantage_no_items_key_errors() {
+        // sample_canonical()'s raw is {} — no items key at all.
+        let pool = fresh_pool().await;
+        let id = db_save(&pool, &sample_canonical(), None).await.unwrap();
+        let err = db_remove_advantage(&pool, id, "merit", "item-1").await.unwrap_err();
+        assert!(err.contains("no item with id 'item-1'"), "got: {err}");
     }
 }

@@ -33,6 +33,7 @@ async-trait = "0.1"
 rcgen = "0.13"
 tokio-rustls = "0.26"
 rustls-pemfile = "2"
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 regex = "1"
