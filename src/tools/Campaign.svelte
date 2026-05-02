@@ -809,6 +809,11 @@
           <!-- ── Collapsible: feats (merits/flaws/backgrounds/boons + actor effects) ── -->
           {#if expandedFeats.has(charKey)}
             <div class="card-section">
+              {#if char.source === 'roll20'}
+                <div class="roll20-hint" title="Roll20 advantage editing not yet supported (Phase 2.5)">
+                  <span>Roll20 advantage editing — coming in Phase 2.5</span>
+                </div>
+              {/if}
               {#if merits.length > 0 || advantageEditAllowed(char)}
                 <div class="feat-row">
                   <span class="stat-label">Merits</span>
@@ -1785,6 +1790,14 @@
     font-size: 0.78rem;
     color: var(--text-ghost);
     font-style: italic;
+  }
+  .roll20-hint {
+    font-size: 0.72rem;
+    color: var(--text-ghost);
+    font-style: italic;
+    padding: 0.2rem 0;
+    border-bottom: 1px dashed var(--border-faint);
+    margin-bottom: 0.2rem;
   }
 
   /* Info rows */
