@@ -76,6 +76,9 @@ export type CanonicalFieldName =
   | 'willpower_superficial'
   | 'willpower_aggravated';
 
+/** Mirrors src-tauri/src/tools/character.rs::FeatureType. */
+export type FeatureType = 'merit' | 'flaw' | 'background' | 'boon';
+
 export interface HealthTrack {
   max: number;
   superficial: number;
