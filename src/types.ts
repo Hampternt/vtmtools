@@ -59,6 +59,23 @@ export interface HistoryEntry {
 
 export type SourceKind = 'roll20' | 'foundry';
 
+/** Mirrors src-tauri/src/tools/character.rs::WriteTarget. */
+export type WriteTarget = 'live' | 'saved' | 'both';
+
+/**
+ * Mirrors src-tauri/src/shared/canonical_fields.rs::ALLOWED_NAMES.
+ * Adding a name = update both ends in the same commit.
+ */
+export type CanonicalFieldName =
+  | 'hunger'
+  | 'humanity'
+  | 'humanity_stains'
+  | 'blood_potency'
+  | 'health_superficial'
+  | 'health_aggravated'
+  | 'willpower_superficial'
+  | 'willpower_aggravated';
+
 export interface HealthTrack {
   max: number;
   superficial: number;
