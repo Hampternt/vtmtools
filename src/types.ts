@@ -160,6 +160,59 @@ export interface FoundryRaw {
 }
 
 // ---------------------------------------------------------------------------
+// GM Screen — character modifiers (mirrors src-tauri/src/shared/modifier.rs).
+// CharacterModifier serializes camelCase via Rust serde rename; the binding
+// discriminator is `kind` and uses snake_case variants ('free' / 'advantage').
+// ---------------------------------------------------------------------------
+
+export type ModifierKind = 'pool' | 'difficulty' | 'note';
+
+export interface ModifierEffect {
+  kind: ModifierKind;
+  scope: string | null;
+  delta: number | null;
+  note: string | null;
+}
+
+export type ModifierBinding =
+  | { kind: 'free' }
+  | { kind: 'advantage'; item_id: string };
+
+export interface CharacterModifier {
+  id: number;
+  source: SourceKind;
+  sourceId: string;
+  name: string;
+  description: string;
+  effects: ModifierEffect[];
+  binding: ModifierBinding;
+  tags: string[];
+  isActive: boolean;
+  isHidden: boolean;
+  originTemplateId: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewCharacterModifierInput {
+  source: SourceKind;
+  sourceId: string;
+  name: string;
+  description: string;
+  effects: ModifierEffect[];
+  binding: ModifierBinding;
+  tags: string[];
+  originTemplateId: number | null;
+}
+
+export interface ModifierPatchInput {
+  name?: string;
+  description?: string;
+  effects?: ModifierEffect[];
+  tags?: string[];
+}
+
+// ---------------------------------------------------------------------------
 // Domains Manager / Chronicle graph types
 // ---------------------------------------------------------------------------
 
