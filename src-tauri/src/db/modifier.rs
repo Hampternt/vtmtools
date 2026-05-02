@@ -100,6 +100,141 @@ pub async fn list_all_character_modifiers(
     db_list_all(&pool.0).await
 }
 
+use crate::shared::modifier::{NewCharacterModifier, ModifierPatch};
+
+pub(crate) async fn db_add(
+    pool: &SqlitePool,
+    input: NewCharacterModifier,
+) -> Result<CharacterModifier, String> {
+    if input.name.trim().is_empty() {
+        return Err("db/modifier.add: empty name".to_string());
+    }
+    let effects_json = serde_json::to_string(&input.effects)
+        .map_err(|e| format!("db/modifier.add: serialize effects: {e}"))?;
+    let binding_json = serde_json::to_string(&input.binding)
+        .map_err(|e| format!("db/modifier.add: serialize binding: {e}"))?;
+    let tags_json = serde_json::to_string(&input.tags)
+        .map_err(|e| format!("db/modifier.add: serialize tags: {e}"))?;
+
+    let result = sqlx::query(
+        "INSERT INTO character_modifiers
+         (source, source_id, name, description, effects_json, binding_json, tags_json,
+          origin_template_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    .bind(source_to_str(&input.source))
+    .bind(&input.source_id)
+    .bind(&input.name)
+    .bind(&input.description)
+    .bind(&effects_json)
+    .bind(&binding_json)
+    .bind(&tags_json)
+    .bind(input.origin_template_id)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/modifier.add: {e}"))?;
+    let id = result.last_insert_rowid();
+    db_get(pool, id).await
+}
+
+pub(crate) async fn db_get(pool: &SqlitePool, id: i64) -> Result<CharacterModifier, String> {
+    let row = sqlx::query(
+        "SELECT id, source, source_id, name, description, effects_json,
+                binding_json, tags_json, is_active, is_hidden,
+                origin_template_id, created_at, updated_at
+         FROM character_modifiers WHERE id = ?"
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("db/modifier.get: {e}"))?
+    .ok_or_else(|| "db/modifier.get: not found".to_string())?;
+    row_to_modifier(&row)
+}
+
+#[tauri::command]
+pub async fn add_character_modifier(
+    pool: tauri::State<'_, crate::DbState>,
+    input: NewCharacterModifier,
+) -> Result<CharacterModifier, String> {
+    db_add(&pool.0, input).await
+}
+
+pub(crate) async fn db_update(
+    pool: &SqlitePool,
+    id: i64,
+    patch: ModifierPatch,
+) -> Result<CharacterModifier, String> {
+    // Load existing, apply patch in memory, write back. Simpler than dynamic SQL
+    // and avoids COALESCE-with-JSON gymnastics.
+    let mut current = db_get(pool, id).await
+        .map_err(|e| if e.contains("not found") { "db/modifier.update: not found".to_string() } else { format!("db/modifier.update: {e}") })?;
+
+    if let Some(name) = patch.name {
+        if name.trim().is_empty() {
+            return Err("db/modifier.update: empty name".to_string());
+        }
+        current.name = name;
+    }
+    if let Some(desc) = patch.description { current.description = desc; }
+    if let Some(effects) = patch.effects   { current.effects = effects; }
+    if let Some(tags) = patch.tags         { current.tags = tags; }
+
+    let effects_json = serde_json::to_string(&current.effects)
+        .map_err(|e| format!("db/modifier.update: serialize effects: {e}"))?;
+    let tags_json = serde_json::to_string(&current.tags)
+        .map_err(|e| format!("db/modifier.update: serialize tags: {e}"))?;
+
+    let result = sqlx::query(
+        "UPDATE character_modifiers
+         SET name = ?, description = ?, effects_json = ?, tags_json = ?,
+             updated_at = datetime('now')
+         WHERE id = ?"
+    )
+    .bind(&current.name)
+    .bind(&current.description)
+    .bind(&effects_json)
+    .bind(&tags_json)
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/modifier.update: {e}"))?;
+
+    if result.rows_affected() == 0 {
+        return Err("db/modifier.update: not found".to_string());
+    }
+    db_get(pool, id).await
+}
+
+#[tauri::command]
+pub async fn update_character_modifier(
+    pool: tauri::State<'_, crate::DbState>,
+    id: i64,
+    patch: ModifierPatch,
+) -> Result<CharacterModifier, String> {
+    db_update(&pool.0, id, patch).await
+}
+
+pub(crate) async fn db_delete(pool: &SqlitePool, id: i64) -> Result<(), String> {
+    let result = sqlx::query("DELETE FROM character_modifiers WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("db/modifier.delete: {e}"))?;
+    if result.rows_affected() == 0 {
+        return Err("db/modifier.delete: not found".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_character_modifier(
+    pool: tauri::State<'_, crate::DbState>,
+    id: i64,
+) -> Result<(), String> {
+    db_delete(&pool.0, id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +311,90 @@ mod tests {
         let list = db_list(&pool, &SourceKind::Foundry, "abc").await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "X");
+    }
+
+    fn sample_new(source_id: &str) -> crate::shared::modifier::NewCharacterModifier {
+        use crate::shared::modifier::*;
+        NewCharacterModifier {
+            source: SourceKind::Foundry,
+            source_id: source_id.to_string(),
+            name: "Beautiful".to_string(),
+            description: "Looks bonus".to_string(),
+            effects: vec![ModifierEffect {
+                kind: ModifierKind::Pool,
+                scope: Some("Social".to_string()),
+                delta: Some(1),
+                note: None,
+            }],
+            binding: ModifierBinding::Free,
+            tags: vec!["Social".to_string()],
+            origin_template_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn add_inserts_and_returns_full_record() {
+        let pool = fresh_pool().await;
+        let m = db_add(&pool, sample_new("abc")).await.unwrap();
+        assert!(m.id > 0);
+        assert_eq!(m.name, "Beautiful");
+        assert_eq!(m.effects.len(), 1);
+        assert!(matches!(m.binding, ModifierBinding::Free));
+        assert!(!m.is_active);
+        assert!(!m.is_hidden);
+        let list = db_list(&pool, &SourceKind::Foundry, "abc").await.unwrap();
+        assert_eq!(list.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn add_rejects_empty_name() {
+        let pool = fresh_pool().await;
+        let mut new = sample_new("abc");
+        new.name = String::new();
+        let err = db_add(&pool, new).await.unwrap_err();
+        assert!(err.contains("empty name"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn update_applies_partial_patch_and_preserves_untouched_fields() {
+        let pool = fresh_pool().await;
+        let m = db_add(&pool, sample_new("abc")).await.unwrap();
+        let original_desc = m.description.clone();
+
+        let patch = ModifierPatch {
+            name: Some("Renamed".to_string()),
+            description: None,
+            effects: None,
+            tags: None,
+        };
+        let updated = db_update(&pool, m.id, patch).await.unwrap();
+        assert_eq!(updated.name, "Renamed");
+        assert_eq!(updated.description, original_desc);
+        assert_eq!(updated.effects.len(), 1); // untouched
+        assert_eq!(updated.tags, vec!["Social".to_string()]); // untouched
+    }
+
+    #[tokio::test]
+    async fn update_missing_id_returns_not_found() {
+        let pool = fresh_pool().await;
+        let patch = ModifierPatch { name: Some("X".into()), description: None, effects: None, tags: None };
+        let err = db_update(&pool, 9999, patch).await.unwrap_err();
+        assert!(err.contains("not found"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn delete_removes_row() {
+        let pool = fresh_pool().await;
+        let m = db_add(&pool, sample_new("abc")).await.unwrap();
+        db_delete(&pool, m.id).await.unwrap();
+        let list = db_list(&pool, &SourceKind::Foundry, "abc").await.unwrap();
+        assert!(list.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_missing_id_returns_not_found() {
+        let pool = fresh_pool().await;
+        let err = db_delete(&pool, 9999).await.unwrap_err();
+        assert!(err.contains("not found"), "got: {err}");
     }
 }
