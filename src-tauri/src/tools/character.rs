@@ -23,6 +23,26 @@ pub enum WriteTarget {
     Both,
 }
 
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum FeatureType {
+    Merit,
+    Flaw,
+    Background,
+    Boon,
+}
+
+impl FeatureType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FeatureType::Merit      => "merit",
+            FeatureType::Flaw       => "flaw",
+            FeatureType::Background => "background",
+            FeatureType::Boon       => "boon",
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn character_set_field(
     db: State<'_, crate::DbState>,
@@ -136,6 +156,166 @@ async fn forward_live(
         s,
     )
     .await
+}
+
+#[tauri::command]
+pub async fn character_add_advantage(
+    db: State<'_, crate::DbState>,
+    bridge: State<'_, crate::bridge::BridgeConn>,
+    target: WriteTarget,
+    source: SourceKind,
+    source_id: String,
+    featuretype: FeatureType,
+    name: String,
+    description: String,
+    points: i32,
+) -> Result<(), String> {
+    do_add_advantage(
+        &db.0, &bridge.0, target, source, source_id,
+        featuretype, name, description, points,
+    ).await
+}
+
+pub(crate) async fn do_add_advantage(
+    pool: &SqlitePool,
+    bridge_state: &Arc<BridgeState>,
+    target: WriteTarget,
+    source: SourceKind,
+    source_id: String,
+    featuretype: FeatureType,
+    name: String,
+    description: String,
+    points: i32,
+) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err("character/add_advantage: empty name".to_string());
+    }
+    if !(0..=10).contains(&points) {
+        return Err(format!(
+            "character/add_advantage: points {points} out of range 0..=10"
+        ));
+    }
+
+    if target != WriteTarget::Saved && source == SourceKind::Roll20 {
+        return Err(
+            "character/add_advantage: Roll20 live editing of advantages not yet supported"
+                .to_string(),
+        );
+    }
+
+    let saved_id: Option<i64> = if target != WriteTarget::Live {
+        Some(lookup_saved_id(pool, source, &source_id).await?)
+    } else {
+        None
+    };
+
+    let do_saved = || async {
+        crate::db::saved_character::db_add_advantage(
+            pool,
+            saved_id.unwrap(),
+            featuretype.as_str(),
+            &name,
+            &description,
+            points,
+        )
+        .await
+    };
+
+    let do_live = || async {
+        let payload = crate::bridge::foundry::actions::actor::build_create_feature(
+            &source_id,
+            featuretype.as_str(),
+            &name,
+            &description,
+            points,
+        )
+        .map_err(|e| format!("character/add_advantage: {e}"))?;
+        let text = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
+        crate::bridge::commands::send_to_source_inner(bridge_state, source, text).await
+    };
+
+    match target {
+        WriteTarget::Saved => do_saved().await,
+        WriteTarget::Live  => do_live().await,
+        WriteTarget::Both  => {
+            do_saved().await
+                .map_err(|e| format!("character/add_advantage: saved write failed: {e}"))?;
+            do_live().await
+                .map_err(|e| format!(
+                    "character/add_advantage: saved updated, live failed: {e}"
+                ))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn character_remove_advantage(
+    db: State<'_, crate::DbState>,
+    bridge: State<'_, crate::bridge::BridgeConn>,
+    target: WriteTarget,
+    source: SourceKind,
+    source_id: String,
+    featuretype: FeatureType,
+    item_id: String,
+) -> Result<(), String> {
+    do_remove_advantage(
+        &db.0, &bridge.0, target, source, source_id, featuretype, item_id,
+    ).await
+}
+
+pub(crate) async fn do_remove_advantage(
+    pool: &SqlitePool,
+    bridge_state: &Arc<BridgeState>,
+    target: WriteTarget,
+    source: SourceKind,
+    source_id: String,
+    featuretype: FeatureType,
+    item_id: String,
+) -> Result<(), String> {
+    if item_id.trim().is_empty() {
+        return Err("character/remove_advantage: empty item_id".to_string());
+    }
+
+    if target != WriteTarget::Saved && source == SourceKind::Roll20 {
+        return Err(
+            "character/remove_advantage: Roll20 live editing of advantages not yet supported"
+                .to_string(),
+        );
+    }
+
+    let saved_id: Option<i64> = if target != WriteTarget::Live {
+        Some(lookup_saved_id(pool, source, &source_id).await?)
+    } else {
+        None
+    };
+
+    let do_saved = || async {
+        crate::db::saved_character::db_remove_advantage(
+            pool, saved_id.unwrap(), featuretype.as_str(), &item_id,
+        )
+        .await
+    };
+
+    let do_live = || async {
+        let payload = crate::bridge::foundry::actions::actor::build_delete_item_by_id(
+            &source_id, &item_id,
+        );
+        let text = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
+        crate::bridge::commands::send_to_source_inner(bridge_state, source, text).await
+    };
+
+    match target {
+        WriteTarget::Saved => do_saved().await,
+        WriteTarget::Live  => do_live().await,
+        WriteTarget::Both  => {
+            do_saved().await
+                .map_err(|e| format!("character/remove_advantage: saved write failed: {e}"))?;
+            do_live().await
+                .map_err(|e| format!(
+                    "character/remove_advantage: saved updated, live failed: {e}"
+                ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -441,5 +621,283 @@ mod tests {
         let json: String = row.get("canonical_json");
         let updated: CanonicalCharacter = serde_json::from_str(&json).unwrap();
         assert_eq!(updated.hunger, Some(4));
+    }
+
+    // ── #8 advantage editor tests ────────────────────────────────────────
+
+    async fn seed_saved_row_with_item(pool: &SqlitePool, source_id: &str, item_id: &str, ft: &str) {
+        let mut c = sample_canonical();
+        c.raw = serde_json::json!({
+            "items": [
+                { "_id": item_id, "type": "feature", "name": "Pre-existing",
+                  "system": { "featuretype": ft, "description": "x", "points": 1 },
+                  "effects": [] }
+            ]
+        });
+        let canonical_json = serde_json::to_string(&c).unwrap();
+        sqlx::query(
+            "INSERT INTO saved_characters
+             (source, source_id, foundry_world, name, canonical_json)
+             VALUES ('foundry', ?, NULL, 'Test', ?)",
+        )
+        .bind(source_id)
+        .bind(&canonical_json)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    // ─── add_advantage ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn add_advantage_empty_name_errors() {
+        let pool = fresh_pool().await;
+        let (state, _rx) = make_bridge_state(true);
+        let err = do_add_advantage(
+            &pool, &state, WriteTarget::Live, SourceKind::Foundry,
+            "abc".to_string(), FeatureType::Merit,
+            "   ".to_string(), "desc".to_string(), 2,
+        ).await.unwrap_err();
+        assert!(err.contains("empty name"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn add_advantage_points_out_of_range_errors() {
+        let pool = fresh_pool().await;
+        let (state, _rx) = make_bridge_state(true);
+        let err = do_add_advantage(
+            &pool, &state, WriteTarget::Live, SourceKind::Foundry,
+            "abc".to_string(), FeatureType::Merit,
+            "X".to_string(), "y".to_string(), 11,
+        ).await.unwrap_err();
+        assert!(err.contains("out of range"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn add_advantage_roll20_live_errors() {
+        let pool = fresh_pool().await;
+        let (state, _rx) = make_bridge_state(true);
+        let err = do_add_advantage(
+            &pool, &state, WriteTarget::Live, SourceKind::Roll20,
+            "abc".to_string(), FeatureType::Merit,
+            "X".to_string(), "y".to_string(), 1,
+        ).await.unwrap_err();
+        assert!(
+            err.contains("Roll20 live editing of advantages not yet supported"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn add_advantage_roll20_saved_succeeds() {
+        // Saved-side editing works for any source — Roll20 fast-fail only on Live.
+        let pool = fresh_pool().await;
+        let (state, _rx) = make_bridge_state(true);
+        // Seed a roll20 saved row.
+        let mut c = sample_canonical();
+        c.source = SourceKind::Roll20;
+        let canonical_json = serde_json::to_string(&c).unwrap();
+        sqlx::query(
+            "INSERT INTO saved_characters
+             (source, source_id, foundry_world, name, canonical_json)
+             VALUES ('roll20', 'r20-1', NULL, 'R20', ?)",
+        )
+        .bind(&canonical_json)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        do_add_advantage(
+            &pool, &state, WriteTarget::Saved, SourceKind::Roll20,
+            "r20-1".to_string(), FeatureType::Merit,
+            "X".to_string(), "y".to_string(), 1,
+        ).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn add_advantage_target_saved_writes_db() {
+        let pool = fresh_pool().await;
+        let (state, _rx) = make_bridge_state(true);
+        seed_saved_row(&pool, "abc").await;
+
+        do_add_advantage(
+            &pool, &state, WriteTarget::Saved, SourceKind::Foundry,
+            "abc".to_string(), FeatureType::Merit,
+            "Iron Will".to_string(), "Strong-minded.".to_string(), 2,
+        ).await.unwrap();
+
+        let row = sqlx::query("SELECT canonical_json FROM saved_characters WHERE source_id = 'abc'")
+            .fetch_one(&pool).await.unwrap();
+        let json: String = row.get("canonical_json");
+        let c: CanonicalCharacter = serde_json::from_str(&json).unwrap();
+        let items = c.raw.get("items").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].get("name").and_then(|v| v.as_str()), Some("Iron Will"));
+    }
+
+    #[tokio::test]
+    async fn add_advantage_target_live_sends_payload() {
+        let pool = fresh_pool().await;
+        let (state, mut rx) = make_bridge_state(true);
+        let rx = rx.as_mut().expect("connected");
+
+        do_add_advantage(
+            &pool, &state, WriteTarget::Live, SourceKind::Foundry,
+            "actor-xyz".to_string(), FeatureType::Flaw,
+            "Bad Sight".to_string(), "Squints.".to_string(), 1,
+        ).await.unwrap();
+
+        let payload_text = rx.try_recv().expect("payload sent");
+        let payload: serde_json::Value = serde_json::from_str(&payload_text).unwrap();
+        assert_eq!(payload.get("type").and_then(|v| v.as_str()), Some("actor.create_feature"));
+        assert_eq!(payload.get("actor_id").and_then(|v| v.as_str()), Some("actor-xyz"));
+        assert_eq!(payload.get("featuretype").and_then(|v| v.as_str()), Some("flaw"));
+        assert_eq!(payload.get("name").and_then(|v| v.as_str()), Some("Bad Sight"));
+    }
+
+    #[tokio::test]
+    async fn add_advantage_target_both_writes_both() {
+        let pool = fresh_pool().await;
+        let (state, mut rx) = make_bridge_state(true);
+        let rx = rx.as_mut().expect("connected");
+        seed_saved_row(&pool, "abc").await;
+
+        do_add_advantage(
+            &pool, &state, WriteTarget::Both, SourceKind::Foundry,
+            "abc".to_string(), FeatureType::Boon,
+            "Owed Favor".to_string(), "From Camarilla.".to_string(), 3,
+        ).await.unwrap();
+
+        // Saved write landed.
+        let row = sqlx::query("SELECT canonical_json FROM saved_characters WHERE source_id = 'abc'")
+            .fetch_one(&pool).await.unwrap();
+        let json: String = row.get("canonical_json");
+        let c: CanonicalCharacter = serde_json::from_str(&json).unwrap();
+        assert_eq!(c.raw.get("items").and_then(|v| v.as_array()).unwrap().len(), 1);
+
+        // Live wire payload sent.
+        let payload_text = rx.try_recv().expect("payload sent");
+        let payload: serde_json::Value = serde_json::from_str(&payload_text).unwrap();
+        assert_eq!(payload.get("type").and_then(|v| v.as_str()), Some("actor.create_feature"));
+    }
+
+    #[tokio::test]
+    async fn add_advantage_both_partial_success_when_live_fails() {
+        // Force tx.send() to fail by dropping the receiver while keeping the
+        // sender alive in BridgeState.connections. tokio mpsc::Sender::send
+        // returns SendError when the receiver has been dropped, which
+        // send_to_source_inner surfaces as Err — triggering the partial-success
+        // path (saved-first ordering means the saved write already landed).
+        let pool = fresh_pool().await;
+        let (state, rx) = make_bridge_state(true);
+        drop(rx);
+        seed_saved_row(&pool, "abc").await;
+
+        let err = do_add_advantage(
+            &pool, &state, WriteTarget::Both, SourceKind::Foundry,
+            "abc".to_string(), FeatureType::Merit,
+            "X".to_string(), "y".to_string(), 1,
+        ).await.unwrap_err();
+
+        assert!(
+            err.starts_with("character/add_advantage: saved updated, live failed:"),
+            "got: {err}"
+        );
+
+        // Saved row was still written (saved-first ordering).
+        let row = sqlx::query("SELECT canonical_json FROM saved_characters WHERE source_id = 'abc'")
+            .fetch_one(&pool).await.unwrap();
+        let json: String = row.get("canonical_json");
+        let c: CanonicalCharacter = serde_json::from_str(&json).unwrap();
+        assert_eq!(c.raw.get("items").and_then(|v| v.as_array()).unwrap().len(), 1);
+    }
+
+    // ─── remove_advantage ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn remove_advantage_empty_item_id_errors() {
+        let pool = fresh_pool().await;
+        let (state, _rx) = make_bridge_state(true);
+        let err = do_remove_advantage(
+            &pool, &state, WriteTarget::Live, SourceKind::Foundry,
+            "abc".to_string(), FeatureType::Merit, "  ".to_string(),
+        ).await.unwrap_err();
+        assert!(err.contains("empty item_id"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn remove_advantage_roll20_live_errors() {
+        let pool = fresh_pool().await;
+        let (state, _rx) = make_bridge_state(true);
+        let err = do_remove_advantage(
+            &pool, &state, WriteTarget::Live, SourceKind::Roll20,
+            "abc".to_string(), FeatureType::Merit, "item-1".to_string(),
+        ).await.unwrap_err();
+        assert!(
+            err.contains("Roll20 live editing of advantages not yet supported"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_advantage_target_saved_writes_db() {
+        let pool = fresh_pool().await;
+        let (state, _rx) = make_bridge_state(true);
+        seed_saved_row_with_item(&pool, "abc", "item-1", "merit").await;
+
+        do_remove_advantage(
+            &pool, &state, WriteTarget::Saved, SourceKind::Foundry,
+            "abc".to_string(), FeatureType::Merit, "item-1".to_string(),
+        ).await.unwrap();
+
+        let row = sqlx::query("SELECT canonical_json FROM saved_characters WHERE source_id = 'abc'")
+            .fetch_one(&pool).await.unwrap();
+        let json: String = row.get("canonical_json");
+        let c: CanonicalCharacter = serde_json::from_str(&json).unwrap();
+        let items = c.raw.get("items").and_then(|v| v.as_array()).unwrap();
+        assert!(items.is_empty(), "items should be empty after remove");
+    }
+
+    #[tokio::test]
+    async fn remove_advantage_target_live_sends_payload() {
+        let pool = fresh_pool().await;
+        let (state, mut rx) = make_bridge_state(true);
+        let rx = rx.as_mut().expect("connected");
+
+        do_remove_advantage(
+            &pool, &state, WriteTarget::Live, SourceKind::Foundry,
+            "actor-xyz".to_string(), FeatureType::Background, "item-bg".to_string(),
+        ).await.unwrap();
+
+        let payload_text = rx.try_recv().expect("payload sent");
+        let payload: serde_json::Value = serde_json::from_str(&payload_text).unwrap();
+        assert_eq!(payload.get("type").and_then(|v| v.as_str()), Some("actor.delete_item_by_id"));
+        assert_eq!(payload.get("actor_id").and_then(|v| v.as_str()), Some("actor-xyz"));
+        assert_eq!(payload.get("item_id").and_then(|v| v.as_str()), Some("item-bg"));
+    }
+
+    #[tokio::test]
+    async fn remove_advantage_target_both_writes_both() {
+        let pool = fresh_pool().await;
+        let (state, mut rx) = make_bridge_state(true);
+        let rx = rx.as_mut().expect("connected");
+        seed_saved_row_with_item(&pool, "abc", "item-1", "merit").await;
+
+        do_remove_advantage(
+            &pool, &state, WriteTarget::Both, SourceKind::Foundry,
+            "abc".to_string(), FeatureType::Merit, "item-1".to_string(),
+        ).await.unwrap();
+
+        // Saved row updated.
+        let row = sqlx::query("SELECT canonical_json FROM saved_characters WHERE source_id = 'abc'")
+            .fetch_one(&pool).await.unwrap();
+        let json: String = row.get("canonical_json");
+        let c: CanonicalCharacter = serde_json::from_str(&json).unwrap();
+        assert!(c.raw.get("items").and_then(|v| v.as_array()).unwrap().is_empty());
+
+        // Live payload sent.
+        let payload_text = rx.try_recv().expect("payload sent");
+        let payload: serde_json::Value = serde_json::from_str(&payload_text).unwrap();
+        assert_eq!(payload.get("type").and_then(|v| v.as_str()), Some("actor.delete_item_by_id"));
     }
 }
