@@ -96,6 +96,21 @@ pub(crate) async fn do_push_to_foundry(
     bridge_state: &Arc<BridgeState>,
     modifier_id: i64,
 ) -> Result<PushReport, String> {
+    // Guard: refuse if Foundry isn't actually connected. BridgeState.characters
+    // persists across disconnects (see bridge/mod.rs cleanup block), so a stale
+    // cached actor would otherwise let send_to_source_inner silently no-op
+    // (no outbound_tx) — the UI would show a fake "Pushed N bonuses" toast.
+    let connected = bridge_state
+        .connections
+        .lock()
+        .await
+        .get(&SourceKind::Foundry)
+        .map(|c| c.connected)
+        .unwrap_or(false);
+    if !connected {
+        return Err("gm_screen/push: Foundry is not connected".to_string());
+    }
+
     // 1. Load the modifier (helper added in Step 0).
     let m = crate::db::modifier::get_modifier_by_id(pool, modifier_id)
         .await
@@ -212,6 +227,13 @@ pub async fn gm_screen_push_to_foundry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bridge::source::BridgeSource;
+    use crate::bridge::types::CanonicalCharacter;
+    use crate::bridge::ConnectionInfo;
+    use crate::shared::modifier::{ModifierBinding, NewCharacterModifier};
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use tokio::sync::Mutex;
 
     fn pool_effect(delta: i32, paths: Vec<&str>) -> ModifierEffect {
         ModifierEffect {
@@ -309,5 +331,121 @@ mod tests {
         let ours_v2 = vec![json!({"source": "GM Screen #2: X", "value": 1, "paths": ["a"]})];
         let after_second = merge_bonuses(&after_first, 2, ours_v2);
         assert_eq!(after_first, after_second, "re-push yields the same array");
+    }
+
+    // --- Disconnect-guard integration test --------------------------------
+    // Verifies the precondition check inside do_push_to_foundry: if the Foundry
+    // connection is marked disconnected (even when the bridge's character cache
+    // still holds a valid actor from a prior session), the push must error out
+    // BEFORE any work runs — otherwise send_to_source_inner would silently
+    // no-op via a missing outbound_tx and the UI would show a fake success.
+
+    struct StubFoundrySource;
+
+    #[async_trait]
+    impl BridgeSource for StubFoundrySource {
+        async fn handle_inbound(&self, _msg: Value) -> Result<Vec<CanonicalCharacter>, String> {
+            Ok(vec![])
+        }
+        fn build_set_attribute(
+            &self,
+            _source_id: &str,
+            _name: &str,
+            _value: &str,
+        ) -> Result<Value, String> {
+            Ok(json!({"type": "stub"}))
+        }
+        fn build_refresh(&self) -> Value {
+            json!({"type": "refresh"})
+        }
+    }
+
+    async fn fresh_pool() -> sqlx::SqlitePool {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    /// Build a BridgeState for the disconnect path: Foundry connection present
+    /// but `connected=false` (mirroring the bridge/mod.rs disconnect cleanup).
+    fn make_disconnected_bridge_state() -> Arc<BridgeState> {
+        let mut sources: HashMap<SourceKind, Arc<dyn BridgeSource>> = HashMap::new();
+        sources.insert(SourceKind::Foundry, Arc::new(StubFoundrySource));
+
+        let mut connections = HashMap::new();
+        connections.insert(
+            SourceKind::Foundry,
+            ConnectionInfo {
+                connected: false,
+                outbound_tx: None,
+            },
+        );
+
+        Arc::new(BridgeState {
+            characters: Mutex::new(HashMap::new()),
+            connections: Mutex::new(connections),
+            source_info: Mutex::new(HashMap::new()),
+            sources,
+        })
+    }
+
+    fn cached_actor_with_item(item_id: &str) -> CanonicalCharacter {
+        CanonicalCharacter {
+            source: SourceKind::Foundry,
+            source_id: "actor-x".to_string(),
+            name: "Stale Cached Actor".to_string(),
+            controlled_by: None,
+            hunger: None,
+            health: None,
+            willpower: None,
+            humanity: None,
+            humanity_stains: None,
+            blood_potency: None,
+            raw: json!({
+                "items": [
+                    { "_id": item_id, "system": { "bonuses": [] } }
+                ]
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn push_errors_when_foundry_disconnected_even_with_stale_cache() {
+        let pool = fresh_pool().await;
+
+        // Insert a Foundry+advantage modifier. The connection check fires
+        // BEFORE the modifier load, but seeding the row makes the test more
+        // representative of the real call shape and guards against future
+        // regressions that reorder the checks.
+        let new = NewCharacterModifier {
+            source: SourceKind::Foundry,
+            source_id: "actor-x".to_string(),
+            name: "Stale Buff".to_string(),
+            description: String::new(),
+            effects: vec![pool_effect(2, vec!["attributes.strength"])],
+            binding: ModifierBinding::Advantage {
+                item_id: "merit-1".to_string(),
+            },
+            tags: vec![],
+            origin_template_id: None,
+        };
+        let added = crate::db::modifier::db_add(&pool, new).await.unwrap();
+
+        let bridge_state = make_disconnected_bridge_state();
+
+        // Populate the character cache to simulate the post-disconnect-but-
+        // cache-still-warm scenario the guard exists to defend against.
+        bridge_state.characters.lock().await.insert(
+            format!("{}:{}", SourceKind::Foundry.as_str(), "actor-x"),
+            cached_actor_with_item("merit-1"),
+        );
+
+        let err = do_push_to_foundry(&pool, &bridge_state, added.id)
+            .await
+            .expect_err("disconnected Foundry must error");
+        assert!(
+            err.to_lowercase().contains("not connected"),
+            "error must mention disconnect, got: {err}"
+        );
     }
 }
