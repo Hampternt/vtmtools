@@ -137,6 +137,16 @@ pub(crate) async fn db_add(
     db_get(pool, id).await
 }
 
+/// Public single-id loader. Thin shim over the crate-private `db_get` so
+/// non-IPC callers (e.g. `tools::gm_screen::do_push_to_foundry`) can fetch
+/// a modifier by its row id without taking a Tauri `State`.
+pub async fn get_modifier_by_id(
+    pool: &SqlitePool,
+    id: i64,
+) -> Result<CharacterModifier, String> {
+    db_get(pool, id).await
+}
+
 pub(crate) async fn db_get(pool: &SqlitePool, id: i64) -> Result<CharacterModifier, String> {
     let row = sqlx::query(
         "SELECT id, source, source_id, name, description, effects_json,
@@ -633,6 +643,42 @@ mod tests {
             &pool, &SourceKind::Foundry, "char-1", "item-1", "", "desc",
         ).await.unwrap_err();
         assert!(err.contains("empty name"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn get_by_id_returns_inserted_row() {
+        use crate::shared::modifier::*;
+        let pool = fresh_pool().await;
+        let new = NewCharacterModifier {
+            source: SourceKind::Foundry,
+            source_id: "actor-x".into(),
+            name: "Test Mod".into(),
+            description: String::new(),
+            effects: vec![ModifierEffect {
+                kind: ModifierKind::Pool,
+                scope: None,
+                delta: Some(2),
+                note: None,
+                paths: vec!["attributes.strength".into()],
+            }],
+            binding: ModifierBinding::Advantage { item_id: "item-y".into() },
+            tags: vec!["combat".into()],
+            origin_template_id: None,
+        };
+        let added = db_add(&pool, new).await.unwrap();
+        let loaded = get_modifier_by_id(&pool, added.id).await.unwrap();
+        assert_eq!(loaded.id, added.id);
+        assert_eq!(loaded.name, "Test Mod");
+        assert_eq!(loaded.effects.len(), 1);
+        assert_eq!(loaded.effects[0].paths, vec!["attributes.strength".to_string()]);
+        assert!(matches!(loaded.binding, ModifierBinding::Advantage { ref item_id } if item_id == "item-y"));
+    }
+
+    #[tokio::test]
+    async fn get_by_id_unknown_returns_err() {
+        let pool = fresh_pool().await;
+        let err = get_modifier_by_id(&pool, 99999).await.expect_err("unknown id must err");
+        assert!(err.contains("99999") || err.to_lowercase().contains("not found"), "got: {err}");
     }
 
     #[test]

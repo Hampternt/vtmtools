@@ -115,6 +115,7 @@ pub fn run() {
             db::modifier::set_modifier_active,
             db::modifier::set_modifier_hidden,
             db::modifier::materialize_advantage_modifier,
+            tools::gm_screen::gm_screen_push_to_foundry,
             db::advantage::list_advantages,
             db::advantage::add_advantage,
             db::advantage::update_advantage,

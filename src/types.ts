@@ -238,6 +238,18 @@ export interface ModifierPatchInput {
   tags?: string[];
 }
 
+/** Per-effect skip record returned by `gm_screen_push_to_foundry`. */
+export interface SkippedEffect {
+  effectIndex: number;
+  reason: string;
+}
+
+/** Result of one push-to-Foundry button press. */
+export interface PushReport {
+  pushed: number;
+  skipped: SkippedEffect[];
+}
+
 // ---------------------------------------------------------------------------
 // Domains Manager / Chronicle graph types
 // ---------------------------------------------------------------------------

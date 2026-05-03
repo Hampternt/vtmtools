@@ -3,6 +3,7 @@ import type {
   CharacterModifier,
   NewCharacterModifierInput,
   ModifierPatchInput,
+  PushReport,
   SourceKind,
 } from '../../types';
 
@@ -48,4 +49,14 @@ export function materializeAdvantageModifier(args: {
   description: string;
 }): Promise<CharacterModifier> {
   return invoke<CharacterModifier>('materialize_advantage_modifier', args);
+}
+
+/**
+ * Push the modifier's pool effects to its bound merit's `system.bonuses[]`
+ * on the live Foundry actor via the bridge. Idempotent — re-pressing replaces
+ * our prior bonuses for this modifier without touching player-added ones.
+ * Difficulty/note effects are skipped and surfaced in the returned PushReport.
+ */
+export function pushToFoundry(modifierId: number): Promise<PushReport> {
+  return invoke<PushReport>('gm_screen_push_to_foundry', { modifierId });
 }
