@@ -46,6 +46,19 @@
     }
   }
 
+  function addPath(i: number, raw: string) {
+    const p = raw.trim();
+    if (!p) return;
+    const cur = effects[i].paths ?? [];
+    if (cur.includes(p)) return;
+    effects[i] = { ...effects[i], paths: [...cur, p] };
+  }
+
+  function removePath(i: number, p: string) {
+    const cur = effects[i].paths ?? [];
+    effects[i] = { ...effects[i], paths: cur.filter(x => x !== p) };
+  }
+
   function commitTag() {
     const t = newTag.trim();
     if (!t || tags.includes(t)) { newTag = ''; return; }
@@ -78,37 +91,67 @@
 
   <div class="effects-list">
     {#each effects as effect, i (i)}
-      <div class="effect-row">
-        <select value={effect.kind} onchange={(e) => setKind(i, (e.currentTarget as HTMLSelectElement).value as ModifierKind)}>
-          {#each KINDS as k}<option value={k.value}>{k.label}</option>{/each}
-        </select>
+      <div class="effect-block">
+        <div class="effect-row">
+          <select value={effect.kind} onchange={(e) => setKind(i, (e.currentTarget as HTMLSelectElement).value as ModifierKind)}>
+            {#each KINDS as k}<option value={k.value}>{k.label}</option>{/each}
+          </select>
 
-        {#if effect.kind === 'note'}
-          <input
-            type="text"
-            placeholder="Note text"
-            value={effect.note ?? ''}
-            oninput={(e) => effects[i] = { ...effects[i], note: (e.currentTarget as HTMLInputElement).value }}
-          />
-        {:else}
-          <input
-            type="text"
-            placeholder="Scope (e.g. Social)"
-            class="scope"
-            value={effect.scope ?? ''}
-            oninput={(e) => {
-              const v = (e.currentTarget as HTMLInputElement).value;
-              effects[i] = { ...effects[i], scope: v === '' ? null : v };
-            }}
-          />
-          <div class="stepper">
-            <button onclick={() => bumpDelta(i, -1)} aria-label="Decrement">−</button>
-            <span class="delta">{effect.delta ?? 0}</span>
-            <button onclick={() => bumpDelta(i, 1)} aria-label="Increment">+</button>
+          {#if effect.kind === 'note'}
+            <input
+              type="text"
+              placeholder="Note text"
+              value={effect.note ?? ''}
+              oninput={(e) => effects[i] = { ...effects[i], note: (e.currentTarget as HTMLInputElement).value }}
+            />
+          {:else}
+            <input
+              type="text"
+              placeholder="Scope (e.g. Social)"
+              class="scope"
+              value={effect.scope ?? ''}
+              oninput={(e) => {
+                const v = (e.currentTarget as HTMLInputElement).value;
+                effects[i] = { ...effects[i], scope: v === '' ? null : v };
+              }}
+            />
+            <div class="stepper">
+              <button onclick={() => bumpDelta(i, -1)} aria-label="Decrement">−</button>
+              <span class="delta">{effect.delta ?? 0}</span>
+              <button onclick={() => bumpDelta(i, 1)} aria-label="Increment">+</button>
+            </div>
+          {/if}
+
+          <button class="remove" onclick={() => removeEffect(i)} aria-label="Remove effect">×</button>
+        </div>
+        {#if effect.kind !== 'note'}
+          <div class="effect-paths">
+            <span class="paths-label">paths</span>
+            {#each effect.paths ?? [] as p}
+              <span class="path-chip">
+                {p === '' ? '(pathless)' : p}
+                <button onclick={() => removePath(i, p)} aria-label="Remove path {p}">×</button>
+              </span>
+            {/each}
+            <input
+              type="text"
+              class="path-input"
+              placeholder="+ path (e.g. attributes.strength)"
+              onkeydown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const el = e.currentTarget as HTMLInputElement;
+                  addPath(i, el.value);
+                  el.value = '';
+                }
+              }}
+              onblur={(e) => {
+                const el = e.currentTarget as HTMLInputElement;
+                if (el.value.trim()) { addPath(i, el.value); el.value = ''; }
+              }}
+            />
           </div>
         {/if}
-
-        <button class="remove" onclick={() => removeEffect(i)} aria-label="Remove effect">×</button>
       </div>
     {/each}
     <button class="add" onclick={addEffect}>+ Add effect</button>
@@ -192,6 +235,51 @@
     text-align: center;
     color: var(--text-primary);
     font-variant-numeric: tabular-nums;
+  }
+  .effect-block { display: flex; flex-direction: column; gap: 0.3rem; }
+  .effect-paths {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem;
+    padding-left: 6.4rem;          /* aligns with end of select column above */
+  }
+  .paths-label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .path-chip {
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-faint);
+    border-radius: 999px;
+    padding: 0.1rem 0.45rem;
+    font-size: 0.7rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    font-family: ui-monospace, monospace;
+  }
+  .path-chip button {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.7rem;
+    padding: 0;
+  }
+  .path-input {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-faint);
+    border-radius: 0.3rem;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.7rem;
+    flex: 0 0 14rem;
+    min-width: 8rem;
+    box-sizing: border-box;
   }
   .tags-section h4 { margin: 0 0 0.4rem 0; font-size: 0.75rem; color: var(--text-label); font-weight: 500; }
   .tag-list { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
