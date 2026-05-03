@@ -33,7 +33,9 @@
     const sign = (e.delta ?? 0) >= 0 ? '+' : '';
     const scope = e.scope ? `${e.scope} ` : '';
     const label = e.kind === 'pool' ? 'dice' : 'difficulty';
-    return `${scope}${sign}${e.delta ?? 0} ${label}`;
+    const paths = (e.paths ?? []).filter(p => p !== '');
+    const pathSuffix = paths.length > 0 ? ` → ${paths.join(', ')}` : '';
+    return `${scope}${sign}${e.delta ?? 0} ${label}${pathSuffix}`;
   }
 
   /** "attributes.strength" → "Strength". Last dot-segment, capitalized. */
