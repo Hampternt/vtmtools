@@ -152,6 +152,37 @@
     }
   }
 
+  // Per-row transient notice surfacing the PushReport (or error). Single
+  // notice per row, scoped by cardKey. Auto-clears after 5s.
+  let pushNotice = $state<{ cardKey: string; text: string; ok: boolean } | null>(null);
+
+  function canPushFor(e: CardEntry): boolean {
+    if (character.source !== 'foundry') return false;
+    if (e.kind !== 'materialized') return false;            // virtual = no DB row yet
+    if (e.mod.binding.kind !== 'advantage') return false;
+    if (e.isStale) return false;
+    return e.mod.effects.some(eff => eff.kind === 'pool');
+  }
+
+  async function handlePush(e: CardEntry): Promise<void> {
+    if (e.kind !== 'materialized') return;
+    const cardKey = `m-${e.mod.id}`;
+    try {
+      const report = await modifiers.pushToFoundry(e.mod.id);
+      const skippedSummary = report.skipped.length > 0
+        ? ` (skipped ${report.skipped.length}: ${report.skipped.map(s => s.reason).join('; ')})`
+        : '';
+      pushNotice = {
+        cardKey,
+        text: `Pushed ${report.pushed} bonus${report.pushed === 1 ? '' : 'es'} to Foundry${skippedSummary}`,
+        ok: true,
+      };
+    } catch (err) {
+      pushNotice = { cardKey, text: `Push failed: ${err}`, ok: false };
+    }
+    setTimeout(() => { if (pushNotice?.cardKey === cardKey) pushNotice = null; }, 5000);
+  }
+
   function openEditor(e: CardEntry, anchor: HTMLElement): void {
     editorTarget = e.kind === 'materialized'
       ? { kind: 'materialized', mod: e.mod }
@@ -247,10 +278,18 @@
         onToggleActive={() => handleToggleActive(entry)}
         onHide={() => handleHide(entry)}
         onOpenEditor={(anchor) => openEditor(entry, anchor)}
+        canPush={canPushFor(entry)}
+        onPush={() => handlePush(entry)}
       />
     {/each}
     <button class="add-modifier" onclick={addFreeModifier}>+ Add modifier</button>
   </div>
+
+  {#if pushNotice}
+    <p class="push-notice" class:ok={pushNotice.ok} class:err={!pushNotice.ok}>
+      {pushNotice.text}
+    </p>
+  {/if}
 
   {#if editorOpen && editorTarget && popoverPos}
     <div class="popover-wrap" style="left: {popoverPos.left}px; top: {popoverPos.top}px;">
@@ -326,6 +365,17 @@
     position: fixed;
     z-index: 1000;
   }
+
+  .push-notice {
+    font-size: 0.7rem;
+    margin: 0.4rem 0 0 0;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+  }
+  .push-notice.ok  { color: var(--text-primary); border-left: 2px solid var(--accent-bright); }
+  .push-notice.err { color: var(--accent-amber);  border-left: 2px solid var(--accent-amber); }
 
   @media (prefers-reduced-motion: reduce) {
     .modifier-row {

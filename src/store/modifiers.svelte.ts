@@ -13,11 +13,13 @@ import {
   setModifierActive,
   setModifierHidden,
   materializeAdvantageModifier,
+  pushToFoundry as apiPushToFoundry,
 } from '$lib/modifiers/api';
 import type {
   CharacterModifier,
   NewCharacterModifierInput,
   ModifierPatchInput,
+  PushReport,
   SourceKind,
 } from '../types';
 
@@ -113,5 +115,8 @@ export const modifiers = {
     const row = await materializeAdvantageModifier(args);
     mergeRow(row);
     return row;
+  },
+  async pushToFoundry(modifierId: number): Promise<PushReport> {
+    return await apiPushToFoundry(modifierId);
   },
 };
