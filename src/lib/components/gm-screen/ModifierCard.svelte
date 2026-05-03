@@ -19,12 +19,20 @@
      * sheet directly and render even on virtual cards.
      */
     bonuses?: FoundryItemBonus[];
+    /** True when this card is push-to-Foundry-eligible: Foundry source,
+     *  advantage binding, materialized, with at least one pool effect. */
+    canPush?: boolean;
+    onPush?: () => void;
     onToggleActive: () => void;
     onOpenEditor: (anchor: HTMLElement) => void;
     onHide: () => void;
   }
 
-  let { modifier, isVirtual = false, isStale = false, bonuses = [], onToggleActive, onOpenEditor, onHide }: Props = $props();
+  let {
+    modifier, isVirtual = false, isStale = false, bonuses = [],
+    canPush = false, onPush,
+    onToggleActive, onOpenEditor, onHide,
+  }: Props = $props();
 
   let cogEl: HTMLButtonElement | undefined = $state();
 
@@ -98,6 +106,13 @@
       class:on={modifier.isActive}
       onclick={onToggleActive}
     >{modifier.isActive ? 'ON' : 'OFF'}</button>
+    {#if canPush}
+      <button
+        class="push"
+        title="Push these effects to the merit on Foundry"
+        onclick={onPush}
+      >↑ Push</button>
+    {/if}
     {#if !modifier.isHidden}
       <button class="hide" title="Hide card" onclick={onHide}>×</button>
     {/if}
@@ -205,6 +220,20 @@
     color: var(--text-primary);
     border-color: var(--accent-bright);
   }
+  .push {
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-faint);
+    border-radius: 0.3rem;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.65rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+  }
+  .modifier-card:hover .push,
+  .push:focus { opacity: 1; }
+  .push:hover { background: var(--accent); color: var(--text-primary); border-color: var(--accent-bright); }
   .hide {
     background: transparent;
     border: none;
