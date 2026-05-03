@@ -440,6 +440,7 @@ mod tests {
                 scope: Some("Social".to_string()),
                 delta: Some(1),
                 note: None,
+                paths: Vec::new(),
             }],
             binding: ModifierBinding::Free,
             tags: vec!["Social".to_string()],
@@ -632,5 +633,28 @@ mod tests {
             &pool, &SourceKind::Foundry, "char-1", "item-1", "", "desc",
         ).await.unwrap_err();
         assert!(err.contains("empty name"), "got: {err}");
+    }
+
+    #[test]
+    fn modifier_effect_serde_back_compat_and_roundtrip() {
+        // Legacy effects_json (no `paths` field) deserializes with empty paths.
+        let legacy = r#"{"kind":"pool","scope":"Strength","delta":2,"note":null}"#;
+        let parsed: crate::shared::modifier::ModifierEffect =
+            serde_json::from_str(legacy).expect("legacy shape parses");
+        assert_eq!(parsed.paths, Vec::<String>::new());
+        assert_eq!(parsed.delta, Some(2));
+
+        // New shape round-trips cleanly.
+        let new_shape = crate::shared::modifier::ModifierEffect {
+            kind: crate::shared::modifier::ModifierKind::Pool,
+            scope: Some("Strength rolls".into()),
+            delta: Some(3),
+            note: None,
+            paths: vec!["attributes.strength".into(), "skills.brawl".into()],
+        };
+        let json = serde_json::to_string(&new_shape).unwrap();
+        let back: crate::shared::modifier::ModifierEffect =
+            serde_json::from_str(&json).unwrap();
+        assert_eq!(back, new_shape);
     }
 }

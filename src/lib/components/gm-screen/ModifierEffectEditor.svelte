@@ -23,7 +23,7 @@
   ];
 
   function addEffect() {
-    effects = [...effects, { kind: 'pool', scope: null, delta: 0, note: null }];
+    effects = [...effects, { kind: 'pool', scope: null, delta: 0, note: null, paths: [] }];
   }
 
   function removeEffect(i: number) {

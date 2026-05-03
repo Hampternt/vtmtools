@@ -193,6 +193,11 @@ export interface ModifierEffect {
   scope: string | null;
   delta: number | null;
   note: string | null;
+  /**
+   * Foundry-bonus dot-paths (e.g. ["attributes.strength"]). Empty array = pathless.
+   * Only used by the push-to-Foundry button on `pool`-kind effects.
+   */
+  paths: string[];
 }
 
 export type ModifierBinding =

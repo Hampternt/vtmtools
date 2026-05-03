@@ -41,6 +41,11 @@ pub struct ModifierEffect {
     pub scope: Option<String>,
     pub delta: Option<i32>,
     pub note: Option<String>,
+    /// Foundry-bonus dot-paths (e.g. ["attributes.strength", "skills.subterfuge"]).
+    /// Mirrors `FoundryItemBonus.paths`. Empty vec = pathless. Only used by the
+    /// push-to-Foundry command on `pool`-kind effects; ignored for other kinds.
+    #[serde(default)]
+    pub paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
