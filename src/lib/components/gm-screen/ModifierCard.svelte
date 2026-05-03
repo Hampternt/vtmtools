@@ -23,6 +23,9 @@
      *  advantage binding, materialized, with at least one pool effect. */
     canPush?: boolean;
     onPush?: () => void;
+    /** True for materialized, advantage-bound cards on Foundry sources. */
+    canReset?: boolean;
+    onReset?: () => void;
     onToggleActive: () => void;
     onOpenEditor: (anchor: HTMLElement) => void;
     onHide: () => void;
@@ -31,6 +34,7 @@
   let {
     modifier, isVirtual = false, isStale = false, bonuses = [],
     canPush = false, onPush,
+    canReset = false, onReset,
     onToggleActive, onOpenEditor, onHide,
   }: Props = $props();
 
@@ -112,6 +116,13 @@
         title="Push these effects to the merit on Foundry"
         onclick={onPush}
       >↑ Push</button>
+    {/if}
+    {#if canReset}
+      <button
+        class="reset"
+        title="Reset card — drops local effects/paths/tags. Foundry bonuses unaffected."
+        onclick={onReset}
+      >↺ Reset</button>
     {/if}
     {#if !modifier.isHidden}
       <button class="hide" title="Hide card" onclick={onHide}>×</button>
@@ -234,6 +245,20 @@
   .modifier-card:hover .push,
   .push:focus { opacity: 1; }
   .push:hover { background: var(--accent); color: var(--text-primary); border-color: var(--accent-bright); }
+  .reset {
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    border: 1px solid var(--accent-amber);
+    border-radius: 0.3rem;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.65rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+  }
+  .modifier-card:hover .reset,
+  .reset:focus { opacity: 1; }
+  .reset:hover { background: var(--accent-amber); color: var(--bg-card); }
   .hide {
     background: transparent;
     border: none;

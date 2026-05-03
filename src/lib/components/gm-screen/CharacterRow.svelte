@@ -198,6 +198,26 @@
     setTimeout(() => { if (pushNotice?.cardKey === cardKey) pushNotice = null; }, 5000);
   }
 
+  function canResetFor(e: CardEntry): boolean {
+    if (character.source !== 'foundry') return false;
+    if (e.kind !== 'materialized') return false;
+    if (e.mod.binding.kind !== 'advantage') return false;
+    return true;
+  }
+
+  async function handleReset(e: CardEntry): Promise<void> {
+    if (e.kind !== 'materialized') return;
+    const ok = confirm(
+      `Reset "${e.mod.name}"?\n\n` +
+      `This deletes the local effects, paths, and tags for this card.\n` +
+      `Any bonuses previously pushed to Foundry will REMAIN on the merit ` +
+      `(visible as "GM Screen #${e.mod.id}: ...") and must be removed in ` +
+      `Foundry manually if no longer wanted.`
+    );
+    if (!ok) return;
+    await modifiers.delete(e.mod.id);
+  }
+
   function openEditor(e: CardEntry, anchor: HTMLElement): void {
     editorTarget = e.kind === 'materialized'
       ? { kind: 'materialized', mod: e.mod }
@@ -295,6 +315,8 @@
         onOpenEditor={(anchor) => openEditor(entry, anchor)}
         canPush={canPushFor(entry)}
         onPush={() => handlePush(entry)}
+        canReset={canResetFor(entry)}
+        onReset={() => handleReset(entry)}
       />
     {/each}
     <button class="add-modifier" onclick={addFreeModifier}>+ Add modifier</button>
