@@ -46,4 +46,10 @@ export const tools: Tool[] = [
     icon: '🧪',
     component: () => import('./tools/FoundryTest.svelte'),
   },
+  {
+    id: 'gm-screen',
+    label: 'GM Screen',
+    icon: '🛡',
+    component: () => import('./tools/GmScreen.svelte'),
+  },
 ];
