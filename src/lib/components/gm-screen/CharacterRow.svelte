@@ -49,13 +49,28 @@
 
   let charMods = $derived(modifiers.forCharacter(character.source, character.source_id));
 
+  // Add a derived set of live tag prefixes for this character.
+  let liveTagPrefixes = $derived(new Set(
+    charMods.map(m => `GM Screen #${m.id}`)
+  ));
+
   /** Read sheet-attached bonuses (system.bonuses[]) off a Foundry feature
    *  item by its _id. Returns [] when the item is gone or has no bonuses. */
   function bonusesFor(itemId: string): FoundryItemBonus[] {
     const item = advantageItems.find(it => it._id === itemId);
     if (!item) return [];
     const raw = (item.system as Record<string, unknown>)?.bonuses;
-    return Array.isArray(raw) ? (raw as FoundryItemBonus[]) : [];
+    if (!Array.isArray(raw)) return [];
+    return (raw as FoundryItemBonus[]).filter(b => {
+      const src = b.source ?? '';
+      // Filter out anything tagged with a LIVE modifier id (those are shown
+      // in the local effects section). Orphans (stale ids) intentionally
+      // pass through so the GM can spot them.
+      for (const prefix of liveTagPrefixes) {
+        if (src === prefix || src.startsWith(prefix + ':')) return false;
+      }
+      return true;
+    });
   }
 
   // Build the card list per spec §8.1.
