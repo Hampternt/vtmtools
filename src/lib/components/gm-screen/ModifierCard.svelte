@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { CharacterModifier, ModifierEffect } from '../../../types';
+  import type { CharacterModifier, ModifierEffect, FoundryItemBonus } from '../../../types';
 
   interface Props {
     /**
@@ -12,12 +12,19 @@
     isVirtual?: boolean;
     /** Marks a stale card whose source merit was deleted — UI shows badge */
     isStale?: boolean;
+    /**
+     * Sheet-attached bonuses (system.bonuses[]) from the source Foundry
+     * feature item, when the card is advantage-bound. Distinct from
+     * modifier.effects (GM Screen annotations) — these come from the actor
+     * sheet directly and render even on virtual cards.
+     */
+    bonuses?: FoundryItemBonus[];
     onToggleActive: () => void;
     onOpenEditor: (anchor: HTMLElement) => void;
     onHide: () => void;
   }
 
-  let { modifier, isVirtual = false, isStale = false, onToggleActive, onOpenEditor, onHide }: Props = $props();
+  let { modifier, isVirtual = false, isStale = false, bonuses = [], onToggleActive, onOpenEditor, onHide }: Props = $props();
 
   let cogEl: HTMLButtonElement | undefined = $state();
 
@@ -27,6 +34,18 @@
     const scope = e.scope ? `${e.scope} ` : '';
     const label = e.kind === 'pool' ? 'dice' : 'difficulty';
     return `${scope}${sign}${e.delta ?? 0} ${label}`;
+  }
+
+  /** "attributes.strength" → "Strength". Last dot-segment, capitalized. */
+  function prettyPath(p: string): string {
+    const last = p.split('.').pop() ?? p;
+    return last.charAt(0).toUpperCase() + last.slice(1);
+  }
+
+  function summarizeBonus(b: FoundryItemBonus): string {
+    const sign = b.value >= 0 ? '+' : '';
+    const stats = b.paths.map(prettyPath).join(', ');
+    return stats ? `${sign}${b.value} ${stats}` : `${sign}${b.value}`;
   }
 </script>
 
@@ -47,6 +66,16 @@
       onclick={() => cogEl && onOpenEditor(cogEl)}
     >⚙</button>
   </div>
+  {#if bonuses.length > 0}
+    <div class="bonuses" title="Sheet-attached bonuses">
+      {#each bonuses as b}
+        <p class="bonus">
+          <span class="bonus-value">{summarizeBonus(b)}</span>
+          {#if b.source}<span class="bonus-source">{b.source}</span>{/if}
+        </p>
+      {/each}
+    </div>
+  {/if}
   <div class="effects">
     {#if modifier.effects.length === 0}
       <p class="no-effect">(no effect)</p>
@@ -145,6 +174,11 @@
   }
   .modifier-card:hover .cog,
   .cog:focus { opacity: 1; }
+
+  .bonuses { display: flex; flex-direction: column; gap: 0.1rem; }
+  .bonus { font-size: 0.65rem; margin: 0; color: var(--text-secondary); display: flex; gap: 0.4rem; align-items: baseline; flex-wrap: wrap; }
+  .bonus-value { font-weight: 500; color: var(--accent-bright); }
+  .bonus-source { font-size: 0.6rem; color: var(--text-muted); font-style: italic; }
 
   .effects { display: flex; flex-direction: column; gap: 0.15rem; }
   .effect, .no-effect { font-size: 0.7rem; margin: 0; color: var(--text-secondary); }

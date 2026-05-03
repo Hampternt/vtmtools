@@ -1,7 +1,7 @@
 <script lang="ts">
   import { modifiers } from '../../../store/modifiers.svelte';
   import type {
-    BridgeCharacter, CharacterModifier, ModifierEffect, FoundryItem,
+    BridgeCharacter, CharacterModifier, ModifierEffect, FoundryItem, FoundryItemBonus,
   } from '../../../types';
   import ModifierCard from './ModifierCard.svelte';
   import ModifierEffectEditor from './ModifierEffectEditor.svelte';
@@ -48,6 +48,15 @@
   );
 
   let charMods = $derived(modifiers.forCharacter(character.source, character.source_id));
+
+  /** Read sheet-attached bonuses (system.bonuses[]) off a Foundry feature
+   *  item by its _id. Returns [] when the item is gone or has no bonuses. */
+  function bonusesFor(itemId: string): FoundryItemBonus[] {
+    const item = advantageItems.find(it => it._id === itemId);
+    if (!item) return [];
+    const raw = (item.system as Record<string, unknown>)?.bonuses;
+    return Array.isArray(raw) ? (raw as FoundryItemBonus[]) : [];
+  }
 
   // Build the card list per spec §8.1.
   type CardEntry =
@@ -230,6 +239,11 @@
           : entry.mod}
         isVirtual={entry.kind === 'virtual'}
         isStale={entry.kind === 'materialized' && entry.isStale}
+        bonuses={entry.kind === 'virtual'
+          ? bonusesFor(entry.virt.item._id)
+          : entry.mod.binding.kind === 'advantage'
+            ? bonusesFor(entry.mod.binding.item_id)
+            : []}
         onToggleActive={() => handleToggleActive(entry)}
         onHide={() => handleHide(entry)}
         onOpenEditor={(anchor) => openEditor(entry, anchor)}

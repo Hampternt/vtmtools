@@ -150,6 +150,27 @@ export interface FoundryItem {
   [k: string]: unknown;
 }
 
+/**
+ * Sheet-attached bonus on a Foundry feature item (system.bonuses[]). Unlike
+ * ModifierEffect (a GM Screen annotation), bonuses come from the actor sheet
+ * itself — the WoD5e system writes them when the player ticks "this merit
+ * adds +1 to Strength" on a feature.
+ */
+export interface FoundryItemBonus {
+  /** Display label the player typed (e.g. "Buff Modifier"). */
+  source: string;
+  /** Numeric modifier applied to each path. Negative values are penalties. */
+  value: number;
+  /** Stat dot-paths the bonus applies to (e.g. "attributes.strength", "skills.subterfuge"). */
+  paths: string[];
+  /** Active-state predicate. `check: 'always'` means unconditional. */
+  activeWhen?: { check: string; path?: string; value?: string };
+  /** When false, hide the bonus from the sheet UI when its activeWhen evaluates false. */
+  displayWhenInactive?: boolean;
+  /** Optional dot-path predicate that disables the bonus when truthy. */
+  unless?: string;
+}
+
 export interface FoundryRaw {
   id: string;
   name: string;
