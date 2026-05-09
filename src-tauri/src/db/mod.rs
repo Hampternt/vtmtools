@@ -7,3 +7,4 @@ pub mod edge;
 pub mod advantage;
 pub mod saved_character;
 pub mod modifier;
+pub mod status_template;

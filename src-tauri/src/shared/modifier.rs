@@ -76,3 +76,36 @@ pub struct ModifierPatch {
     pub effects: Option<Vec<ModifierEffect>>,
     pub tags: Option<Vec<String>>,
 }
+
+/// One row in the status_templates table — a GM-authored reusable bundle of
+/// effects + tags. Templates have no character anchor; they're applied as
+/// independent copies via add_character_modifier.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusTemplate {
+    pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub effects: Vec<ModifierEffect>,
+    pub tags: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewStatusTemplate {
+    pub name: String,
+    pub description: String,
+    pub effects: Vec<ModifierEffect>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusTemplatePatch {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub effects: Option<Vec<ModifierEffect>>,
+    pub tags: Option<Vec<String>>,
+}
