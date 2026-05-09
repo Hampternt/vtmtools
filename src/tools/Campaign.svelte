@@ -75,7 +75,7 @@
 
   /// Per-field clamp ranges. Mirrors src-tauri/src/shared/canonical_fields.rs
   /// expect_u8_in_range() bounds; keep the two in sync.
-  const FIELD_RANGES: Record<CanonicalFieldName, [number, number]> = {
+  const FIELD_RANGES: Partial<Record<CanonicalFieldName, [number, number]>> = {
     hunger:                [0, 5],
     humanity:              [0, 10],
     humanity_stains:       [0, 10],
@@ -108,6 +108,7 @@
     current: number,
   ) {
     const range = FIELD_RANGES[field];
+    if (!range) return; // Range not defined for this field
     const next  = Math.max(range[0], Math.min(range[1], current + delta));
     if (next === current) return;
     const key = stepperKey(char, field);
@@ -348,35 +349,37 @@
   {@const key       = stepperKey(char, field)}
   {@const busy      = busyKey === key}
   {@const range     = FIELD_RANGES[field]}
-  {@const atFloor   = current <= range[0]}
-  {@const atCeiling = current >= range[1]}
-  {@const tooltip   = allowed
-    ? ''
-    : 'Roll20 live editing not supported (Phase 2.5)'}
-  <span
-    class="stat-stepper"
-    class:roll20-blocked={!allowed}
-    aria-disabled={!allowed}
-  >
-    <button
-      type="button"
-      class="step-btn"
-      onclick={() => tweakField(char, field, -1, current)}
-      disabled={!allowed || busy || atFloor}
-      aria-busy={busy}
-      title={tooltip}
-      aria-label={`Decrease ${field}`}
-    >−</button>
-    <button
-      type="button"
-      class="step-btn"
-      onclick={() => tweakField(char, field, +1, current)}
-      disabled={!allowed || busy || atCeiling}
-      aria-busy={busy}
-      title={tooltip}
-      aria-label={`Increase ${field}`}
-    >+</button>
-  </span>
+  {#if range}
+    {@const atFloor   = current <= range[0]}
+    {@const atCeiling = current >= range[1]}
+    {@const tooltip   = allowed
+      ? ''
+      : 'Roll20 live editing not supported (Phase 2.5)'}
+    <span
+      class="stat-stepper"
+      class:roll20-blocked={!allowed}
+      aria-disabled={!allowed}
+    >
+      <button
+        type="button"
+        class="step-btn"
+        onclick={() => tweakField(char, field, -1, current)}
+        disabled={!allowed || busy || atFloor}
+        aria-busy={busy}
+        title={tooltip}
+        aria-label={`Decrease ${field}`}
+      >−</button>
+      <button
+        type="button"
+        class="step-btn"
+        onclick={() => tweakField(char, field, +1, current)}
+        disabled={!allowed || busy || atCeiling}
+        aria-busy={busy}
+        title={tooltip}
+        aria-label={`Increase ${field}`}
+      >+</button>
+    </span>
+  {/if}
 {/snippet}
 
 {#snippet chipRemoveBtn(char: BridgeCharacter, featuretype: FeatureType, item: FoundryItem)}
