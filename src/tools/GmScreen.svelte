@@ -113,7 +113,10 @@
             role="button"
             tabindex="0"
             onclick={() => focusedCharacter = char}
-            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusedCharacter = char; } }}
+            onkeydown={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusedCharacter = char; }
+            }}
           >
             <CharacterRow
               character={char}
