@@ -69,7 +69,7 @@
   data-hidden={modifier.isHidden ? 'true' : 'false'}
 >
   <div class="head">
-    <span class="name">
+    <span class="name" title={modifier.name}>
       {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}
       {#if isStale}<span class="stale" title="Source merit removed">stale</span>{/if}
     </span>
@@ -81,9 +81,9 @@
     >⚙</button>
   </div>
   {#if bonuses.length > 0}
-    <div class="bonuses" title="Sheet-attached bonuses">
+    <div class="bonuses">
       {#each bonuses as b}
-        <p class="bonus">
+        <p class="bonus" title={`${summarizeBonus(b)}${b.source ? ' — ' + b.source : ''}`}>
           <span class="bonus-value">{summarizeBonus(b)}</span>
           {#if b.source}<span class="bonus-source">{b.source}</span>{/if}
         </p>
@@ -95,7 +95,7 @@
       <p class="no-effect">(no effect)</p>
     {:else}
       {#each modifier.effects as e}
-        <p class="effect">{summarize(e)}</p>
+        <p class="effect" title={summarize(e)}>{summarize(e)}</p>
       {/each}
     {/if}
   </div>
@@ -114,19 +114,24 @@
       <button
         class="push"
         title="Push these effects to the merit on Foundry"
+        aria-label="Push effects to Foundry"
         onclick={onPush}
-      >↑ Push</button>
+      >↑</button>
     {/if}
     {#if canReset}
       <button
         class="reset"
         title="Reset card — drops local effects/paths/tags. Foundry bonuses unaffected."
+        aria-label="Reset card"
         onclick={onReset}
-      >↺ Reset</button>
+      >↺</button>
     {/if}
-    {#if !modifier.isHidden}
-      <button class="hide" title="Hide card" onclick={onHide}>×</button>
-    {/if}
+    <button
+      class="hide"
+      title={modifier.isHidden ? 'Show card again' : 'Hide card'}
+      aria-label={modifier.isHidden ? 'Show card again' : 'Hide card'}
+      onclick={onHide}
+    >{modifier.isHidden ? '+' : '×'}</button>
   </div>
 </div>
 
@@ -153,6 +158,11 @@
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
+    /* Safety net: even with single-line bonuses/effects, a card with many
+       rows could still exceed the fixed 8rem height. Clip rather than spill
+       the .foot (toggle / hide) outside the card boundary. The card's own
+       :hover box-shadow renders outside the box and is unaffected. */
+    overflow: hidden;
     z-index: calc(100 - var(--distance));
 
     transform: translateX(calc(var(--base-x) + var(--shift-x)));
@@ -162,7 +172,10 @@
   }
 
   .modifier-card:hover {
-    z-index: 100;
+    /* Must exceed the highest possible baseline (=100 for the centre card)
+       so a hovered inner card is never covered by a same-z sibling that
+       happens to come later in DOM order. */
+    z-index: 1000;
     transform: translateX(calc(var(--base-x) + var(--shift-x))) translateY(-0.75rem) translateZ(20px);
     box-shadow: 0 1.25rem 2rem -0.5rem var(--accent);
   }
@@ -188,7 +201,18 @@
   }
 
   .head { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; }
-  .name { font-size: 0.85rem; color: var(--text-primary); font-weight: 500; }
+  .name {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    font-weight: 500;
+    /* Long merit names must not push the cog past the right edge of the
+       9rem card. min-width:0 lets a flex child shrink below its content. */
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .virtual-mark { color: var(--accent-amber); margin-left: 0.15rem; }
   .stale { font-size: 0.65rem; color: var(--accent-amber); margin-left: 0.4rem; }
   .cog {
@@ -198,18 +222,51 @@
     font-size: 0.85rem;
     cursor: pointer;
     opacity: 0;
+    flex-shrink: 0;
     transition: opacity 120ms ease;
   }
   .modifier-card:hover .cog,
   .cog:focus { opacity: 1; }
 
   .bonuses { display: flex; flex-direction: column; gap: 0.1rem; }
-  .bonus { font-size: 0.65rem; margin: 0; color: var(--text-secondary); display: flex; gap: 0.4rem; align-items: baseline; flex-wrap: wrap; }
-  .bonus-value { font-weight: 500; color: var(--accent-bright); }
-  .bonus-source { font-size: 0.6rem; color: var(--text-muted); font-style: italic; }
+  .bonus {
+    font-size: 0.65rem;
+    margin: 0;
+    color: var(--text-secondary);
+    display: flex;
+    gap: 0.4rem;
+    align-items: baseline;
+    /* Stay on one line — wrapping pushed total content past 8rem and
+       spilled the foot below the card. Full text remains in the title. */
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .bonus-value {
+    font-weight: 500;
+    color: var(--accent-bright);
+    flex-shrink: 0;
+  }
+  .bonus-source {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    font-style: italic;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   .effects { display: flex; flex-direction: column; gap: 0.15rem; }
-  .effect, .no-effect { font-size: 0.7rem; margin: 0; color: var(--text-secondary); }
+  .effect, .no-effect {
+    font-size: 0.7rem;
+    margin: 0;
+    color: var(--text-secondary);
+    /* Single line per effect — long path lists ellipse. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .no-effect { color: var(--text-muted); font-style: italic; }
 
   .tags { display: flex; flex-wrap: wrap; gap: 0.2rem; }
@@ -270,6 +327,9 @@
   }
   .modifier-card:hover .hide,
   .hide:focus { opacity: 1; }
+  /* Hidden cards are dimmed to ~0.45 opacity, but the unhide affordance
+     must stay discoverable without forcing the GM to hover-hunt for it. */
+  .modifier-card[data-hidden="true"] .hide { opacity: 1; }
 
   @media (prefers-reduced-motion: reduce) {
     .modifier-card {

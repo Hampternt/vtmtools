@@ -160,10 +160,12 @@
 
   async function handleHide(e: CardEntry): Promise<void> {
     if (e.kind === 'virtual') {
+      // Virtual cards are by definition not yet hidden — first click hides.
       const m = await materialize(e.virt);
       await modifiers.setHidden(m.id, true);
     } else {
-      await modifiers.setHidden(e.mod.id, true);
+      // Materialized: toggle so the same button serves as hide / unhide.
+      await modifiers.setHidden(e.mod.id, !e.mod.isHidden);
     }
   }
 
