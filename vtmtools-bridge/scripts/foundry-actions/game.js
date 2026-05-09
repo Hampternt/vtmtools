@@ -11,38 +11,63 @@ async function rollV5Pool(msg) {
   }
 
   const paths = msg.value_paths ?? [];
-  const advancedDice =
-    msg.advanced_dice ?? WOD5E.api.getAdvancedDice({ actor });
+  const advancedDice = msg.advanced_dice
+    ?? WOD5E.api.getAdvancedDice({ actor });
   const label = msg.flavor ?? deriveFlavorFromPaths(paths);
+  const rollMode = msg.roll_mode ?? "roll";
+  const poolModifier = msg.pool_modifier ?? 0;
 
-  if (paths.length === 0) {
-    // Rouse-style: zero basic dice + caller-supplied advanced dice. Use the
-    // direct Roll API since RollFromDataset cannot represent an empty pool.
+  // Direct-Roll-API path: empty paths (rouse-style) OR caller specified a
+  // pool_modifier (popover semantics). Bypassing RollFromDataset here is
+  // deliberate — it avoids double-counting any modifier card that has been
+  // pushed to the sheet via GM Screen Plan C (those bonuses would also be
+  // auto-applied via Foundry's selectors-based situational-bonus pipeline).
+  // The popover's poolModifier already encodes the GM's intent.
+  if (paths.length === 0 || poolModifier !== 0) {
+    const basicDice = computeBasicDice(actor, paths) + poolModifier;
     await WOD5E.api.Roll({
-      basicDice: 0,
+      basicDice,
       advancedDice,
       actor,
       difficulty: msg.difficulty,
       flavor: label,
       quickRoll: true,
+      rollMode,
     });
     return;
   }
 
-  // WoD5e's _onConfirmRoll consumes a few dataset fields as space-separated
-  // strings (valuePaths, selectors) and pulls quickRoll/selectDialog as
-  // booleans. quickRoll skips the modifier dialog inside WOD5eDice.Roll;
-  // selectDialog skips the splat-picker dialog earlier in RollFromDataset.
-  const dataset = {
-    valuePaths: paths.join(" "),
-    label,
-    difficulty: msg.difficulty,
-    selectDialog: false,
-    quickRoll: true,
-    advancedDice,
-    selectors: (msg.selectors ?? []).join(" "),
-  };
-  await WOD5E.api.RollFromDataset({ dataset, actor });
+  // RollFromDataset path: auto-applies sheet bonuses via the WoD5e selectors
+  // pipeline. Used for non-popover callers (e.g., a future stat-button click
+  // that wants the full sheet-bonus expansion). Selectors stay caller-supplied.
+  await WOD5E.api.RollFromDataset({
+    dataset: {
+      valuePaths: paths.join(" "),
+      label,
+      difficulty: msg.difficulty,
+      selectDialog: false,            // never pop the GM dialog from outside Foundry
+      advancedDice,
+      selectors: msg.selectors ?? [],
+      rollMode,
+    },
+    actor,
+  });
+}
+
+/**
+ * Walks each path against actor.system and sums the numeric leaf values.
+ * Returns 0 for paths that don't resolve to numbers (defensive — actor data
+ * shape may have nulls or missing keys). Intentionally does NOT cap at any
+ * ceiling; respects whatever value Foundry stores.
+ */
+function computeBasicDice(actor, paths) {
+  let sum = 0;
+  for (const path of paths) {
+    // path like "attributes.strength.value"; walk against actor.system.
+    const v = path.split(".").reduce((obj, key) => obj?.[key], actor.system);
+    if (typeof v === "number") sum += v;
+  }
+  return sum;
 }
 
 async function postChatAsActor(msg) {
