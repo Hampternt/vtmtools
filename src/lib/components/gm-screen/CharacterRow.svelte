@@ -1,5 +1,6 @@
 <script lang="ts">
   import { modifiers } from '../../../store/modifiers.svelte';
+  import { statusTemplates } from '../../../store/statusTemplates.svelte';
   import type {
     BridgeCharacter, CharacterModifier, ModifierEffect, FoundryItem, FoundryItemBonus,
   } from '../../../types';
@@ -319,6 +320,9 @@
         onPush={() => handlePush(entry)}
         canReset={canResetFor(entry)}
         onReset={() => handleReset(entry)}
+        originTemplateName={entry.kind === 'materialized' && entry.mod.originTemplateId != null
+          ? (statusTemplates.byId(entry.mod.originTemplateId)?.name ?? null)
+          : null}
       />
     {/each}
     <button class="add-modifier" onclick={addFreeModifier}>+ Add modifier</button>

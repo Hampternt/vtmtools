@@ -29,6 +29,13 @@
     onToggleActive: () => void;
     onOpenEditor: (anchor: HTMLElement) => void;
     onHide: () => void;
+    /**
+     * Live-looked-up name of the originating status template, when the card
+     * has `originTemplateId` set and the template still exists. Null clears
+     * the provenance subtitle. Looked up by parent (CharacterRow) — we don't
+     * read the templates store here.
+     */
+    originTemplateName?: string | null;
   }
 
   let {
@@ -36,6 +43,7 @@
     canPush = false, onPush,
     canReset = false, onReset,
     onToggleActive, onOpenEditor, onHide,
+    originTemplateName = null,
   }: Props = $props();
 
   let cogEl: HTMLButtonElement | undefined = $state();
@@ -80,6 +88,9 @@
       onclick={() => cogEl && onOpenEditor(cogEl)}
     >⚙</button>
   </div>
+  {#if originTemplateName}
+    <p class="origin">from "{originTemplateName}"</p>
+  {/if}
   {#if bonuses.length > 0}
     <div class="bonuses">
       {#each bonuses as b}
@@ -215,6 +226,12 @@
   }
   .virtual-mark { color: var(--accent-amber); margin-left: 0.15rem; }
   .stale { font-size: 0.65rem; color: var(--accent-amber); margin-left: 0.4rem; }
+  .origin {
+    margin: 0;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    font-style: italic;
+  }
   .cog {
     background: transparent;
     border: none;
