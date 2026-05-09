@@ -31,14 +31,16 @@
       return;
     }
     try {
-      // Spec §8.4: independent copy. structuredClone the effects array so the
-      // new modifier doesn't share references with the template.
+      // $state.snapshot strips the Svelte 5 runes proxy off the template's
+      // effects (structuredClone throws DataCloneError on proxies). Spec §8.4
+      // independent copy is also preserved by the IPC round-trip (Rust stores
+      // effects as JSON), but the snapshot keeps the intent visible.
       await modifiers.add({
         source: focusedCharacter.source,
         sourceId: focusedCharacter.source_id,
         name: t.name,
         description: t.description,
-        effects: structuredClone(t.effects),
+        effects: $state.snapshot(t.effects),
         binding: { kind: 'free' },
         tags: [...t.tags],
         originTemplateId: t.id,
