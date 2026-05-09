@@ -7,6 +7,10 @@ export interface RollV5PoolInput {
   flavor?: string | null;
   advancedDice?: number | null;
   selectors?: string[] | null;
+  /** One of 'roll' / 'gmroll' / 'blindroll' / 'selfroll'. Default 'roll'. */
+  rollMode?: 'roll' | 'gmroll' | 'blindroll' | 'selfroll' | null;
+  /** Net pool modifier from active GM Screen modifier cards. Negative = penalty. Default 0. */
+  poolModifier?: number | null;
 }
 
 export interface PostChatAsActorInput {

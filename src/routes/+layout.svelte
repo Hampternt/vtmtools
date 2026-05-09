@@ -78,6 +78,9 @@
     --temp-negligible-dim: #686868;  /* zone labels, prob bars */
     --temp-fleeting-dim:   #907220;
     --temp-intense-dim:    #902020;
+
+    /* ── Elevation ──────────────────────────────────── */
+    --shadow-strong: rgba(0, 0, 0, 0.55);  /* drop-shadow for floating popovers */
   }
 
   @font-face {

@@ -2,7 +2,7 @@
   "id": "vtmtools-bridge",
   "title": "vtmtools Desktop Bridge",
   "description": "Mirror Foundry actors into the vtmtools desktop app. GM-only; opens a WebSocket to wss://localhost:7424 on world ready.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "authors": [
     {
       "name": "Hampternt",

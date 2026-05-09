@@ -55,7 +55,7 @@ impl BridgeSource for FoundrySource {
 
 fn canonical_to_path(name: &str) -> String {
     if let Some(p) = crate::shared::canonical_fields::canonical_to_foundry_path(name) {
-        return p.to_string();
+        return p;
     }
     if name.starts_with("system.") {
         return name.to_string();

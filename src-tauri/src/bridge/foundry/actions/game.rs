@@ -11,8 +11,18 @@ pub fn build_roll_v5_pool(input: &RollV5PoolInput) -> Result<Value, String> {
     if input.actor_id.is_empty() {
         return Err("foundry/game.roll_v5_pool: actor_id is required".into());
     }
-    // Note: value_paths may be empty — empty paths + advanced_dice=1 is a
-    // rouse check (basic pool = 0, one hunger die). No emptiness check.
+    // value_paths may be empty — empty paths + advanced_dice=1 is a rouse
+    // check (basic pool = 0, one hunger die). No emptiness check.
+    if let Some(rm) = &input.roll_mode {
+        if !VALID_ROLL_MODES.contains(&rm.as_str()) {
+            return Err(format!(
+                "foundry/game.roll_v5_pool: invalid roll_mode: {rm}"
+            ));
+        }
+    }
+    // pool_modifier: no range check — negative is valid (penalty); i32
+    // range cannot overflow the JS executor's basic-dice computation in
+    // any realistic actor stat sum.
     Ok(json!({
         "type": "game.roll_v5_pool",
         "actor_id": input.actor_id,
@@ -21,6 +31,8 @@ pub fn build_roll_v5_pool(input: &RollV5PoolInput) -> Result<Value, String> {
         "flavor": input.flavor,
         "advanced_dice": input.advanced_dice,
         "selectors": input.selectors.clone().unwrap_or_default(),
+        "roll_mode": input.roll_mode.as_deref().unwrap_or("roll"),
+        "pool_modifier": input.pool_modifier.unwrap_or(0),
     }))
 }
 
@@ -54,11 +66,16 @@ mod tests {
     fn sample_roll_input() -> RollV5PoolInput {
         RollV5PoolInput {
             actor_id: "abc".into(),
-            value_paths: vec!["attributes.strength.value".into(), "skills.brawl.value".into()],
+            value_paths: vec![
+                "attributes.strength.value".into(),
+                "skills.brawl.value".into(),
+            ],
             difficulty: 3,
             flavor: Some("Strength + Brawl".into()),
             advanced_dice: None,
             selectors: None,
+            roll_mode: None,
+            pool_modifier: None,
         }
     }
 
@@ -106,6 +123,46 @@ mod tests {
         input.advanced_dice = Some(2);
         let v = build_roll_v5_pool(&input).expect("ok");
         assert_eq!(v["advanced_dice"], 2);
+    }
+
+    #[test]
+    fn roll_v5_pool_envelope_includes_roll_mode_and_pool_modifier() {
+        let mut input = sample_roll_input();
+        input.roll_mode = Some("gmroll".into());
+        input.pool_modifier = Some(2);
+        let v = build_roll_v5_pool(&input).expect("happy path");
+        assert_eq!(v["roll_mode"], "gmroll");
+        assert_eq!(v["pool_modifier"], 2);
+    }
+
+    #[test]
+    fn roll_v5_pool_default_roll_mode_is_roll() {
+        // sample_roll_input has roll_mode: None
+        let v = build_roll_v5_pool(&sample_roll_input()).expect("ok");
+        assert_eq!(v["roll_mode"], "roll");
+    }
+
+    #[test]
+    fn roll_v5_pool_default_pool_modifier_is_zero() {
+        let v = build_roll_v5_pool(&sample_roll_input()).expect("ok");
+        assert_eq!(v["pool_modifier"], 0);
+    }
+
+    #[test]
+    fn roll_v5_pool_invalid_roll_mode_errors() {
+        let mut input = sample_roll_input();
+        input.roll_mode = Some("shouting".into());
+        let err = build_roll_v5_pool(&input).expect_err("must reject invalid roll_mode");
+        assert!(err.contains("invalid roll_mode"), "got: {err}");
+        assert!(err.contains("foundry/game.roll_v5_pool"), "got: {err}");
+    }
+
+    #[test]
+    fn roll_v5_pool_negative_pool_modifier_passes_through() {
+        let mut input = sample_roll_input();
+        input.pool_modifier = Some(-2);
+        let v = build_roll_v5_pool(&input).expect("negative is valid");
+        assert_eq!(v["pool_modifier"], -2);
     }
 
     fn sample_chat_input() -> PostChatAsActorInput {

@@ -13,7 +13,7 @@ use tauri::State;
 
 use crate::bridge::types::SourceKind;
 use crate::bridge::BridgeState;
-use crate::shared::canonical_fields::{canonical_to_roll20_attr, ALLOWED_NAMES};
+use crate::shared::canonical_fields::{canonical_to_roll20_attr, is_allowed_name};
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -67,7 +67,7 @@ pub(crate) async fn do_set_field(
     name: String,
     value: serde_json::Value,
 ) -> Result<(), String> {
-    if !ALLOWED_NAMES.contains(&name.as_str()) {
+    if !is_allowed_name(&name) {
         return Err(format!("character/set_field: unknown field '{name}'"));
     }
 
@@ -485,6 +485,113 @@ mod tests {
         .unwrap_err();
         assert!(
             err.contains("Roll20 live editing of canonical names not yet supported"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn live_foundry_attribute_strength_routes_outbound() {
+        let pool = fresh_pool().await;
+        // Use the real FoundrySource so canonical → Foundry path translation
+        // (Task B3) actually runs; StubFoundrySource returns an opaque blob.
+        let (state, rx) = make_bridge_state_with_source(
+            true,
+            Arc::new(crate::bridge::foundry::FoundrySource),
+        );
+        let mut rx = rx.expect("connected state must yield a receiver");
+
+        do_set_field(
+            &pool,
+            &state,
+            WriteTarget::Live,
+            SourceKind::Foundry,
+            "abc".to_string(),
+            "attribute.strength".to_string(),
+            serde_json::json!(4),
+        )
+        .await
+        .expect("happy path");
+
+        let sent = rx.recv().await.expect("router must send outbound message");
+        assert!(
+            sent.contains("system.attributes.strength.value"),
+            "outbound payload should contain the translated path; got: {sent}"
+        );
+        // Value flows: do_set_field stringifies the JSON value to "4",
+        // FoundrySource::build_set_attribute parses it back via parse_value()
+        // to the number 4, which serializes unquoted into the wire JSON as
+        // `"value":4`.
+        assert!(
+            sent.contains("\"value\":4"),
+            "value should appear as numeric 4; got: {sent}"
+        );
+    }
+
+    #[tokio::test]
+    async fn live_roll20_attribute_strength_fast_fails() {
+        let pool = fresh_pool().await;
+        let (state, _rx) = make_bridge_state(true);
+
+        let err = do_set_field(
+            &pool,
+            &state,
+            WriteTarget::Live,
+            SourceKind::Roll20,
+            "abc".to_string(),
+            "attribute.strength".to_string(),
+            serde_json::json!(3),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.contains("Roll20 live editing of canonical names not yet supported"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn live_roll20_skill_brawl_fast_fails() {
+        let pool = fresh_pool().await;
+        let (state, _rx) = make_bridge_state(true);
+
+        let err = do_set_field(
+            &pool,
+            &state,
+            WriteTarget::Live,
+            SourceKind::Roll20,
+            "abc".to_string(),
+            "skill.brawl".to_string(),
+            serde_json::json!(2),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.contains("Roll20 live editing of canonical names not yet supported"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_attribute_key_errors_at_router() {
+        let pool = fresh_pool().await;
+        let (state, _rx) = make_bridge_state(true);
+
+        let err = do_set_field(
+            &pool,
+            &state,
+            WriteTarget::Live,
+            SourceKind::Foundry,
+            "abc".to_string(),
+            "attribute.foo".to_string(),
+            serde_json::json!(0),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.contains("unknown field 'attribute.foo'"),
             "got: {err}"
         );
     }

@@ -6,6 +6,7 @@
   } from '../../../types';
   import ModifierCard from './ModifierCard.svelte';
   import ModifierEffectEditor from './ModifierEffectEditor.svelte';
+  import RollDispatcherPopover from './RollDispatcherPopover.svelte';
 
   interface Props {
     character: BridgeCharacter;
@@ -22,6 +23,23 @@
   let editorOpen = $state(false);
   let editorTarget = $state<EditorTarget | null>(null);
   let popoverPos = $state<{ left: number; top: number } | null>(null);
+
+  // Roll dispatcher popover state — anchored to the 🎲 button.
+  let rollPopoverOpen = $state(false);
+  let rollPopoverAnchor = $state<{ left: number; top: number } | null>(null);
+
+  function openRollPopover(e: MouseEvent) {
+    const btn = e.currentTarget as HTMLElement;
+    const rect = btn.getBoundingClientRect();
+    // Anchor below the button, left-aligned to the button's left edge.
+    rollPopoverAnchor = { left: rect.left, top: rect.bottom + 4 };
+    rollPopoverOpen = true;
+  }
+
+  function closeRollPopover() {
+    rollPopoverOpen = false;
+    rollPopoverAnchor = null;
+  }
 
   /**
    * Virtual cards are advantage-derived rows the GM hasn't engaged yet — no
@@ -281,6 +299,24 @@
       <span class="stat">WP {character.willpower.max - character.willpower.superficial - character.willpower.aggravated}/{character.willpower.max}</span>
     {/if}
     <span class="stat">{damageSummary()}</span>
+    {#if character.source === 'foundry'}
+      <button
+        class="roll-trigger"
+        aria-label="Roll for {character.name}"
+        onclick={openRollPopover}
+        type="button"
+      >
+        🎲 Roll
+      </button>
+      {#if rollPopoverOpen && rollPopoverAnchor}
+        <RollDispatcherPopover
+          {character}
+          modifiers={charMods}
+          anchor={rollPopoverAnchor}
+          onclose={closeRollPopover}
+        />
+      {/if}
+    {/if}
   </header>
 
   <div
@@ -369,6 +405,21 @@
     letter-spacing: 0.05em;
   }
   .stat { font-size: 0.75rem; color: var(--text-secondary); }
+
+  .roll-trigger {
+    background: var(--bg-sunken);
+    color: var(--text-primary);
+    border: 1px solid var(--border-faint);
+    border-radius: 4px;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    margin-left: 0.5rem;
+  }
+
+  .roll-trigger:hover {
+    background: var(--bg-raised);
+  }
 
   .modifier-row {
     --card-trans-duration: 600ms;

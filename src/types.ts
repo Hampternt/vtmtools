@@ -62,9 +62,19 @@ export type SourceKind = 'roll20' | 'foundry';
 /** Mirrors src-tauri/src/tools/character.rs::WriteTarget. */
 export type WriteTarget = 'live' | 'saved' | 'both';
 
+import type { AttributeName, SkillName } from './lib/foundry/canonical-names';
+export type { AttributeName, SkillName };
+
 /**
- * Mirrors src-tauri/src/shared/canonical_fields.rs::ALLOWED_NAMES.
- * Adding a name = update both ends in the same commit.
+ * Mirrors the v2 canonical-name surface in
+ * src-tauri/src/shared/canonical_fields.rs::is_allowed_name:
+ *   - Legacy 8 flat names (FLAT_NAMES).
+ *   - `attribute.<key>` for every key in ATTRIBUTE_NAMES.
+ *   - `skill.<key>` for every key in SKILL_NAMES.
+ *
+ * Adding a name = update BOTH the Rust ATTRIBUTE_NAMES/SKILL_NAMES arrays
+ * AND src/lib/foundry/canonical-names.ts in the same commit (manual-checklist
+ * convention; matches BridgeCharacter mirror precedent).
  */
 export type CanonicalFieldName =
   | 'hunger'
@@ -74,7 +84,9 @@ export type CanonicalFieldName =
   | 'health_superficial'
   | 'health_aggravated'
   | 'willpower_superficial'
-  | 'willpower_aggravated';
+  | 'willpower_aggravated'
+  | `attribute.${AttributeName}`
+  | `skill.${SkillName}`;
 
 /** Mirrors src-tauri/src/tools/character.rs::FeatureType. */
 export type FeatureType = 'merit' | 'flaw' | 'background' | 'boon';
