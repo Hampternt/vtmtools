@@ -133,10 +133,14 @@
       <div class="modifier-summary">
         {#if sums.pool !== 0}
           <div class="mod-line">
-            <span class="mod-label">Pool modifiers:</span>
+            <span class="mod-label">Pool modifiers (advisory):</span>
             <span class="mod-val" class:positive={sums.pool > 0} class:negative={sums.pool < 0}>
               {sums.pool > 0 ? '+' : ''}{sums.pool}
             </span>
+          </div>
+          <div class="mod-note small">
+            Pool modifier doesn't auto-apply to the roll yet — push the card
+            to the sheet first, or add the dice manually in Foundry.
           </div>
         {/if}
         {#if sums.difficulty !== 0}
@@ -155,11 +159,8 @@
 
     <div class="totals">
       <div class="total-line">
-        <span class="total-label">Pool:</span>
-        <span class="total-val">
-          {baseFromStats}{sums.pool !== 0 ? ` ${sums.pool > 0 ? '+' : '−'} ${Math.abs(sums.pool)}` : ''}
-          {sums.pool !== 0 ? ` = ${finalPool}` : ''}
-        </span>
+        <span class="total-label">Pool (rolling):</span>
+        <span class="total-val">{baseFromStats}</span>
       </div>
       <div class="total-line">
         <span class="total-label">Difficulty:</span>
@@ -304,6 +305,12 @@
   .mod-note {
     color: var(--text-secondary);
     font-style: italic;
+  }
+
+  .mod-note.small {
+    font-size: 0.7rem;
+    line-height: 1.25;
+    padding-top: 0.1rem;
   }
 
   .totals {
