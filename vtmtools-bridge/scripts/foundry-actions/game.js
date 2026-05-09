@@ -45,9 +45,13 @@ async function rollV5Pool(msg) {
       valuePaths: paths.join(" "),
       label,
       difficulty: msg.difficulty,
-      selectDialog: false,            // never pop the GM dialog from outside Foundry
+      selectDialog: false,            // never pop the GM picker from outside Foundry
+      quickRoll: true,                // skip the modifier dialog inside WOD5eDice.Roll (fix 2631d2e)
       advancedDice,
-      selectors: msg.selectors ?? [],
+      // WoD5e's _onConfirmRoll calls `dataset.selectors.split(...)` — it wants
+      // the pre-split string, not the array. Same convention as valuePaths
+      // (fix fbb3050).
+      selectors: (msg.selectors ?? []).join(" "),
       rollMode,
     },
     actor,
