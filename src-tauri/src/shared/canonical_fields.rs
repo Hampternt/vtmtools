@@ -264,20 +264,45 @@ fn apply_skill(c: &mut CanonicalCharacter, key: &str, value: &Value) -> Result<(
     set_raw_u8(&mut c.raw, &pointer, n)
 }
 
-/// Foundry system-path mapping. Replaces the inline match in
-/// `bridge/foundry/mod.rs::canonical_to_path` (delegated in Task 3).
-pub fn canonical_to_foundry_path(name: &str) -> Option<&'static str> {
-    Some(match name {
-        "hunger" => "system.hunger.value",
-        "humanity" => "system.humanity.value",
-        "humanity_stains" => "system.humanity.stains",
-        "blood_potency" => "system.blood.potency",
-        "health_superficial" => "system.health.superficial",
-        "health_aggravated" => "system.health.aggravated",
-        "willpower_superficial" => "system.willpower.superficial",
-        "willpower_aggravated" => "system.willpower.aggravated",
-        _ => return None,
-    })
+/// Foundry system-path mapping. Returns the dot-path for any name in the v2
+/// canonical-name surface (FLAT_NAMES + ATTRIBUTE_NAMES + SKILL_NAMES).
+///
+/// Signature: returns `Option<String>` (not `Option<&'static str>`) because
+/// the namespaced arms format-construct paths from the key. Legacy 8 arms
+/// allocate via `.to_string()` for uniformity — overhead is one allocation
+/// per IPC call; not measurable.
+pub fn canonical_to_foundry_path(name: &str) -> Option<String> {
+    // Legacy 8 flat names.
+    let flat = match name {
+        "hunger" => Some("system.hunger.value"),
+        "humanity" => Some("system.humanity.value"),
+        "humanity_stains" => Some("system.humanity.stains"),
+        "blood_potency" => Some("system.blood.potency"),
+        "health_superficial" => Some("system.health.superficial"),
+        "health_aggravated" => Some("system.health.aggravated"),
+        "willpower_superficial" => Some("system.willpower.superficial"),
+        "willpower_aggravated" => Some("system.willpower.aggravated"),
+        _ => None,
+    };
+    if let Some(s) = flat {
+        return Some(s.to_string());
+    }
+
+    // Namespaced arms.
+    if let Some(key) = name.strip_prefix("attribute.") {
+        if !ATTRIBUTE_NAMES.contains(&key) {
+            return None;
+        }
+        return Some(format!("system.attributes.{key}.value"));
+    }
+    if let Some(key) = name.strip_prefix("skill.") {
+        if !SKILL_NAMES.contains(&key) {
+            return None;
+        }
+        return Some(format!("system.skills.{key}.value"));
+    }
+
+    None
 }
 
 /// Roll20 attribute mapping. v1 returns None for every canonical name —
@@ -525,5 +550,81 @@ mod tests {
             c.raw.pointer("/system/skills/occult/value"),
             Some(&serde_json::json!(5))
         );
+    }
+
+    #[test]
+    fn canonical_to_foundry_path_for_attribute_strength() {
+        assert_eq!(
+            canonical_to_foundry_path("attribute.strength").as_deref(),
+            Some("system.attributes.strength.value")
+        );
+    }
+
+    #[test]
+    fn canonical_to_foundry_path_for_skill_brawl() {
+        assert_eq!(
+            canonical_to_foundry_path("skill.brawl").as_deref(),
+            Some("system.skills.brawl.value")
+        );
+    }
+
+    #[test]
+    fn canonical_to_foundry_path_for_unknown_attribute_returns_none() {
+        assert!(canonical_to_foundry_path("attribute.foo").is_none());
+    }
+
+    #[test]
+    fn canonical_to_foundry_path_for_unknown_skill_returns_none() {
+        assert!(canonical_to_foundry_path("skill.bar").is_none());
+    }
+
+    #[test]
+    fn every_attribute_name_has_foundry_path() {
+        for n in ATTRIBUTE_NAMES {
+            let full = format!("attribute.{n}");
+            assert!(
+                canonical_to_foundry_path(&full).is_some(),
+                "missing Foundry path for '{full}'"
+            );
+        }
+    }
+
+    #[test]
+    fn every_skill_name_has_foundry_path() {
+        for n in SKILL_NAMES {
+            let full = format!("skill.{n}");
+            assert!(
+                canonical_to_foundry_path(&full).is_some(),
+                "missing Foundry path for '{full}'"
+            );
+        }
+    }
+
+    #[test]
+    fn every_attribute_name_applies_via_apply_canonical_field() {
+        for n in ATTRIBUTE_NAMES {
+            let full = format!("attribute.{n}");
+            let mut c = sample();
+            let res = apply_canonical_field(&mut c, &full, &serde_json::json!(0));
+            assert!(
+                res.is_ok(),
+                "apply_canonical_field rejected '{full}': {:?}",
+                res.err()
+            );
+        }
+    }
+
+    #[test]
+    fn every_skill_name_applies_via_apply_canonical_field() {
+        for n in SKILL_NAMES {
+            let full = format!("skill.{n}");
+            let mut c = sample();
+            let res = apply_canonical_field(&mut c, &full, &serde_json::json!(0));
+            assert!(
+                res.is_ok(),
+                "apply_canonical_field rejected '{full}': {:?}",
+                res.err()
+            );
+        }
     }
 }
