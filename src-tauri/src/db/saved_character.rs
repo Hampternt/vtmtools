@@ -509,6 +509,62 @@ mod tests {
         assert!(err.contains("expects integer"), "got: {err}");
     }
 
+    #[tokio::test]
+    async fn patch_field_attribute_strength_round_trip() {
+        let pool = fresh_pool().await;
+        // Start with a canonical character whose raw blob has the path:
+        // system.attributes.strength.value = 1.
+        let mut canonical = sample_canonical();
+        canonical.raw = serde_json::json!({
+            "system": { "attributes": { "strength": { "value": 1 } } }
+        });
+        let id = db_save(&pool, &canonical, None).await.unwrap();
+
+        db_patch_field(&pool, id, "attribute.strength", &serde_json::json!(4))
+            .await
+            .expect("happy path");
+
+        // Re-read and assert via db_list.
+        let list = db_list(&pool).await.unwrap();
+        let raw = &list[0].canonical.raw;
+        assert_eq!(
+            raw.pointer("/system/attributes/strength/value"),
+            Some(&serde_json::json!(4))
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_field_skill_brawl_round_trip_creates_intermediate_objects() {
+        let pool = fresh_pool().await;
+        // sample_canonical's raw is empty-ish; set_raw_u8 must build the full
+        // /system/skills/brawl/value path from scratch.
+        let canonical = sample_canonical();
+        let id = db_save(&pool, &canonical, None).await.unwrap();
+
+        db_patch_field(&pool, id, "skill.brawl", &serde_json::json!(3))
+            .await
+            .expect("must create intermediate objects and write");
+
+        let list = db_list(&pool).await.unwrap();
+        let raw = &list[0].canonical.raw;
+        assert_eq!(
+            raw.pointer("/system/skills/brawl/value"),
+            Some(&serde_json::json!(3))
+        );
+    }
+
+    #[tokio::test]
+    async fn patch_field_unknown_attribute_key_errors() {
+        let pool = fresh_pool().await;
+        let id = db_save(&pool, &sample_canonical(), None).await.unwrap();
+
+        let err = db_patch_field(&pool, id, "attribute.foo", &serde_json::json!(1))
+            .await
+            .unwrap_err();
+
+        assert!(err.contains("unknown attribute 'foo'"), "got: {err}");
+    }
+
     // ── #8 advantage editor tests ────────────────────────────────────────
 
     fn sample_canonical_with_items(items: serde_json::Value) -> CanonicalCharacter {
