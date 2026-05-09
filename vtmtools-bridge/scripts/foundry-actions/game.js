@@ -4,6 +4,8 @@
 const MODULE_ID = "vtmtools-bridge";
 
 async function rollV5Pool(msg) {
+  console.log(`[${MODULE_ID}] game.js loaded — build ROLL-DIAG-1`);
+
   const actor = game.actors.get(msg.actor_id);
   if (!actor) {
     console.warn(`[${MODULE_ID}] game.roll_v5_pool: actor not found: ${msg.actor_id}`);
@@ -11,26 +13,35 @@ async function rollV5Pool(msg) {
   }
 
   const paths = msg.value_paths ?? [];
+  // getAdvancedDice is async on WoD5e 5.3.17 — must be awaited here.
   const advancedDice = msg.advanced_dice
-    ?? WOD5E.api.getAdvancedDice({ actor });
+    ?? (await WOD5E.api.getAdvancedDice({ actor }));
   const label = msg.flavor ?? deriveFlavorFromPaths(paths);
   const rollMode = msg.roll_mode ?? "roll";
 
+  console.log(`[${MODULE_ID}] rollV5Pool inputs:`, {
+    actorId: msg.actor_id,
+    actorName: actor.name,
+    actorSystem: actor.system?.gamesystem,
+    paths,
+    pathsType: typeof paths,
+    advancedDice,
+    advancedDiceType: typeof advancedDice,
+    label,
+    rollMode,
+    difficulty: msg.difficulty,
+    difficultyType: typeof msg.difficulty,
+    selectors: msg.selectors,
+    poolModifier: msg.pool_modifier,
+  });
+
   // Always route non-empty value_paths through RollFromDataset — the proven
-  // path that's been working since FHL Phase 2 shipped. The earlier
-  // pool_modifier-triggered direct-Roll branch was abandoned because
-  // WOD5E.api.Roll's invocation signature didn't survive contact with a
-  // real Foundry runtime.
+  // path that's been working since FHL Phase 2 shipped.
   //
   // pool_modifier (Plan C wire field) is currently IGNORED on the JS side.
-  // The popover's modifier-sum display is informational; to actually inject
-  // a bonus into the dice, the GM should push the modifier card to the
-  // sheet first via the existing GM Screen "push to Foundry" button —
-  // RollFromDataset's selectors-based auto-apply will then pick it up.
   if (paths.length === 0) {
-    // Rouse-style: zero basic dice + caller-supplied advanced dice (hunger /
-    // rage). RollFromDataset can't represent an empty pool, so use direct
-    // Roll for this narrow case (this is the original pre-Plan-C behavior).
+    // Rouse-style: zero basic dice + caller-supplied advanced dice.
+    console.log(`[${MODULE_ID}] -> direct Roll (rouse-style, paths=[])`);
     await WOD5E.api.Roll({
       basicDice: 0,
       advancedDice,
@@ -42,22 +53,25 @@ async function rollV5Pool(msg) {
     return;
   }
 
-  await WOD5E.api.RollFromDataset({
-    dataset: {
-      valuePaths: paths.join(" "),
-      label,
-      difficulty: msg.difficulty,
-      selectDialog: false,            // never pop the GM picker from outside Foundry
-      quickRoll: true,                // skip the modifier dialog inside WOD5eDice.Roll (fix 2631d2e)
-      advancedDice,
-      // WoD5e's _onConfirmRoll calls `dataset.selectors.split(...)` — it wants
-      // the pre-split string, not the array. Same convention as valuePaths
-      // (fix fbb3050).
-      selectors: (msg.selectors ?? []).join(" "),
-      rollMode,
-    },
-    actor,
-  });
+  const dataset = {
+    valuePaths: paths.join(" "),
+    label,
+    difficulty: msg.difficulty,
+    selectDialog: false,
+    quickRoll: true,
+    selectors: (msg.selectors ?? []).join(" "),
+  };
+  console.log(`[${MODULE_ID}] -> RollFromDataset with dataset:`, dataset);
+
+  try {
+    await WOD5E.api.RollFromDataset({ dataset, actor });
+  } catch (err) {
+    console.error(`[${MODULE_ID}] RollFromDataset threw:`, err);
+    console.error(`[${MODULE_ID}] dataset was:`, dataset);
+    console.error(`[${MODULE_ID}] actor.system.attributes:`, actor.system?.attributes);
+    console.error(`[${MODULE_ID}] actor.system.skills:`, actor.system?.skills);
+    throw err;
+  }
 }
 
 async function postChatAsActor(msg) {
