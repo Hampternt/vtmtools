@@ -18,6 +18,79 @@ pub const ALLOWED_NAMES: &[&str] = &[
     "willpower_aggravated",
 ];
 
+/// Legacy 8 flat canonical names — duplicates ALLOWED_NAMES under a clearer
+/// name so the three arrays (FLAT_NAMES + ATTRIBUTE_NAMES + SKILL_NAMES) form
+/// the full v2 surface. ALLOWED_NAMES is kept for backward compatibility with
+/// any existing callers that iterate it.
+pub const FLAT_NAMES: &[&str] = ALLOWED_NAMES;
+
+/// WoD5e v5.3.17 attribute keys (system.attributes.<key>.value).
+/// Mirrors src/lib/foundry/canonical-names.ts::FOUNDRY_ATTRIBUTE_NAMES.
+/// When changing this list, update the TS array in the same commit.
+pub const ATTRIBUTE_NAMES: &[&str] = &[
+    "charisma",
+    "composure",
+    "dexterity",
+    "intelligence",
+    "manipulation",
+    "resolve",
+    "stamina",
+    "strength",
+    "wits",
+];
+
+/// WoD5e v5.3.17 skill keys (system.skills.<key>.value).
+/// Mirrors src/lib/foundry/canonical-names.ts::FOUNDRY_SKILL_NAMES.
+pub const SKILL_NAMES: &[&str] = &[
+    "academics",
+    "animalken",
+    "athletics",
+    "awareness",
+    "brawl",
+    "craft",
+    "drive",
+    "etiquette",
+    "finance",
+    "firearms",
+    "insight",
+    "intimidation",
+    "investigation",
+    "larceny",
+    "leadership",
+    "medicine",
+    "melee",
+    "occult",
+    "performance",
+    "persuasion",
+    "politics",
+    "science",
+    "stealth",
+    "streetwise",
+    "subterfuge",
+    "survival",
+    "technology",
+];
+
+/// Returns true if `name` is in the v2 canonical-name surface:
+///   - one of the legacy 8 flat names (FLAT_NAMES), OR
+///   - `attribute.<key>` where `<key>` is in ATTRIBUTE_NAMES, OR
+///   - `skill.<key>` where `<key>` is in SKILL_NAMES.
+///
+/// Use this at the router instead of `ALLOWED_NAMES.contains(...)` — the
+/// const can't grow inline (no const-fn array concat in stable Rust).
+pub fn is_allowed_name(name: &str) -> bool {
+    if FLAT_NAMES.contains(&name) {
+        return true;
+    }
+    if let Some(rest) = name.strip_prefix("attribute.") {
+        return ATTRIBUTE_NAMES.contains(&rest);
+    }
+    if let Some(rest) = name.strip_prefix("skill.") {
+        return SKILL_NAMES.contains(&rest);
+    }
+    false
+}
+
 /// Apply a canonical-named field to a typed CanonicalCharacter.
 /// Returns Err on unknown name, wrong value type, or out-of-range integer.
 pub fn apply_canonical_field(
@@ -226,5 +299,54 @@ mod tests {
                 "v1 stub should return None for {n}"
             );
         }
+    }
+
+    #[test]
+    fn is_allowed_name_accepts_legacy_flat_names() {
+        for n in FLAT_NAMES {
+            assert!(is_allowed_name(n), "should accept legacy flat name '{n}'");
+        }
+    }
+
+    #[test]
+    fn is_allowed_name_accepts_namespaced_attributes() {
+        for n in ATTRIBUTE_NAMES {
+            let full = format!("attribute.{n}");
+            assert!(is_allowed_name(&full), "should accept '{full}'");
+        }
+    }
+
+    #[test]
+    fn is_allowed_name_accepts_namespaced_skills() {
+        for n in SKILL_NAMES {
+            let full = format!("skill.{n}");
+            assert!(is_allowed_name(&full), "should accept '{full}'");
+        }
+    }
+
+    #[test]
+    fn is_allowed_name_rejects_unknown_attribute_key() {
+        assert!(!is_allowed_name("attribute.foo"));
+        assert!(!is_allowed_name("attribute."));
+    }
+
+    #[test]
+    fn is_allowed_name_rejects_unknown_skill_key() {
+        assert!(!is_allowed_name("skill.bar"));
+        assert!(!is_allowed_name("skill."));
+    }
+
+    #[test]
+    fn is_allowed_name_rejects_unknown_flat_name() {
+        assert!(!is_allowed_name("xyzzy"));
+        assert!(!is_allowed_name(""));
+    }
+
+    #[test]
+    fn flat_names_match_legacy_allowed_names() {
+        // FLAT_NAMES must equal the existing ALLOWED_NAMES (legacy 8 names) —
+        // this test pins the equivalence so future-you doesn't accidentally
+        // diverge them.
+        assert_eq!(FLAT_NAMES, ALLOWED_NAMES);
     }
 }
