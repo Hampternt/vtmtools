@@ -15,31 +15,33 @@ async function rollV5Pool(msg) {
     ?? WOD5E.api.getAdvancedDice({ actor });
   const label = msg.flavor ?? deriveFlavorFromPaths(paths);
   const rollMode = msg.roll_mode ?? "roll";
-  const poolModifier = msg.pool_modifier ?? 0;
 
-  // Direct-Roll-API path: empty paths (rouse-style) OR caller specified a
-  // pool_modifier (popover semantics). Bypassing RollFromDataset here is
-  // deliberate — it avoids double-counting any modifier card that has been
-  // pushed to the sheet via GM Screen Plan C (those bonuses would also be
-  // auto-applied via Foundry's selectors-based situational-bonus pipeline).
-  // The popover's poolModifier already encodes the GM's intent.
-  if (paths.length === 0 || poolModifier !== 0) {
-    const basicDice = computeBasicDice(actor, paths) + poolModifier;
+  // Always route non-empty value_paths through RollFromDataset — the proven
+  // path that's been working since FHL Phase 2 shipped. The earlier
+  // pool_modifier-triggered direct-Roll branch was abandoned because
+  // WOD5E.api.Roll's invocation signature didn't survive contact with a
+  // real Foundry runtime.
+  //
+  // pool_modifier (Plan C wire field) is currently IGNORED on the JS side.
+  // The popover's modifier-sum display is informational; to actually inject
+  // a bonus into the dice, the GM should push the modifier card to the
+  // sheet first via the existing GM Screen "push to Foundry" button —
+  // RollFromDataset's selectors-based auto-apply will then pick it up.
+  if (paths.length === 0) {
+    // Rouse-style: zero basic dice + caller-supplied advanced dice (hunger /
+    // rage). RollFromDataset can't represent an empty pool, so use direct
+    // Roll for this narrow case (this is the original pre-Plan-C behavior).
     await WOD5E.api.Roll({
-      basicDice,
+      basicDice: 0,
       advancedDice,
       actor,
       difficulty: msg.difficulty,
       flavor: label,
       quickRoll: true,
-      rollMode,
     });
     return;
   }
 
-  // RollFromDataset path: auto-applies sheet bonuses via the WoD5e selectors
-  // pipeline. Used for non-popover callers (e.g., a future stat-button click
-  // that wants the full sheet-bonus expansion). Selectors stay caller-supplied.
   await WOD5E.api.RollFromDataset({
     dataset: {
       valuePaths: paths.join(" "),
@@ -56,22 +58,6 @@ async function rollV5Pool(msg) {
     },
     actor,
   });
-}
-
-/**
- * Walks each path against actor.system and sums the numeric leaf values.
- * Returns 0 for paths that don't resolve to numbers (defensive — actor data
- * shape may have nulls or missing keys). Intentionally does NOT cap at any
- * ceiling; respects whatever value Foundry stores.
- */
-function computeBasicDice(actor, paths) {
-  let sum = 0;
-  for (const path of paths) {
-    // path like "attributes.strength.value"; walk against actor.system.
-    const v = path.split(".").reduce((obj, key) => obj?.[key], actor.system);
-    if (typeof v === "number") sum += v;
-  }
-  return sum;
 }
 
 async function postChatAsActor(msg) {
