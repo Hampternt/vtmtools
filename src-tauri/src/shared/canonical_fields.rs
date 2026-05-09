@@ -98,34 +98,50 @@ pub fn apply_canonical_field(
     name: &str,
     value: &Value,
 ) -> Result<(), String> {
+    // Existing 8 flat-name arms.
     match name {
         "hunger" => {
             let n = expect_u8_in_range(value, name, 0, 5)?;
             c.hunger = Some(n);
+            return Ok(());
         }
         "humanity" => {
             let n = expect_u8_in_range(value, name, 0, 10)?;
             c.humanity = Some(n);
+            return Ok(());
         }
         "humanity_stains" => {
             let n = expect_u8_in_range(value, name, 0, 10)?;
             c.humanity_stains = Some(n);
+            return Ok(());
         }
         "blood_potency" => {
             let n = expect_u8_in_range(value, name, 0, 10)?;
             c.blood_potency = Some(n);
+            return Ok(());
         }
         "health_superficial" | "health_aggravated" => {
             let n = expect_u8_in_range(value, name, 0, 20)?;
             apply_track_field(&mut c.health, name, n);
+            return Ok(());
         }
         "willpower_superficial" | "willpower_aggravated" => {
             let n = expect_u8_in_range(value, name, 0, 20)?;
             apply_track_field(&mut c.willpower, name, n);
+            return Ok(());
         }
-        other => return Err(format!("character/set_field: unknown field '{other}'")),
+        _ => {}
     }
-    Ok(())
+
+    // New namespaced arms: attribute.<key>, skill.<key>.
+    if let Some(key) = name.strip_prefix("attribute.") {
+        return apply_attribute(c, key, value);
+    }
+    if let Some(key) = name.strip_prefix("skill.") {
+        return apply_skill(c, key, value);
+    }
+
+    Err(format!("character/set_field: unknown field '{name}'"))
 }
 
 fn apply_track_field(track: &mut Option<HealthTrack>, name: &str, n: u8) {
@@ -171,6 +187,81 @@ fn type_label(v: &Value) -> &'static str {
         Value::Array(_) => "array",
         Value::Object(_) => "object",
     }
+}
+
+/// Walk `raw` by JSON pointer-path segments and overwrite the leaf with `n`.
+/// Creates intermediate objects as needed so a saved-side write succeeds even
+/// for actors whose raw blob hasn't seen this skill/attribute before.
+///
+/// `pointer` MUST start with '/' and use '/' as the segment delimiter
+/// (RFC 6901 JSON Pointer syntax — same as serde_json's Value::pointer).
+///
+/// Returns Err if a non-leaf segment exists but is not a JSON object
+/// (e.g. trying to walk into a string at /system/attributes when the actor's
+/// raw has system.attributes as "broken" — defensive; should never happen
+/// with valid Foundry payloads).
+fn set_raw_u8(raw: &mut Value, pointer: &str, n: u8) -> Result<(), String> {
+    if !pointer.starts_with('/') {
+        return Err(format!(
+            "character/set_field: invalid pointer '{pointer}' (must start with '/')"
+        ));
+    }
+    let segments: Vec<&str> = pointer[1..].split('/').collect();
+    if segments.is_empty() {
+        return Err("character/set_field: empty pointer".into());
+    }
+
+    // Ensure root is an object.
+    if !raw.is_object() {
+        *raw = Value::Object(serde_json::Map::new());
+    }
+
+    // Walk all but the last segment, creating empty objects as we go.
+    let mut cur = raw;
+    for seg in &segments[..segments.len() - 1] {
+        let obj = cur.as_object_mut().ok_or_else(|| {
+            format!("character/set_field: pointer '{pointer}' walks into non-object")
+        })?;
+        if !obj.contains_key(*seg) {
+            obj.insert(seg.to_string(), Value::Object(serde_json::Map::new()));
+        }
+        // Re-borrow for the next iteration. Unwrap is safe — we just inserted
+        // (or it already existed); object_mut may still fail if existing was
+        // not an object, which is the defensive Err above on next iteration.
+        cur = obj.get_mut(*seg).unwrap();
+    }
+
+    // Set the leaf.
+    let leaf_obj = cur.as_object_mut().ok_or_else(|| {
+        format!("character/set_field: pointer '{pointer}' walks into non-object at leaf parent")
+    })?;
+    leaf_obj.insert(segments.last().unwrap().to_string(), Value::from(n as u64));
+    Ok(())
+}
+
+/// Apply `attribute.<key>` write — validates `key` against ATTRIBUTE_NAMES,
+/// range-checks the value 0..=5 (WoD5e dot rating), then writes via JSON
+/// pointer to /system/attributes/<key>/value.
+fn apply_attribute(c: &mut CanonicalCharacter, key: &str, value: &Value) -> Result<(), String> {
+    if !ATTRIBUTE_NAMES.contains(&key) {
+        return Err(format!("character/set_field: unknown attribute '{key}'"));
+    }
+    let display_name = format!("attribute.{key}");
+    let n = expect_u8_in_range(value, &display_name, 0, 5)?;
+    let pointer = format!("/system/attributes/{key}/value");
+    set_raw_u8(&mut c.raw, &pointer, n)
+}
+
+/// Apply `skill.<key>` write — same shape as apply_attribute but for
+/// /system/skills/<key>/value.
+fn apply_skill(c: &mut CanonicalCharacter, key: &str, value: &Value) -> Result<(), String> {
+    if !SKILL_NAMES.contains(&key) {
+        return Err(format!("character/set_field: unknown skill '{key}'"));
+    }
+    let display_name = format!("skill.{key}");
+    let n = expect_u8_in_range(value, &display_name, 0, 5)?;
+    let pointer = format!("/system/skills/{key}/value");
+    set_raw_u8(&mut c.raw, &pointer, n)
 }
 
 /// Foundry system-path mapping. Replaces the inline match in
@@ -348,5 +439,91 @@ mod tests {
         // this test pins the equivalence so future-you doesn't accidentally
         // diverge them.
         assert_eq!(FLAT_NAMES, ALLOWED_NAMES);
+    }
+
+    #[test]
+    fn apply_attribute_strength_writes_into_raw() {
+        let mut c = sample();
+        apply_canonical_field(&mut c, "attribute.strength", &serde_json::json!(3))
+            .expect("happy path");
+        let v = c
+            .raw
+            .pointer("/system/attributes/strength/value")
+            .expect("raw pointer exists");
+        assert_eq!(v, &serde_json::json!(3));
+    }
+
+    #[test]
+    fn apply_skill_brawl_writes_into_raw() {
+        let mut c = sample();
+        apply_canonical_field(&mut c, "skill.brawl", &serde_json::json!(2))
+            .expect("happy path");
+        let v = c
+            .raw
+            .pointer("/system/skills/brawl/value")
+            .expect("raw pointer exists");
+        assert_eq!(v, &serde_json::json!(2));
+    }
+
+    #[test]
+    fn apply_attribute_unknown_key_errors() {
+        let mut c = sample();
+        let err = apply_canonical_field(&mut c, "attribute.foo", &serde_json::json!(1))
+            .unwrap_err();
+        assert!(
+            err.contains("unknown attribute 'foo'"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn apply_skill_unknown_key_errors() {
+        let mut c = sample();
+        let err = apply_canonical_field(&mut c, "skill.bar", &serde_json::json!(1))
+            .unwrap_err();
+        assert!(err.contains("unknown skill 'bar'"), "got: {err}");
+    }
+
+    #[test]
+    fn apply_attribute_out_of_range_errors() {
+        let mut c = sample();
+        let err = apply_canonical_field(&mut c, "attribute.strength", &serde_json::json!(6))
+            .unwrap_err();
+        assert!(err.contains("expects integer 0..=5"), "got: {err}");
+    }
+
+    #[test]
+    fn apply_attribute_wrong_type_errors() {
+        let mut c = sample();
+        let err = apply_canonical_field(&mut c, "attribute.strength", &serde_json::json!("3"))
+            .unwrap_err();
+        assert!(err.contains("got string"), "got: {err}");
+    }
+
+    #[test]
+    fn apply_attribute_overwrites_existing_raw_value() {
+        let mut c = sample();
+        c.raw = serde_json::json!({
+            "system": { "attributes": { "strength": { "value": 1 } } }
+        });
+        apply_canonical_field(&mut c, "attribute.strength", &serde_json::json!(4))
+            .expect("happy path");
+        assert_eq!(
+            c.raw.pointer("/system/attributes/strength/value"),
+            Some(&serde_json::json!(4))
+        );
+    }
+
+    #[test]
+    fn apply_skill_creates_intermediate_objects_when_missing() {
+        // sample() raw is `{}` — fully missing system/skills/<key>/value path.
+        // set_raw_u8 must create intermediate objects without erroring.
+        let mut c = sample();
+        apply_canonical_field(&mut c, "skill.occult", &serde_json::json!(5))
+            .expect("must create intermediate objects");
+        assert_eq!(
+            c.raw.pointer("/system/skills/occult/value"),
+            Some(&serde_json::json!(5))
+        );
     }
 }
