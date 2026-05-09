@@ -18,30 +18,37 @@
 
   let editorOpen = $state(false);
   let editorExisting = $state<StatusTemplate | null>(null);
-  let applyHint = $state<string | null>(null);
+  // Tagged hint so the error tone can persist (no auto-clear) while
+  // success/info auto-fade. Errors stay until the user clicks again.
+  let applyHint = $state<{ text: string; tone: 'info' | 'success' | 'error' } | null>(null);
 
   onMount(() => { void statusTemplates.ensureLoaded(); });
 
   async function applyTemplate(t: StatusTemplate): Promise<void> {
     if (!focusedCharacter) {
-      applyHint = 'Click a character row first, then a template.';
-      setTimeout(() => { applyHint = null; }, 2500);
+      applyHint = { text: 'Click a character row first, then a template.', tone: 'info' };
+      setTimeout(() => { applyHint = null; }, 8000);
       return;
     }
-    // Spec §8.4: independent copy. structuredClone the effects array so the
-    // new modifier doesn't share references with the template.
-    await modifiers.add({
-      source: focusedCharacter.source,
-      sourceId: focusedCharacter.source_id,
-      name: t.name,
-      description: t.description,
-      effects: structuredClone(t.effects),
-      binding: { kind: 'free' },
-      tags: [...t.tags],
-      originTemplateId: t.id,
-    });
-    applyHint = `Applied "${t.name}" to ${focusedCharacter.name}.`;
-    setTimeout(() => { applyHint = null; }, 2000);
+    try {
+      // Spec §8.4: independent copy. structuredClone the effects array so the
+      // new modifier doesn't share references with the template.
+      await modifiers.add({
+        source: focusedCharacter.source,
+        sourceId: focusedCharacter.source_id,
+        name: t.name,
+        description: t.description,
+        effects: structuredClone(t.effects),
+        binding: { kind: 'free' },
+        tags: [...t.tags],
+        originTemplateId: t.id,
+      });
+      applyHint = { text: `Applied "${t.name}" to ${focusedCharacter.name}.`, tone: 'success' };
+      setTimeout(() => { applyHint = null; }, 2500);
+    } catch (err) {
+      console.error('[gm-screen] apply template failed:', err);
+      applyHint = { text: `Failed to apply: ${err}`, tone: 'error' };
+    }
   }
 
   function openNewEditor() {
@@ -71,7 +78,7 @@
     <button class="new" onclick={openNewEditor}>+ New template</button>
   </header>
 
-  {#if applyHint}<p class="hint">{applyHint}</p>{/if}
+  {#if applyHint}<p class="hint" class:error={applyHint.tone === 'error'}>{applyHint.text}</p>{/if}
   {#if !focusedCharacter}<p class="hint muted">Click a character row to enable template apply.</p>{/if}
 
   {#if statusTemplates.list.length === 0}
@@ -127,6 +134,15 @@
   }
   .hint { font-size: 0.7rem; color: var(--accent-amber); margin: 0; }
   .hint.muted { color: var(--text-muted); }
+  .hint.error {
+    color: var(--accent-amber);
+    font-weight: 500;
+    padding: 0.25rem 0.4rem;
+    border-left: 2px solid var(--accent-amber);
+    background: var(--bg-input);
+    border-radius: 0.25rem;
+    word-break: break-word;
+  }
   .empty { color: var(--text-muted); font-size: 0.75rem; font-style: italic; }
   .grid { display: flex; flex-direction: column; gap: 0.4rem; }
   .template {
