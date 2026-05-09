@@ -131,6 +131,15 @@ pub struct RollV5PoolInput {
     pub flavor: Option<String>,
     pub advanced_dice: Option<u8>,
     pub selectors: Option<Vec<String>>,
+    /// One of "roll" / "gmroll" / "blindroll" / "selfroll". None = "roll".
+    /// Mirrors the field on PostChatAsActorInput.
+    pub roll_mode: Option<String>,
+    /// Net pool modifier from the GM Screen popover (sum of active card pool
+    /// deltas). i32 because penalties are negative. None = 0. When non-zero,
+    /// the JS executor switches to direct WOD5E.api.Roll to bypass selectors-
+    /// based situational-bonus auto-apply (avoids double-counting modifier
+    /// cards that have been pushed to the sheet via GM Screen Plan C).
+    pub pool_modifier: Option<i32>,
 }
 
 /// Input for the `post_foundry_chat` Tauri command (frontend → Rust).
