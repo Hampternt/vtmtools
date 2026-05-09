@@ -13,7 +13,13 @@
     foundryEffects,
     foundryItemEffects,
     foundryEffectIsActive,
+    foundryAttrInt,
+    foundrySkillInt,
   } from '$lib/foundry/raw';
+  import {
+    FOUNDRY_ATTRIBUTE_NAMES,
+    FOUNDRY_SKILL_NAMES,
+  } from '../lib/foundry/canonical-names';
   import type { FoundryItem } from '../types';
   import { characterRemoveAdvantage, characterAddAdvantage } from '$lib/character/api';
   import type { FeatureType } from '$lib/character/api';
@@ -61,6 +67,7 @@
   onMount(() => { void savedCharacters.ensureLoaded(); });
   let expandedRaw   = $state<Set<string>>(new Set());
   let expandedAttrs = $state<Set<string>>(new Set());
+  let expandedSkills = $state<Set<string>>(new Set());
   let expandedInfo  = $state<Set<string>>(new Set());
   let expandedFeats = $state<Set<string>>(new Set());
 
@@ -175,6 +182,23 @@
     return r20Attrs(char).find(a => a.name === name)?.current ?? '';
   }
 
+  /// Source-aware attribute reader. Foundry: walks system.attributes.<name>.value
+  /// via the shared foundryAttrInt helper. Roll20: walks the flat attribute
+  /// list via r20AttrInt. Returns 0 for unknown names or unsupported sources.
+  function attrInt(char: BridgeCharacter, name: string): number {
+    if (char.source === 'foundry') return foundryAttrInt(char, name);
+    return r20AttrInt(char, name);
+  }
+
+  /// Source-aware skill reader. Foundry only — Roll20 sheets don't expose
+  /// skills via this codepath. Returns 0 for non-Foundry chars (the markup
+  /// guards the Skills section behind {#if char.source === 'foundry'} so this
+  /// fallback is defensive).
+  function skillInt(char: BridgeCharacter, name: string): number {
+    if (char.source === 'foundry') return foundrySkillInt(char, name);
+    return 0;
+  }
+
   function parseDisciplines(char: BridgeCharacter): { type: string; level: number }[] {
     const attrs = r20Attrs(char);
     const prefix = 'repeating_disciplines_';
@@ -208,6 +232,7 @@
 
   function toggleRaw(id: string)   { expandedRaw   = toggleSet(expandedRaw,   id); }
   function toggleAttrs(id: string) { expandedAttrs = toggleSet(expandedAttrs, id); }
+  function toggleSkills(id: string) { expandedSkills = toggleSet(expandedSkills, id); }
   function toggleInfo(id: string)  { expandedInfo  = toggleSet(expandedInfo,  id); }
   function toggleFeats(id: string) { expandedFeats = toggleSet(expandedFeats, id); }
 
@@ -566,15 +591,15 @@
         {@const stains       = char.humanity_stains ?? 0}
         {@const clan         = r20AttrText(char, 'clan')}
         {@const disciplines  = parseDisciplines(char)}
-        {@const strAttr      = r20AttrInt(char, 'strength')}
-        {@const dexAttr      = r20AttrInt(char, 'dexterity')}
-        {@const staAttr      = r20AttrInt(char, 'stamina')}
-        {@const chaAttr      = r20AttrInt(char, 'charisma')}
-        {@const manAttr      = r20AttrInt(char, 'manipulation')}
-        {@const comAttr      = r20AttrInt(char, 'composure')}
-        {@const intAttr      = r20AttrInt(char, 'intelligence')}
-        {@const witAttr      = r20AttrInt(char, 'wits')}
-        {@const resAttr      = r20AttrInt(char, 'resolve')}
+        {@const strAttr      = attrInt(char, 'strength')}
+        {@const dexAttr      = attrInt(char, 'dexterity')}
+        {@const staAttr      = attrInt(char, 'stamina')}
+        {@const chaAttr      = attrInt(char, 'charisma')}
+        {@const manAttr      = attrInt(char, 'manipulation')}
+        {@const comAttr      = attrInt(char, 'composure')}
+        {@const intAttr      = attrInt(char, 'intelligence')}
+        {@const witAttr      = attrInt(char, 'wits')}
+        {@const resAttr      = attrInt(char, 'resolve')}
         {@const bane         = r20AttrText(char, 'bane')}
         {@const baneSeverity = r20AttrText(char, 'blood_bane_severity')}
         {@const ambition     = r20AttrText(char, 'ambition')}
@@ -741,6 +766,20 @@
                   {#if bane}<span class="bane-text">{bane}</span>{/if}
                 </div>
               {/if}
+            </div>
+          {/if}
+
+          <!-- ── Collapsible: skills (Foundry only) ──────────────────────── -->
+          {#if char.source === 'foundry' && expandedSkills.has(charKey)}
+            <div class="card-section">
+              <div class="skill-grid">
+                {#each FOUNDRY_SKILL_NAMES as skill (skill)}
+                  <div class="attr-cell">
+                    <span class="attr-name">{skill}</span>
+                    <span class="attr-val">{skillInt(char, skill)}</span>
+                  </div>
+                {/each}
+              </div>
             </div>
           {/if}
 
@@ -940,6 +979,11 @@
             <button class="section-toggle" onclick={() => toggleAttrs(charKey)}>
               attrs {expandedAttrs.has(charKey) ? '▴' : '▾'}
             </button>
+            {#if char.source === 'foundry'}
+              <button class="section-toggle" onclick={() => toggleSkills(charKey)}>
+                skills {expandedSkills.has(charKey) ? '▴' : '▾'}
+              </button>
+            {/if}
             <button class="section-toggle" onclick={() => toggleInfo(charKey)}>
               info {expandedInfo.has(charKey) ? '▴' : '▾'}
             </button>
@@ -1606,6 +1650,13 @@
 
   /* 3×3 attribute grid */
   .attr-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.4rem 0.25rem;
+    text-align: center;
+  }
+  /* Skills grid — same 3-col shape as attrs but denser (3×9 = 27 cells) */
+  .skill-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 0.4rem 0.25rem;
