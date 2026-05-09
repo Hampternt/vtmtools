@@ -238,6 +238,30 @@ export interface ModifierPatchInput {
   tags?: string[];
 }
 
+export interface StatusTemplate {
+  id: number;
+  name: string;
+  description: string;
+  effects: ModifierEffect[];
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewStatusTemplateInput {
+  name: string;
+  description: string;
+  effects: ModifierEffect[];
+  tags: string[];
+}
+
+export interface StatusTemplatePatchInput {
+  name?: string;
+  description?: string;
+  effects?: ModifierEffect[];
+  tags?: string[];
+}
+
 /** Per-effect skip record returned by `gm_screen_push_to_foundry`. */
 export interface SkippedEffect {
   effectIndex: number;

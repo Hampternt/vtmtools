@@ -5,6 +5,9 @@ import type {
   ModifierPatchInput,
   PushReport,
   SourceKind,
+  StatusTemplate,
+  NewStatusTemplateInput,
+  StatusTemplatePatchInput,
 } from '../../types';
 
 export function listCharacterModifiers(
@@ -59,4 +62,23 @@ export function materializeAdvantageModifier(args: {
  */
 export function pushToFoundry(modifierId: number): Promise<PushReport> {
   return invoke<PushReport>('gm_screen_push_to_foundry', { modifierId });
+}
+
+export function listStatusTemplates(): Promise<StatusTemplate[]> {
+  return invoke<StatusTemplate[]>('list_status_templates');
+}
+
+export function addStatusTemplate(input: NewStatusTemplateInput): Promise<StatusTemplate> {
+  return invoke<StatusTemplate>('add_status_template', { input });
+}
+
+export function updateStatusTemplate(
+  id: number,
+  patch: StatusTemplatePatchInput,
+): Promise<StatusTemplate> {
+  return invoke<StatusTemplate>('update_status_template', { id, patch });
+}
+
+export function deleteStatusTemplate(id: number): Promise<void> {
+  return invoke<void>('delete_status_template', { id });
 }
