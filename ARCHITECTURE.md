@@ -404,15 +404,25 @@ the full list.
 /// `src-tauri/src/bridge/<source>/mod.rs`.
 #[async_trait]
 pub trait BridgeSource: Send + Sync {
-    async fn handle_inbound(&self, msg: Value) -> Result<Vec<CanonicalCharacter>, String>;
-    fn build_set_attribute(&self, source_id: &str, name: &str, value: &str) -> Value;
+    async fn handle_inbound(&self, msg: Value) -> Result<Vec<InboundEvent>, String>;
+    fn build_set_attribute(&self, source_id: &str, name: &str, value: &str) -> Result<Value, String>;
     fn build_refresh(&self) -> Value;
+}
+
+/// One event emitted from a single inbound frame. A frame may yield zero,
+/// one, or many events — e.g. an `actors` snapshot is one
+/// `CharactersUpdated`; a `hello` frame yields nothing; a roll frame
+/// yields one `RollReceived`.
+pub enum InboundEvent {
+    CharactersUpdated(Vec<CanonicalCharacter>),
+    RollReceived(CanonicalRoll),
 }
 ```
 
 Sources are stateless transformers. Shared connection state
 (per-source connected flag, outbound `mpsc::Sender`, merged
-characters map) lives in `BridgeState` (`src-tauri/src/bridge/mod.rs`).
+characters map, roll-history ring) lives in `BridgeState`
+(`src-tauri/src/bridge/mod.rs`).
 
 **Roll20 source** wire protocol (extension protocol — preserved verbatim
 from the pre-bridge era so the existing browser extension keeps working):
@@ -449,7 +459,24 @@ pub enum InboundMsg {
 pub enum FoundryInbound {
     Actors { actors: Vec<FoundryActor> },
     ActorUpdate { actor: FoundryActor },
-    Hello,
+    Hello {
+        #[serde(default)] protocol_version: Option<u32>,
+        #[serde(default)] world_id: Option<String>,
+        #[serde(default)] world_title: Option<String>,
+        #[serde(default)] system_id: Option<String>,
+        #[serde(default)] system_version: Option<String>,
+        #[serde(default)] capabilities: Option<Vec<String>>,
+    },
+    /// Module-side handler threw; surfaced to the GM via toast.
+    Error {
+        refers_to: String,
+        #[serde(default)] request_id: Option<String>,
+        code: String,
+        message: String,
+    },
+    /// Inbound roll result captured by the Foundry-side `createChatMessage`
+    /// hook; decoded into `CanonicalRoll` by `bridge/foundry/translate_roll.rs`.
+    RollResult { message: FoundryRollMessage },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

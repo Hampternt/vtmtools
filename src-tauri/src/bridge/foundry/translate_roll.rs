@@ -69,21 +69,21 @@ fn detect_splat_from_formula(formula: &str) -> RollSplat {
     }
 }
 
-/// Detects `Ndx` patterns where x is the die-class letter. Lightweight
-/// substring match — formulas are simple, no regex crate needed.
+/// Match an `Ndx` pattern in a Foundry roll formula. `N` is a digit count;
+/// `x` is the die-class letter. The formula structure is what we trust:
+/// real formulas always have a digit-count immediately before the `d`. Whatever
+/// follows the denom (whitespace, `cs>5`, `+`, end-of-string) doesn't matter
+/// because the digit-prefix is the load-bearing invariant — denominations are
+/// always single lowercase letters in WoD5e.
 fn has_die(formula: &str, denom: char) -> bool {
-    // Walk the formula looking for "d<denom>" not preceded/followed by another letter
-    // (keeps "dh" from matching inside "Dhampir" or similar — paranoid since formulas
-    // are simple strings, but free defensiveness).
-    let needle = format!("d{denom}");
+    let pat: [u8; 2] = [b'd', denom as u8];
     let bytes = formula.as_bytes();
-    let nb = needle.as_bytes();
-    if bytes.len() < nb.len() { return false; }
-    for i in 0..=bytes.len() - nb.len() {
-        if &bytes[i..i + nb.len()] == nb {
-            // require boundary after the denomination
-            let after = bytes.get(i + nb.len());
-            if after.map_or(true, |b| !b.is_ascii_alphabetic()) {
+    if bytes.len() < 2 { return false; }
+    for i in 0..=bytes.len() - 2 {
+        if bytes[i] == pat[0] && bytes[i + 1] == pat[1] {
+            // The digit-prefix invariant: byte before `d` must be a digit.
+            // (Or the formula is malformed and we don't accept it.)
+            if i > 0 && bytes[i - 1].is_ascii_digit() {
                 return true;
             }
         }
@@ -187,11 +187,26 @@ mod tests {
     }
 
     #[test]
-    fn has_die_word_boundary() {
-        // 'dh' inside hypothetical word should not falsely detect hunter.
-        // Real formulas don't have alphabetic chars after the die denom, but
-        // the test pins the boundary check.
-        assert!(has_die("3dh cs>5", 'h'));
-        assert!(!has_die("3dho cs>5", 'h'), "'dh' followed by letter should not match");
+    fn vampire_unspaced_formula_from_live_sample() {
+        // Real Foundry formulas don't put a space between denom and "cs>5".
+        // Captured live in docs/reference/foundry-vtm5e-roll-sample.json.
+        let m = make_msg("unknown", "12dvcs>5 + 0dgcs>5", vec![3, 7, 9, 10, 6, 4, 8, 6, 5, 9, 2, 7], vec![]);
+        let c = to_canonical_roll(&m);
+        assert_eq!(c.splat, RollSplat::Vampire,
+            "splat detection must work on real (unspaced) Foundry formulas");
+    }
+
+    #[test]
+    fn has_die_requires_digit_prefix() {
+        // The structural invariant: real formulas have a digit count before d<x>.
+        assert!(has_die("12dvcs>5", 'v'));
+        assert!(has_die("5dv cs>5", 'v'));
+        assert!(has_die("0dg cs>5", 'g'));
+        assert!(has_die("3dh+2ds", 'h'));
+        assert!(has_die("3dh+2ds", 's'));
+        // Without a digit prefix, do not match (defensive against false positives
+        // in arbitrary text).
+        assert!(!has_die("dv cs>5", 'v'));
+        assert!(!has_die("addv", 'v'));
     }
 }

@@ -8,11 +8,16 @@
 // Per-die-class extraction: walk roll.terms[] for Die instances, partition by
 // denomination (basic: m/v/w/h, advanced: g/r/s).
 
+// JS regex caveat: digits are word characters, so `\b` between a digit and
+// `d` never fires — real formulas always look like `12dv...`, which is
+// word→word at the digit→`d` boundary. Drop the leading `\b` and use
+// `(?!\w)` after the denomination to keep hypothetical multi-char denoms
+// (e.g. `dvs`) from false-matching `dv`.
 const SPLAT_PATTERNS = {
-  vampire: /\bd[vg]\b/,
-  werewolf: /\bd[wr]\b/,
-  hunter: /\bd[hs]\b/,
-  mortal: /\bdm\b/,
+  vampire: /d[vg](?!\w)/,
+  werewolf: /d[wr](?!\w)/,
+  hunter: /d[hs](?!\w)/,
+  mortal: /dm(?!\w)/,
 };
 
 function detectSplat(formula) {
