@@ -20,6 +20,7 @@
     { value: 'pool',       label: 'Pool' },
     { value: 'difficulty', label: 'Difficulty' },
     { value: 'note',       label: 'Note' },
+    { value: 'stat',       label: 'Stat' },
   ];
 
   function addEffect() {
@@ -93,9 +94,14 @@
     {#each effects as effect, i (i)}
       <div class="effect-block">
         <div class="effect-row">
-          <select value={effect.kind} onchange={(e) => setKind(i, (e.currentTarget as HTMLSelectElement).value as ModifierKind)}>
-            {#each KINDS as k}<option value={k.value}>{k.label}</option>{/each}
-          </select>
+          <div class="kind-cluster">
+            <select value={effect.kind} onchange={(e) => setKind(i, (e.currentTarget as HTMLSelectElement).value as ModifierKind)}>
+              {#each KINDS as k}<option value={k.value}>{k.label}</option>{/each}
+            </select>
+            {#if effect.kind === 'stat'}
+              <span class="kind-help" title="Stat effects show on the card as attribute deltas. They don't auto-affect rolls — use a Pool effect for that.">render-time only ⓘ</span>
+            {/if}
+          </div>
 
           {#if effect.kind === 'note'}
             <input
@@ -228,6 +234,14 @@
     font-size: 0.75rem;
     box-sizing: border-box;
     width: 100%;
+  }
+  .kind-cluster { display: flex; flex-direction: column; gap: 0.15rem; }
+  .kind-help {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    cursor: help;
+    letter-spacing: 0.04em;
   }
   .stepper { display: inline-flex; gap: 0.25rem; align-items: center; }
   .stepper .delta {

@@ -198,7 +198,7 @@ export interface FoundryRaw {
 // discriminator is `kind` and uses snake_case variants ('free' / 'advantage').
 // ---------------------------------------------------------------------------
 
-export type ModifierKind = 'pool' | 'difficulty' | 'note';
+export type ModifierKind = 'pool' | 'difficulty' | 'note' | 'stat';
 
 export interface ModifierEffect {
   kind: ModifierKind;
