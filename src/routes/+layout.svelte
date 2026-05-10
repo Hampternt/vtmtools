@@ -81,6 +81,16 @@
 
     /* ── Elevation ──────────────────────────────────── */
     --shadow-strong: rgba(0, 0, 0, 0.55);  /* drop-shadow for floating popovers */
+
+    /* ── Camarilla-Dossier card variant ─────────────────────────────── */
+    --bg-card-dossier:        #14181d;  /* slate institutional surface */
+    --text-card-dossier:      #c5cdd6;  /* primary content */
+    --accent-card-dossier:    #5c8aa8;  /* slate-blue accent / labels */
+    --alert-card-dossier:     #d24545;  /* blood-red active / deltas */
+    --label-card-dossier:     rgba(92, 138, 168, 0.9);  /* file labels */
+    --rule-card-dossier:        rgba(197, 205, 214, 0.08);  /* hairline */
+    --rule-card-dossier-dashed: rgba(197, 205, 214, 0.12);  /* decorative */
+    --shadow-card-dossier:    0 8px 32px rgba(0, 0, 0, 0.45);
   }
 
   @font-face {
