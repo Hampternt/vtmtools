@@ -1,5 +1,16 @@
 <script lang="ts">
   import type { ModifierEffect, ModifierKind } from '../../../types';
+  import { FOUNDRY_ATTRIBUTE_NAMES, FOUNDRY_SKILL_NAMES } from '$lib/foundry/canonical-names';
+
+  // Canonical-path suggestions for the path-input datalist. Mirrors the path
+  // vocabulary recognized by src/lib/character/active-deltas.ts::readPath and
+  // src/lib/saved-characters/diff.ts. Adding a new path category here is
+  // additive — readPath already supports any 'head.tail' shape that matches
+  // raw.system.<head>.<tail>.value on Foundry actors.
+  const CANONICAL_PATHS: readonly string[] = [
+    ...FOUNDRY_ATTRIBUTE_NAMES.map(n => `attributes.${n}`),
+    ...FOUNDRY_SKILL_NAMES.map(n => `skills.${n}`),
+  ];
 
   interface Props {
     initialEffects: ModifierEffect[];
@@ -143,6 +154,7 @@
               type="text"
               class="path-input"
               placeholder="+ path (e.g. attributes.strength)"
+              list="canonical-path-suggestions"
               onkeydown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -191,6 +203,12 @@
       {saving ? 'Saving…' : 'Save'}
     </button>
   </footer>
+
+  <datalist id="canonical-path-suggestions">
+    {#each CANONICAL_PATHS as path}
+      <option value={path}></option>
+    {/each}
+  </datalist>
 </div>
 
 <style>
