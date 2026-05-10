@@ -26,6 +26,7 @@
   import ModifierEffectEditor from './gm-screen/ModifierEffectEditor.svelte';
   import type { ModifierEffect } from '../../types';
   import { onMount } from 'svelte';
+  import { publishEvent } from '../../store/toolEvents';
 
   interface Props {
     character: BridgeCharacter;
@@ -79,6 +80,18 @@
   }
   function deltaSign(delta: number): string {
     return delta >= 0 ? `+${delta}` : `${delta}`;
+  }
+
+  // Active-modifiers banner click → publish a cross-tool navigate event.
+  // Handled by +layout.svelte (which owns the active-tool seam — local
+  // $state activeTool + loadTool()). Banner stays generic; any future
+  // tool can dispatch the same event.
+  function onBannerClick() {
+    publishEvent({
+      type: 'navigate-to-character',
+      source: character.source,
+      sourceId: character.source_id,
+    });
   }
 
   // ── Chip click — toggle activation ────────────────────────────────────
@@ -461,7 +474,14 @@
 
   <div class="panel">
     {#if hasActiveModifiers}
-      <div class="modifier-banner" title="Active modifiers on this character">
+      <div
+        class="modifier-banner"
+        role="button"
+        tabindex="0"
+        onclick={onBannerClick}
+        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBannerClick(); } }}
+        title="Click to view in GM Screen"
+      >
         <span class="banner-label">Active modifiers</span>
         <span class="banner-count">{characterModifiers.filter(m => m.isActive).length}</span>
       </div>
@@ -1455,6 +1475,17 @@
     text-transform: uppercase;
     border-radius: calc(0.2rem * var(--card-scale, 1));
     margin-bottom: calc(0.4rem * var(--card-scale, 1));
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s, box-shadow 0.15s;
+  }
+  /* Alpha override of --alert-card-dossier (#d24545); kept inline as
+     established precedent (card-redesign spec §3.1 / plan §3 note). */
+  .modifier-banner:hover,
+  .modifier-banner:focus-visible {
+    background: rgba(210, 69, 69, 0.18);
+    box-shadow: 0 0 0 1px var(--alert-card-dossier);
+    outline: none;
   }
   .modifier-banner .banner-count {
     background: var(--alert-card-dossier);

@@ -1,13 +1,19 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import type { Snippet } from 'svelte';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import { tools } from '../tools';
   import { initBridge } from '../store/bridge.svelte';
+  import { toolEvents } from '../store/toolEvents';
   import type { Component } from 'svelte';
 
   const { children }: { children?: Snippet } = $props();
 
+  // Active-tool seam: local $state + loadTool() owned here (no shared
+  // store). The `navigate-to-character` toolEvents subscriber lives in
+  // this layout (not GmScreen.svelte) because GmScreen is dynamically
+  // imported and unmounted when inactive — its onMount can't receive
+  // an event published from another tool.
   let activeTool = $state(tools[0].id);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ActiveComponent: Component<any> | null = $state(null);
@@ -23,6 +29,28 @@
   onMount(() => {
     loadTool(activeTool);
     initBridge();
+
+    // Cross-tool navigate handler — switches to GM Screen if not active,
+    // then scrolls the matching CharacterRow into view with a brief
+    // red-pulse flash. Silent no-op when the row isn't rendered (filtered
+    // out, character not in display set) per spec §8.4.
+    const unsub = toolEvents.subscribe(async (ev) => {
+      if (!ev || ev.type !== 'navigate-to-character') return;
+      if (activeTool !== 'gm-screen') {
+        await loadTool('gm-screen');
+      }
+      // Two ticks: one for state→render of ActiveComponent swap, one
+      // settle pass for child mount before querying the DOM.
+      await tick();
+      await tick();
+      const sel = `[data-character-source="${ev.source}"][data-character-source-id="${CSS.escape(ev.sourceId)}"]`;
+      const row = document.querySelector(sel);
+      if (!row) return;
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      row.classList.add('flash-target');
+      setTimeout(() => row.classList.remove('flash-target'), 1500);
+    });
+    return () => unsub();
   });
 </script>
 
