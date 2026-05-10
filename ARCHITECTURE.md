@@ -761,7 +761,8 @@ inventing a new hook.
 - **Add a tool.** Add one entry to `src/tools.ts`. Sidebar +
   lazy-loaded component wiring is automatic. Existing examples:
   `Resonance.svelte`, `DyscrasiaManager.svelte`, `Campaign.svelte`,
-  `DomainsManager.svelte` — the pattern is stable.
+  `DomainsManager.svelte`, `GmScreen.svelte`, `RollFeed.svelte` —
+  the pattern is stable.
 - **Add a schema change.** Add a new
   `src-tauri/migrations/NNNN_*.sql` file; migrations run on app
   start. Mirror the shape change in `shared/types.rs` and
