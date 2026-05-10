@@ -24,7 +24,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::bridge::source::BridgeSource;
+use crate::bridge::source::{BridgeSource, InboundEvent};
 use crate::bridge::types::{CanonicalCharacter, SourceInfo, SourceKind};
 
 pub struct ConnectionInfo {
@@ -236,16 +236,32 @@ async fn handle_connection<S>(
         }
 
         match source.handle_inbound(parsed).await {
-            Ok(updated) if !updated.is_empty() => {
-                let mut chars = state.characters.lock().await;
-                for c in updated {
-                    chars.insert(c.key(), c);
+            Ok(events) => {
+                for event in events {
+                    match event {
+                        InboundEvent::CharactersUpdated(updated) if !updated.is_empty() => {
+                            let mut chars = state.characters.lock().await;
+                            for c in updated {
+                                chars.insert(c.key(), c);
+                            }
+                            let snapshot: Vec<CanonicalCharacter> =
+                                chars.values().cloned().collect();
+                            drop(chars);
+                            let _ = handle.emit("bridge://characters-updated", snapshot);
+                        }
+                        InboundEvent::CharactersUpdated(_) => {}
+                        InboundEvent::RollReceived(_roll) => {
+                            // Plan B wires the ring + bridge://roll-received emit. For now,
+                            // log and drop so Plan A.2's hook can be smoke-tested without
+                            // Plan B existing.
+                            eprintln!(
+                                "[bridge:{}] RollReceived event arrived; ring + emit pending Plan B",
+                                kind.as_str()
+                            );
+                        }
+                    }
                 }
-                let snapshot: Vec<CanonicalCharacter> = chars.values().cloned().collect();
-                drop(chars);
-                let _ = handle.emit("bridge://characters-updated", snapshot);
             }
-            Ok(_) => {}
             Err(e) => eprintln!("[bridge:{}] handler error: {e}", kind.as_str()),
         }
     }

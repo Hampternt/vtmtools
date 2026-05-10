@@ -115,6 +115,32 @@ export interface BridgeCharacter {
   raw: unknown;
 }
 
+export type RollSplat = 'mortal' | 'vampire' | 'werewolf' | 'hunter' | 'unknown';
+
+/**
+ * Source-agnostic roll result. Mirrors src-tauri/src/bridge/types.rs::CanonicalRoll.
+ * Drift between Rust and TS is not tolerated — change both in the same commit.
+ */
+export interface CanonicalRoll {
+  source: SourceKind;
+  source_id: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  timestamp: string | null;
+  splat: RollSplat;
+  flavor: string;
+  formula: string;
+  basic_results: number[];
+  advanced_results: number[];
+  total: number;
+  difficulty: number | null;
+  criticals: number;
+  messy: boolean;
+  bestial: boolean;
+  brutal: boolean;
+  raw: unknown;
+}
+
 export interface Roll20RawAttribute {
   name: string;
   current: string;
