@@ -228,7 +228,7 @@ pub async fn gm_screen_push_to_foundry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bridge::source::BridgeSource;
+    use crate::bridge::source::{BridgeSource, InboundEvent};
     use crate::bridge::types::CanonicalCharacter;
     use crate::bridge::ConnectionInfo;
     use crate::shared::modifier::{ModifierBinding, NewCharacterModifier};
@@ -345,7 +345,7 @@ mod tests {
 
     #[async_trait]
     impl BridgeSource for StubFoundrySource {
-        async fn handle_inbound(&self, _msg: Value) -> Result<Vec<CanonicalCharacter>, String> {
+        async fn handle_inbound(&self, _msg: Value) -> Result<Vec<InboundEvent>, String> {
             Ok(vec![])
         }
         fn build_set_attribute(
@@ -387,6 +387,7 @@ mod tests {
             connections: Mutex::new(connections),
             source_info: Mutex::new(HashMap::new()),
             sources,
+            roll_history: Mutex::new(std::collections::VecDeque::new()),
         })
     }
 

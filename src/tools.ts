@@ -47,6 +47,12 @@ export const tools: Tool[] = [
     component: () => import('./tools/FoundryTest.svelte'),
   },
   {
+    id: 'rolls',
+    label: 'Rolls',
+    icon: '🎲',
+    component: () => import('./tools/RollFeed.svelte'),
+  },
+  {
     id: 'gm-screen',
     label: 'GM Screen',
     icon: '🛡',

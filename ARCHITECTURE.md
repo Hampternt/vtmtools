@@ -404,15 +404,25 @@ the full list.
 /// `src-tauri/src/bridge/<source>/mod.rs`.
 #[async_trait]
 pub trait BridgeSource: Send + Sync {
-    async fn handle_inbound(&self, msg: Value) -> Result<Vec<CanonicalCharacter>, String>;
-    fn build_set_attribute(&self, source_id: &str, name: &str, value: &str) -> Value;
+    async fn handle_inbound(&self, msg: Value) -> Result<Vec<InboundEvent>, String>;
+    fn build_set_attribute(&self, source_id: &str, name: &str, value: &str) -> Result<Value, String>;
     fn build_refresh(&self) -> Value;
+}
+
+/// One event emitted from a single inbound frame. A frame may yield zero,
+/// one, or many events — e.g. an `actors` snapshot is one
+/// `CharactersUpdated`; a `hello` frame yields nothing; a roll frame
+/// yields one `RollReceived`.
+pub enum InboundEvent {
+    CharactersUpdated(Vec<CanonicalCharacter>),
+    RollReceived(CanonicalRoll),
 }
 ```
 
 Sources are stateless transformers. Shared connection state
 (per-source connected flag, outbound `mpsc::Sender`, merged
-characters map) lives in `BridgeState` (`src-tauri/src/bridge/mod.rs`).
+characters map, roll-history ring) lives in `BridgeState`
+(`src-tauri/src/bridge/mod.rs`).
 
 **Roll20 source** wire protocol (extension protocol — preserved verbatim
 from the pre-bridge era so the existing browser extension keeps working):
@@ -449,7 +459,24 @@ pub enum InboundMsg {
 pub enum FoundryInbound {
     Actors { actors: Vec<FoundryActor> },
     ActorUpdate { actor: FoundryActor },
-    Hello,
+    Hello {
+        #[serde(default)] protocol_version: Option<u32>,
+        #[serde(default)] world_id: Option<String>,
+        #[serde(default)] world_title: Option<String>,
+        #[serde(default)] system_id: Option<String>,
+        #[serde(default)] system_version: Option<String>,
+        #[serde(default)] capabilities: Option<Vec<String>>,
+    },
+    /// Module-side handler threw; surfaced to the GM via toast.
+    Error {
+        refers_to: String,
+        #[serde(default)] request_id: Option<String>,
+        code: String,
+        message: String,
+    },
+    /// Inbound roll result captured by the Foundry-side `createChatMessage`
+    /// hook; decoded into `CanonicalRoll` by `bridge/foundry/translate_roll.rs`.
+    RollResult { message: FoundryRollMessage },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -536,13 +563,16 @@ Rust signature + the types it references in §2) is the stable contract.
   `delete_dyscrasia`, `roll_random_dyscrasia`.
 - **`src-tauri/src/tools/resonance.rs`** (1): `roll_resonance`.
 - **`src-tauri/src/tools/export.rs`** (1): `export_result_to_md`.
-- **`src-tauri/src/bridge/commands.rs`** (4):
-  `bridge_get_characters`, `bridge_get_status`,
+- **`src-tauri/src/bridge/commands.rs`** (5):
+  `bridge_get_characters`, `bridge_get_rolls`, `bridge_get_status`,
   `bridge_refresh`, `bridge_set_attribute`. Generic across Roll20
   and Foundry — `set_attribute`'s `name` is opaque to the frontend
   and translated per-source by the source's `BridgeSource` impl.
+  `bridge_get_rolls` snapshots the in-memory roll-history ring
+  (capacity 200, dedup by `source_id`); see the events table for the
+  paired live event.
 
-Total: 31 commands. New commands are registered in
+Total: 32 commands. New commands are registered in
 `src-tauri/src/lib.rs` (`invoke_handler(tauri::generate_handler![...])`).
 See §8 for the Tauri capability / ACL surface.
 
@@ -591,6 +621,7 @@ disabled for the session; Roll20 is unaffected.
 | `bridge://foundry/connected` | none | Foundry module opens wss connection |
 | `bridge://foundry/disconnected` | none | Foundry module closes wss connection |
 | `bridge://characters-updated` | `Vec<CanonicalCharacter>` | Any source pushed updated characters; carries the merged cache across all sources |
+| `bridge://roll-received` | `CanonicalRoll` | Foundry source decoded a `roll_result` chat message into a canonical roll; pushed into bridge state ring (capacity 200, dedup by `source_id`) and emitted in one accept-loop arm |
 
 ### Svelte cross-tool pub/sub
 
@@ -757,7 +788,8 @@ inventing a new hook.
 - **Add a tool.** Add one entry to `src/tools.ts`. Sidebar +
   lazy-loaded component wiring is automatic. Existing examples:
   `Resonance.svelte`, `DyscrasiaManager.svelte`, `Campaign.svelte`,
-  `DomainsManager.svelte` — the pattern is stable.
+  `DomainsManager.svelte`, `GmScreen.svelte`, `RollFeed.svelte` —
+  the pattern is stable.
 - **Add a schema change.** Add a new
   `src-tauri/migrations/NNNN_*.sql` file; migrations run on app
   start. Mirror the shape change in `shared/types.rs` and

@@ -321,7 +321,7 @@ pub(crate) async fn do_remove_advantage(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bridge::source::BridgeSource;
+    use crate::bridge::source::{BridgeSource, InboundEvent};
     use crate::bridge::types::CanonicalCharacter;
     use crate::bridge::ConnectionInfo;
     use async_trait::async_trait;
@@ -333,7 +333,7 @@ mod tests {
 
     #[async_trait]
     impl BridgeSource for StubFoundrySource {
-        async fn handle_inbound(&self, _msg: Value) -> Result<Vec<CanonicalCharacter>, String> {
+        async fn handle_inbound(&self, _msg: Value) -> Result<Vec<InboundEvent>, String> {
             Ok(vec![])
         }
         fn build_set_attribute(
@@ -387,6 +387,7 @@ mod tests {
             connections: Mutex::new(connections),
             source_info: Mutex::new(HashMap::new()),
             sources,
+            roll_history: Mutex::new(std::collections::VecDeque::new()),
         });
         (state, rx_opt)
     }
@@ -419,7 +420,7 @@ mod tests {
 
     #[async_trait]
     impl BridgeSource for AlwaysErrSource {
-        async fn handle_inbound(&self, _msg: Value) -> Result<Vec<CanonicalCharacter>, String> {
+        async fn handle_inbound(&self, _msg: Value) -> Result<Vec<InboundEvent>, String> {
             Ok(vec![])
         }
         fn build_set_attribute(

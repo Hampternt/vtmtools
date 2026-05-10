@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod translate;
+mod translate_roll;
 pub mod types;
 
 use async_trait::async_trait;
@@ -7,8 +8,7 @@ use serde_json::{json, Value};
 
 use crate::bridge::foundry::actions::actor;
 use crate::bridge::foundry::types::FoundryInbound;
-use crate::bridge::source::BridgeSource;
-use crate::bridge::types::CanonicalCharacter;
+use crate::bridge::source::{BridgeSource, InboundEvent};
 
 /// Stateless adapter for the FoundryVTT WoD5e module. Translates
 /// Foundry actor data into the canonical bridge shape and builds
@@ -17,7 +17,7 @@ pub struct FoundrySource;
 
 #[async_trait]
 impl BridgeSource for FoundrySource {
-    async fn handle_inbound(&self, msg: Value) -> Result<Vec<CanonicalCharacter>, String> {
+    async fn handle_inbound(&self, msg: Value) -> Result<Vec<InboundEvent>, String> {
         let parsed: FoundryInbound = serde_json::from_value(msg).map_err(|e| e.to_string())?;
         let actors = match parsed {
             FoundryInbound::Actors { actors } => actors,
@@ -28,8 +28,13 @@ impl BridgeSource for FoundrySource {
             // exhaustiveness completeness only.
             FoundryInbound::Hello { .. } => return Ok(vec![]),
             FoundryInbound::Error { .. } => return Ok(vec![]),
+            FoundryInbound::RollResult { message } => {
+                let canonical = translate_roll::to_canonical_roll(&message);
+                return Ok(vec![InboundEvent::RollReceived(canonical)]);
+            }
         };
-        Ok(actors.iter().map(translate::to_canonical).collect())
+        let canonical: Vec<_> = actors.iter().map(translate::to_canonical).collect();
+        Ok(vec![InboundEvent::CharactersUpdated(canonical)])
     }
 
     fn build_set_attribute(

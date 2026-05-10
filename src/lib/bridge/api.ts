@@ -2,9 +2,9 @@
 // components must NOT call invoke() directly — they go through here.
 
 import { invoke } from '@tauri-apps/api/core';
-import type { BridgeCharacter, SourceKind } from '../../types';
+import type { BridgeCharacter, CanonicalRoll, SourceKind } from '../../types';
 
-export type { BridgeCharacter, SourceKind };
+export type { BridgeCharacter, CanonicalRoll, SourceKind };
 
 export interface SourceInfo {
   worldId: string | null;
@@ -20,6 +20,9 @@ export const getStatus = (): Promise<Record<SourceKind, boolean>> =>
 
 export const getCharacters = (): Promise<BridgeCharacter[]> =>
   invoke<BridgeCharacter[]>('bridge_get_characters');
+
+export const bridgeGetRolls = (): Promise<CanonicalRoll[]> =>
+  invoke<CanonicalRoll[]>('bridge_get_rolls');
 
 export const refresh = (source?: SourceKind): Promise<void> =>
   invoke<void>('bridge_refresh', { source });

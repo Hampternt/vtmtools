@@ -78,6 +78,7 @@ pub fn run() {
             tools::character::character_add_advantage,
             tools::character::character_remove_advantage,
             bridge::commands::bridge_get_characters,
+            bridge::commands::bridge_get_rolls,
             bridge::commands::bridge_get_status,
             bridge::commands::bridge_refresh,
             bridge::commands::bridge_set_attribute,

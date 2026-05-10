@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use crate::bridge::types::{CanonicalCharacter, SourceInfo, SourceKind};
+use crate::bridge::types::{CanonicalCharacter, CanonicalRoll, SourceInfo, SourceKind};
 use crate::bridge::BridgeConn;
 use crate::bridge::BridgeState;
 
@@ -25,6 +25,18 @@ pub async fn bridge_get_characters(
 ) -> Result<Vec<CanonicalCharacter>, String> {
     let chars = conn.0.characters.lock().await;
     Ok(chars.values().cloned().collect())
+}
+
+/// Returns a newest-first snapshot of the in-memory roll-history ring
+/// (capacity 200, dedup by `source_id`). The frontend rolls store calls
+/// this once on mount, then subscribes to `bridge://roll-received` for
+/// incremental updates. Per
+/// docs/superpowers/specs/2026-05-10-foundry-roll-mirroring-design.md §7.
+#[tauri::command]
+pub async fn bridge_get_rolls(
+    conn: State<'_, BridgeConn>,
+) -> Result<Vec<CanonicalRoll>, String> {
+    Ok(conn.0.get_rolls().await)
 }
 
 /// Inner logic shared by the Tauri command and any non-IPC caller (the new
