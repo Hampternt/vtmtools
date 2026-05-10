@@ -480,6 +480,7 @@
         tabindex="0"
         onclick={onBannerClick}
         onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBannerClick(); } }}
+        oncontextmenu={(e) => { e.preventDefault(); onBannerClick(); }}
         title="Click to view in GM Screen"
       >
         <span class="banner-label">Active modifiers</span>

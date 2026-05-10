@@ -506,9 +506,11 @@
   :global(.row.flash-target) {
     animation: flash-pulse 1.5s ease-out;
   }
-  @keyframes flash-pulse {
-    0%   { box-shadow: 0 0 0 0   rgba(210, 69, 69, 0.6); }
-    50%  { box-shadow: 0 0 0 6px rgba(210, 69, 69, 0); }
-    100% { box-shadow: 0 0 0 0   rgba(210, 69, 69, 0); }
+  :global {
+    @keyframes flash-pulse {
+      0%   { box-shadow: 0 0 0 0   rgba(210, 69, 69, 0.6); }
+      50%  { box-shadow: 0 0 0 6px rgba(210, 69, 69, 0); }
+      100% { box-shadow: 0 0 0 0   rgba(210, 69, 69, 0); }
+    }
   }
 </style>
