@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod translate;
+mod translate_roll;
 pub mod types;
 
 use async_trait::async_trait;
@@ -27,6 +28,10 @@ impl BridgeSource for FoundrySource {
             // exhaustiveness completeness only.
             FoundryInbound::Hello { .. } => return Ok(vec![]),
             FoundryInbound::Error { .. } => return Ok(vec![]),
+            FoundryInbound::RollResult { message } => {
+                let canonical = translate_roll::to_canonical_roll(&message);
+                return Ok(vec![InboundEvent::RollReceived(canonical)]);
+            }
         };
         let canonical: Vec<_> = actors.iter().map(translate::to_canonical).collect();
         Ok(vec![InboundEvent::CharactersUpdated(canonical)])

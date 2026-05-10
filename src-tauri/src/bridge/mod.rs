@@ -250,14 +250,9 @@ async fn handle_connection<S>(
                             let _ = handle.emit("bridge://characters-updated", snapshot);
                         }
                         InboundEvent::CharactersUpdated(_) => {}
-                        InboundEvent::RollReceived(_roll) => {
-                            // Plan B wires the ring + bridge://roll-received emit. For now,
-                            // log and drop so Plan A.2's hook can be smoke-tested without
-                            // Plan B existing.
-                            eprintln!(
-                                "[bridge:{}] RollReceived event arrived; ring + emit pending Plan B",
-                                kind.as_str()
-                            );
+                        InboundEvent::RollReceived(roll) => {
+                            // Plan B will additionally push to BridgeState.roll_history.
+                            let _ = handle.emit("bridge://roll-received", &roll);
                         }
                     }
                 }

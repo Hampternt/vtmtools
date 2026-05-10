@@ -6,6 +6,7 @@
 import { handlers } from "./foundry-actions/index.js";
 import * as bridgeUmbrella from "./foundry-actions/bridge.js";
 import { actorToWire } from "./translate.js";
+import { init as initRollsHook } from "./foundry-hooks/rolls.js";
 
 const BRIDGE_URL = "wss://localhost:7424";
 const MODULE_ID = "vtmtools-bridge";
@@ -20,6 +21,9 @@ Hooks.once("ready", async () => {
     return;
   }
   connect();
+  // vtmtools roll mirror: subscribe to createChatMessage. The hook stays
+  // registered for the world-session lifetime; teardown happens on world reload.
+  initRollsHook(() => socket);
 });
 
 function connect() {

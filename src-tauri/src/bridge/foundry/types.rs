@@ -26,6 +26,32 @@ pub enum FoundryInbound {
         code: String,
         message: String,
     },
+    /// Inbound roll result captured by the Foundry-side `createChatMessage`
+    /// hook. Fields are decoded into `CanonicalRoll` by `translate_roll`.
+    RollResult { message: FoundryRollMessage },
+}
+
+/// Wire shape for a Foundry roll result. JS-side `messageToWire`
+/// (vtmtools-bridge/scripts/foundry-hooks/rolls.js) builds this from the
+/// `ChatMessage` + `rolls[0]` Foundry document. Splat is detected
+/// JS-side from `roll.formula`; Rust re-detects defensively (see
+/// `translate_roll::parse_splat`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FoundryRollMessage {
+    pub message_id: String,
+    pub actor_id: Option<String>,
+    pub actor_name: Option<String>,
+    /// ISO-8601 string — JS-side converts ms-epoch to ISO before sending.
+    pub timestamp: Option<String>,
+    pub flavor: String,
+    pub formula: String,
+    pub splat: String,
+    pub basic_results: Vec<u8>,
+    pub advanced_results: Vec<u8>,
+    pub total: u32,
+    pub difficulty: Option<u32>,
+    /// Full Foundry ChatMessage blob — opaque to Rust, forwarded to UI as `raw`.
+    pub raw: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
