@@ -68,7 +68,13 @@ function modifierMatchesChar(
 }
 
 /**
- * Project active stat-kind modifiers onto a character's canonical paths.
+ * Project active path-bound modifiers onto a character's canonical paths.
+ *
+ * Includes effects whose `kind` is `'stat'` (render-time only) OR `'pool'`
+ * (also folds into rolls when the V5 dice helper lands). Pool effects must
+ * have non-empty `paths` to project — pathless pool effects are scope-based
+ * bonuses with no specific stat target. Difficulty and note kinds never
+ * project to the card.
  *
  * Returns a Map keyed by path. Entries with `delta === 0` after summation
  * (two opposing modifiers that cancel) are omitted from the map — the View 2
@@ -87,7 +93,13 @@ export function computeActiveDeltas(
     if (!m.isActive) continue;
     if (!modifierMatchesChar(m, char.source, char.source_id)) continue;
     for (const e of m.effects) {
-      if (e.kind !== 'stat') continue;
+      // Project Stat effects (render-time only) AND Pool effects with paths
+      // (Pool effects also fold into rolls when the V5 dice helper lands;
+      // their card-projection is the common "+1 Charisma"-style merit shape).
+      // Pool effects without paths are scope-based bonuses with no specific
+      // stat target — they're not visualizable on the card.
+      if (e.kind !== 'stat' && e.kind !== 'pool') continue;
+      if (e.paths.length === 0) continue;
       const delta = e.delta ?? 0;
       if (delta === 0) continue;
       for (const path of e.paths) {

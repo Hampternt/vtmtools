@@ -555,8 +555,7 @@
               <span class="attr-name">{abbr}</span>
               {#if delta}
                 <span class="attr-val">
-                  <span class="baseline">{delta.baseline}</span>{delta.modified}
-                  <span class="delta-badge">{delta.delta > 0 ? '+' : ''}{delta.delta}</span>
+                  {delta.modified}<span class="delta-badge">{delta.delta > 0 ? '+' : ''}{delta.delta}</span>
                 </span>
               {:else}
                 <span class="attr-val">{attrInt(character, n)}</span>
@@ -577,8 +576,7 @@
                 <span class="skill-name">{s.name}</span>
                 {#if sDelta}
                   <span class="skill-val">
-                    <span class="baseline">{sDelta.baseline}</span>{sDelta.modified}
-                    <span class="delta-badge">{sDelta.delta > 0 ? '+' : ''}{sDelta.delta}</span>
+                    {sDelta.modified}<span class="delta-badge">{sDelta.delta > 0 ? '+' : ''}{sDelta.delta}</span>
                   </span>
                 {:else}
                   <span class="skill-val">{s.value}</span>
@@ -1044,9 +1042,12 @@
     font-weight: 700;
   }
   .skills {
-    display: flex;
-    flex-direction: column;
-    gap: calc(2px * var(--card-scale, 1));
+    /* Two-column grid — uses CSS Grid, not multi-column (ARCH §6 forbids
+       multi-column due to animate:flip incompatibility). Row-major fill:
+       skills go left-to-right alphabetically across each row pair. */
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: calc(2px * var(--card-scale, 1)) calc(8px * var(--card-scale, 1));
     font-size: calc(10px * var(--card-scale, 1));
     font-family: ui-monospace, monospace;
     overflow-y: auto;
@@ -1386,22 +1387,15 @@
     color: var(--alert-card-dossier);
     font-weight: 700;
   }
-  .attr-cell.modified .baseline,
-  .skill-row.modified .baseline {
-    color: color-mix(in srgb, var(--text-card-dossier) 40%, transparent);
-    text-decoration: line-through;
-    font-weight: 400;
-    margin-right: 0.25em;
-  }
+  /* Compact delta indicator: superscript-style, no background, no border.
+     The full delta + source modifier names live in the row's title tooltip. */
   .delta-badge {
-    background: var(--alert-card-dossier);
-    color: var(--bg-card-dossier);
-    font-size: calc(0.55rem * var(--card-scale, 1));
-    font-weight: 700;
-    padding: 0 0.3em;
-    border-radius: calc(0.15rem * var(--card-scale, 1));
-    margin-left: 0.3em;
-    letter-spacing: 0.04em;
+    color: var(--alert-card-dossier);
+    font-size: 0.65em;
+    font-weight: 600;
+    margin-left: 0.25em;
+    vertical-align: super;
+    letter-spacing: 0.02em;
   }
 
   .chip[role="button"] { cursor: pointer; }
