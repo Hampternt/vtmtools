@@ -21,6 +21,11 @@
     characterSetField,
   } from '$lib/character/api';
   import type { FeatureType, CanonicalFieldName } from '$lib/character/api';
+  import { modifiers as modifiersStore } from '../../store/modifiers.svelte';
+  import { computeActiveDeltas, activeAdvantageItemIds } from '$lib/character/active-deltas';
+  import ModifierEffectEditor from './gm-screen/ModifierEffectEditor.svelte';
+  import type { ModifierEffect } from '../../types';
+  import { onMount } from 'svelte';
 
   interface Props {
     character: BridgeCharacter;
@@ -41,6 +46,101 @@
   function flip(dir: 1 | -1) {
     setView(((viewIndex - 1 + dir + 4) % 4) + 1);
   }
+
+  // ── Modifier subscription ─────────────────────────────────────────────
+  onMount(() => { void modifiersStore.ensureLoaded(); });
+
+  const characterModifiers = $derived(
+    modifiersStore.list.filter(
+      m => m.source === character.source && m.sourceId === character.source_id,
+    ),
+  );
+  const activeDeltas = $derived(
+    computeActiveDeltas(character, modifiersStore.list),
+  );
+  const activeChipIds = $derived(
+    activeAdvantageItemIds(character, modifiersStore.list),
+  );
+  const hasActiveModifiers = $derived(
+    characterModifiers.some(m => m.isActive),
+  );
+
+  function deltaTooltip(path: string): string {
+    const entry = activeDeltas.get(path);
+    if (!entry) return '';
+    return entry.sources
+      .map(s => `${s.modifierName}${s.scope ? ' — ' + s.scope : ''} (${entry.delta >= 0 ? '+' : ''}${entry.delta})`)
+      .join('\n');
+  }
+
+  // ── Chip click — toggle activation ────────────────────────────────────
+  let chipBusy = $state<string | null>(null);
+
+  async function toggleChip(itemId: string, name: string, description: string) {
+    if (character.source !== 'foundry') return; // Roll20 chip toggle deferred to Phase 2.5.
+    chipBusy = itemId;
+    try {
+      const existing = characterModifiers.find(
+        m => m.binding.kind === 'advantage' && m.binding.item_id === itemId,
+      );
+      if (existing) {
+        await modifiersStore.setActive(existing.id, !existing.isActive);
+      } else {
+        const created = await modifiersStore.materializeAdvantage({
+          source: character.source,
+          sourceId: character.source_id,
+          itemId,
+          name,
+          description,
+        });
+        await modifiersStore.setActive(created.id, true);
+      }
+    } catch (e) {
+      console.error('[CharacterCard] toggleChip failed:', e);
+      window.alert(String(e));
+    } finally {
+      if (chipBusy === itemId) chipBusy = null;
+    }
+  }
+
+  // ── Chip right-click — open editor popover ────────────────────────────
+  let editorTarget = $state<{ itemId: string; name: string; description: string; effects: ModifierEffect[]; tags: string[] } | null>(null);
+
+  async function openChipEditor(itemId: string, name: string, description: string, ev: Event) {
+    ev.preventDefault(); // suppress browser context menu
+    if (character.source !== 'foundry') return;
+    let modifier = characterModifiers.find(
+      m => m.binding.kind === 'advantage' && m.binding.item_id === itemId,
+    );
+    if (!modifier) {
+      modifier = await modifiersStore.materializeAdvantage({
+        source: character.source,
+        sourceId: character.source_id,
+        itemId,
+        name,
+        description,
+      });
+    }
+    editorTarget = {
+      itemId,
+      name: modifier.name,
+      description: modifier.description,
+      effects: modifier.effects.map(e => ({ ...e })),
+      tags: [...modifier.tags],
+    };
+  }
+
+  async function saveChipEditor(effects: ModifierEffect[], tags: string[]) {
+    if (!editorTarget) return;
+    const modifier = characterModifiers.find(
+      m => m.binding.kind === 'advantage' && m.binding.item_id === editorTarget!.itemId,
+    );
+    if (!modifier) return;
+    await modifiersStore.update(modifier.id, { effects, tags });
+    editorTarget = null;
+  }
+
+  function closeChipEditor() { editorTarget = null; }
 
   const VIEW_LABELS = ['Basics', 'Stats', 'Disciplines', 'Advantages'] as const;
 
@@ -294,7 +394,7 @@
   {@const busy    = busyAdvantageKey === advantageBusyKey(c, item._id)}
   {#if allowed}
     <button type="button" class="chip-remove-btn"
-      onclick={() => removeAdvantage(c, ft, item)}
+      onclick={(ev) => { ev.stopPropagation(); removeAdvantage(c, ft, item); }}
       disabled={busy} aria-busy={busy}
       title={`Remove ${ft}`} aria-label={`Remove ${ft} ${item.name}`}>×</button>
   {/if}
@@ -352,6 +452,12 @@
   </div>
 
   <div class="panel">
+    {#if hasActiveModifiers}
+      <div class="modifier-banner" title="Active modifiers on this character">
+        <span class="banner-label">Active modifiers</span>
+        <span class="banner-count">{characterModifiers.filter(m => m.isActive).length}</span>
+      </div>
+    {/if}
     {#if viewIndex === 1}
       <div class="basics">
         <div class="vital-row">
@@ -443,9 +549,18 @@
         <div class="panel-title">Attributes</div>
         <div class="attr-grid">
           {#each ATTR_NAMES as [n, abbr]}
-            <div class="attr-cell" data-path={`attributes.${n}`}>
+            {@const path = `attributes.${n}`}
+            {@const delta = activeDeltas.get(path)}
+            <div class="attr-cell" data-path={path} class:modified={!!delta} title={deltaTooltip(path)}>
               <span class="attr-name">{abbr}</span>
-              <span class="attr-val">{attrInt(character, n)}</span>
+              {#if delta}
+                <span class="attr-val">
+                  <span class="baseline">{delta.baseline}</span>{delta.modified}
+                  <span class="delta-badge">{delta.delta > 0 ? '+' : ''}{delta.delta}</span>
+                </span>
+              {:else}
+                <span class="attr-val">{attrInt(character, n)}</span>
+              {/if}
             </div>
           {/each}
         </div>
@@ -456,9 +571,18 @@
         {:else}
           <div class="skills">
             {#each skills as s}
-              <div class="skill-row" data-path={`skills.${s.name}`}>
+              {@const sPath = `skills.${s.name}`}
+              {@const sDelta = activeDeltas.get(sPath)}
+              <div class="skill-row" data-path={sPath} class:modified={!!sDelta} title={deltaTooltip(sPath)}>
                 <span class="skill-name">{s.name}</span>
-                <span class="skill-val">{s.value}</span>
+                {#if sDelta}
+                  <span class="skill-val">
+                    <span class="baseline">{sDelta.baseline}</span>{sDelta.modified}
+                    <span class="delta-badge">{sDelta.delta > 0 ? '+' : ''}{sDelta.delta}</span>
+                  </span>
+                {:else}
+                  <span class="skill-val">{s.value}</span>
+                {/if}
               </div>
             {/each}
           </div>
@@ -518,7 +642,16 @@
             <div class="chips">
               {#each merits as m}
                 {@const points = (m.system?.points as number | undefined) ?? 0}
-                <span class="chip merit" data-active="false" data-item-id={m._id}>
+                <span
+                  class="chip merit"
+                  data-active={activeChipIds.has(m._id)}
+                  data-item-id={m._id}
+                  data-busy={chipBusy === m._id}
+                  role="button" tabindex="0"
+                  onclick={() => toggleChip(m._id, m.name, '')}
+                  oncontextmenu={(ev) => openChipEditor(m._id, m.name, '', ev)}
+                  onkeydown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggleChip(m._id, m.name, ''); } }}
+                >
                   <span class="feat-name">{m.name}</span>
                   {#if points > 0}<span class="dots">{'●'.repeat(Math.min(points, 5))}</span>{/if}
                   {@render chipRemoveBtn(character, 'merit', m)}
@@ -535,7 +668,16 @@
             <div class="chips">
               {#each flaws as f}
                 {@const points = (f.system?.points as number | undefined) ?? 0}
-                <span class="chip flaw" data-active="false" data-item-id={f._id}>
+                <span
+                  class="chip flaw"
+                  data-active={activeChipIds.has(f._id)}
+                  data-item-id={f._id}
+                  data-busy={chipBusy === f._id}
+                  role="button" tabindex="0"
+                  onclick={() => toggleChip(f._id, f.name, '')}
+                  oncontextmenu={(ev) => openChipEditor(f._id, f.name, '', ev)}
+                  onkeydown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggleChip(f._id, f.name, ''); } }}
+                >
                   <span class="feat-name">{f.name}</span>
                   {#if points > 0}<span class="dots">{'●'.repeat(Math.min(points, 5))}</span>{/if}
                   {@render chipRemoveBtn(character, 'flaw', f)}
@@ -552,7 +694,16 @@
             <div class="chips">
               {#each backgrounds as b}
                 {@const points = (b.system?.points as number | undefined) ?? 0}
-                <span class="chip bg" data-active="false" data-item-id={b._id}>
+                <span
+                  class="chip bg"
+                  data-active={activeChipIds.has(b._id)}
+                  data-item-id={b._id}
+                  data-busy={chipBusy === b._id}
+                  role="button" tabindex="0"
+                  onclick={() => toggleChip(b._id, b.name, '')}
+                  oncontextmenu={(ev) => openChipEditor(b._id, b.name, '', ev)}
+                  onkeydown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggleChip(b._id, b.name, ''); } }}
+                >
                   <span class="feat-name">{b.name}</span>
                   {#if points > 0}<span class="dots">{'●'.repeat(Math.min(points, 5))}</span>{/if}
                   {@render chipRemoveBtn(character, 'background', b)}
@@ -568,7 +719,16 @@
             <div class="adv-label">Boons</div>
             <div class="chips">
               {#each boons as bn}
-                <span class="chip boon" data-active="false" data-item-id={bn._id}>
+                <span
+                  class="chip boon"
+                  data-active={activeChipIds.has(bn._id)}
+                  data-item-id={bn._id}
+                  data-busy={chipBusy === bn._id}
+                  role="button" tabindex="0"
+                  onclick={() => toggleChip(bn._id, bn.name, '')}
+                  oncontextmenu={(ev) => openChipEditor(bn._id, bn.name, '', ev)}
+                  onkeydown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggleChip(bn._id, bn.name, ''); } }}
+                >
                   <span class="feat-name">{bn.name}</span>
                   {@render chipRemoveBtn(character, 'boon', bn)}
                 </span>
@@ -609,6 +769,19 @@
             onclick={() => flip(+1)}>›</button>
   </footer>
 </div>
+
+{#if editorTarget}
+  <div class="editor-overlay" onclick={closeChipEditor} role="presentation">
+    <div class="editor-anchor" onclick={(ev) => ev.stopPropagation()} role="presentation">
+      <ModifierEffectEditor
+        initialEffects={editorTarget.effects}
+        initialTags={editorTarget.tags}
+        onSave={saveChipEditor}
+        onCancel={closeChipEditor}
+      />
+    </div>
+  </div>
+{/if}
 
 <style>
   /* ── Card frame: 2:3 aspect, scales by --card-scale ─────────────────── */
@@ -1183,5 +1356,61 @@
     .flip-arrow {
       transition: none;
     }
+  }
+
+  /* ── Plan B: modifier integration ───────────────────────────────────── */
+  .modifier-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: color-mix(in srgb, var(--alert-card-dossier) 10%, transparent);
+    border: 1px solid var(--alert-card-dossier);
+    color: var(--alert-card-dossier);
+    padding: calc(0.25rem * var(--card-scale, 1)) calc(0.5rem * var(--card-scale, 1));
+    font-size: calc(0.65rem * var(--card-scale, 1));
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    border-radius: calc(0.2rem * var(--card-scale, 1));
+    margin-bottom: calc(0.4rem * var(--card-scale, 1));
+  }
+  .modifier-banner .banner-count {
+    background: var(--alert-card-dossier);
+    color: var(--bg-card-dossier);
+    font-weight: 700;
+    padding: 0 0.5em;
+    border-radius: 999px;
+  }
+
+  .attr-cell.modified .attr-val,
+  .skill-row.modified .skill-val {
+    color: var(--alert-card-dossier);
+    font-weight: 700;
+  }
+  .attr-cell.modified .baseline,
+  .skill-row.modified .baseline {
+    color: color-mix(in srgb, var(--text-card-dossier) 40%, transparent);
+    text-decoration: line-through;
+    font-weight: 400;
+    margin-right: 0.25em;
+  }
+  .delta-badge {
+    background: var(--alert-card-dossier);
+    color: var(--bg-card-dossier);
+    font-size: calc(0.55rem * var(--card-scale, 1));
+    font-weight: 700;
+    padding: 0 0.3em;
+    border-radius: calc(0.15rem * var(--card-scale, 1));
+    margin-left: 0.3em;
+    letter-spacing: 0.04em;
+  }
+
+  .chip[role="button"] { cursor: pointer; }
+  .chip[data-busy="true"] { opacity: 0.6; pointer-events: none; }
+
+  .editor-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: grid; place-items: center;
+    z-index: 100;
   }
 </style>
