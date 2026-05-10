@@ -142,6 +142,7 @@ pub(crate) async fn do_push_to_foundry(
                 let reason = match effect.kind {
                     ModifierKind::Difficulty => "difficulty: no Foundry bonus equivalent",
                     ModifierKind::Note => "note: descriptive only",
+                    ModifierKind::Stat => "stat: render-time card delta only, no Foundry bonus",
                     ModifierKind::Pool => unreachable!("Pool always translates"),
                 };
                 skipped.push(SkippedEffect {

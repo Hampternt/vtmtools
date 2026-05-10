@@ -50,7 +50,12 @@ pub struct ModifierEffect {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum ModifierKind { Pool, Difficulty, Note }
+pub enum ModifierKind {
+    Pool,
+    Difficulty,
+    Note,
+    Stat, // NEW — render-time visual stat delta on the character card.
+}
 
 /// Argument shape for `add_character_modifier`.
 #[derive(Debug, Deserialize)]
@@ -108,4 +113,55 @@ pub struct StatusTemplatePatch {
     pub description: Option<String>,
     pub effects: Option<Vec<ModifierEffect>>,
     pub tags: Option<Vec<String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modifier_effect_stat_round_trips_through_json() {
+        let original = ModifierEffect {
+            kind: ModifierKind::Stat,
+            scope: Some("vs social rolls".to_string()),
+            delta: Some(1),
+            note: None,
+            paths: vec!["attributes.charisma".to_string(), "attributes.manipulation".to_string()],
+        };
+        let json = serde_json::to_string(&original).expect("serialize");
+        let round_trip: ModifierEffect = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(round_trip.kind, ModifierKind::Stat);
+        assert_eq!(round_trip.scope.as_deref(), Some("vs social rolls"));
+        assert_eq!(round_trip.delta, Some(1));
+        assert_eq!(round_trip.note, None);
+        assert_eq!(
+            round_trip.paths,
+            vec!["attributes.charisma".to_string(), "attributes.manipulation".to_string()],
+        );
+    }
+
+    #[test]
+    fn modifier_kind_serializes_as_snake_case() {
+        // Regression — guards against accidentally renaming the variant.
+        let stat_json = serde_json::to_string(&ModifierKind::Stat).expect("ser stat");
+        assert_eq!(stat_json, r#""stat""#);
+        let pool_json = serde_json::to_string(&ModifierKind::Pool).expect("ser pool");
+        assert_eq!(pool_json, r#""pool""#);
+    }
+
+    #[test]
+    fn effects_json_blob_with_all_four_kinds_round_trips() {
+        // Mirrors the actual `effects_json` TEXT column shape.
+        let blob = vec![
+            ModifierEffect { kind: ModifierKind::Pool,       scope: Some("Social".into()),  delta: Some(1),  note: None,                paths: vec![] },
+            ModifierEffect { kind: ModifierKind::Difficulty, scope: None,                   delta: Some(-1), note: None,                paths: vec![] },
+            ModifierEffect { kind: ModifierKind::Note,       scope: None,                   delta: None,     note: Some("blinded".into()), paths: vec![] },
+            ModifierEffect { kind: ModifierKind::Stat,       scope: Some("Beautiful".into()), delta: Some(1),  note: None,                paths: vec!["attributes.charisma".into()] },
+        ];
+        let json = serde_json::to_string(&blob).expect("serialize");
+        let round_trip: Vec<ModifierEffect> = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(round_trip.len(), 4);
+        assert_eq!(round_trip[3].kind, ModifierKind::Stat);
+        assert_eq!(round_trip[3].paths, vec!["attributes.charisma".to_string()]);
+    }
 }
