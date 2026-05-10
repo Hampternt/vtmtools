@@ -387,6 +387,7 @@ mod tests {
             connections: Mutex::new(connections),
             source_info: Mutex::new(HashMap::new()),
             sources,
+            roll_history: Mutex::new(std::collections::VecDeque::new()),
         });
         (state, rx_opt)
     }

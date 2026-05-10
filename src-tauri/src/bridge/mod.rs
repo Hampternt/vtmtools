@@ -13,7 +13,7 @@ pub mod source;
 pub mod tls;
 pub mod types;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
@@ -25,7 +25,14 @@ use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::bridge::source::{BridgeSource, InboundEvent};
-use crate::bridge::types::{CanonicalCharacter, SourceInfo, SourceKind};
+use crate::bridge::types::{CanonicalCharacter, CanonicalRoll, SourceInfo, SourceKind};
+
+/// Capacity of the in-memory roll-history ring. ~80 rolls per typical 4-hour
+/// session × 2.5 → 200 covers a session-and-a-half comfortably. Per
+/// docs/superpowers/specs/2026-05-10-foundry-roll-mirroring-design.md §15
+/// open question 4: revisit only if user feedback shows entries dropping
+/// mid-session.
+const ROLL_HISTORY_CAPACITY: usize = 200;
 
 pub struct ConnectionInfo {
     pub connected: bool,
@@ -37,6 +44,10 @@ pub struct BridgeState {
     pub connections: Mutex<HashMap<SourceKind, ConnectionInfo>>,
     pub source_info: Mutex<HashMap<SourceKind, SourceInfo>>,
     pub sources: HashMap<SourceKind, Arc<dyn BridgeSource>>,
+    // roll_history uses tokio::sync::Mutex to match the existing in-memory
+    // caches (characters, connections, source_info). tokio's Mutex doesn't
+    // poison; push_roll / get_rolls are async because acquisition awaits.
+    pub roll_history: Mutex<VecDeque<CanonicalRoll>>,
 }
 
 impl BridgeState {
@@ -53,7 +64,27 @@ impl BridgeState {
             connections: Mutex::new(connections),
             source_info: Mutex::new(HashMap::new()),
             sources,
+            roll_history: Mutex::new(VecDeque::with_capacity(ROLL_HISTORY_CAPACITY)),
         }
+    }
+
+    /// Push a roll into the bounded ring. Newest-first ordering. Dedup by
+    /// `source_id` — Foundry occasionally re-fires createChatMessage for the
+    /// same message across sockets; pre-removing any existing entry collapses
+    /// dupes without losing chronology.
+    pub async fn push_roll(&self, roll: CanonicalRoll) {
+        let mut ring = self.roll_history.lock().await;
+        ring.retain(|r| r.source_id != roll.source_id);
+        ring.push_front(roll);
+        while ring.len() > ROLL_HISTORY_CAPACITY {
+            ring.pop_back();
+        }
+    }
+
+    /// Snapshot of the ring, newest-first. Cheap clone — capacity 200 of small
+    /// structs (Vec<u8> dice arrays + an opaque JSON blob).
+    pub async fn get_rolls(&self) -> Vec<CanonicalRoll> {
+        self.roll_history.lock().await.iter().cloned().collect()
     }
 }
 
@@ -251,7 +282,7 @@ async fn handle_connection<S>(
                         }
                         InboundEvent::CharactersUpdated(_) => {}
                         InboundEvent::RollReceived(roll) => {
-                            // Plan B will additionally push to BridgeState.roll_history.
+                            state.push_roll(roll.clone()).await;
                             let _ = handle.emit("bridge://roll-received", &roll);
                         }
                     }
@@ -274,4 +305,67 @@ async fn handle_connection<S>(
         info.remove(&kind);
     }
     let _ = handle.emit(&format!("bridge://{}/disconnected", kind.as_str()), ());
+}
+
+#[cfg(test)]
+mod ring_tests {
+    use super::*;
+    use crate::bridge::types::{CanonicalRoll, RollSplat, SourceKind};
+    use serde_json::json;
+
+    fn make_roll(id: &str) -> CanonicalRoll {
+        CanonicalRoll {
+            source: SourceKind::Foundry,
+            source_id: id.into(),
+            actor_id: None,
+            actor_name: None,
+            timestamp: None,
+            splat: RollSplat::Mortal,
+            flavor: String::new(),
+            formula: String::new(),
+            basic_results: vec![],
+            advanced_results: vec![],
+            total: 0,
+            difficulty: None,
+            criticals: 0,
+            messy: false,
+            bestial: false,
+            brutal: false,
+            raw: json!({}),
+        }
+    }
+
+    #[tokio::test]
+    async fn ring_dedups_by_source_id() {
+        let state = BridgeState::new(HashMap::new());
+        state.push_roll(make_roll("a")).await;
+        state.push_roll(make_roll("b")).await;
+        state.push_roll(make_roll("a")).await; // dup of first
+        let rolls = state.get_rolls().await;
+        assert_eq!(rolls.len(), 2);
+        assert_eq!(rolls[0].source_id, "a", "newest-first; re-pushed 'a' is newest");
+        assert_eq!(rolls[1].source_id, "b");
+    }
+
+    #[tokio::test]
+    async fn ring_caps_at_capacity() {
+        let state = BridgeState::new(HashMap::new());
+        for i in 0..(ROLL_HISTORY_CAPACITY + 50) {
+            state.push_roll(make_roll(&format!("id_{i}"))).await;
+        }
+        assert_eq!(state.get_rolls().await.len(), ROLL_HISTORY_CAPACITY);
+    }
+
+    #[tokio::test]
+    async fn ring_newest_first_ordering() {
+        let state = BridgeState::new(HashMap::new());
+        state.push_roll(make_roll("first")).await;
+        state.push_roll(make_roll("second")).await;
+        state.push_roll(make_roll("third")).await;
+        let rolls = state.get_rolls().await;
+        assert_eq!(rolls.len(), 3);
+        assert_eq!(rolls[0].source_id, "third");
+        assert_eq!(rolls[1].source_id, "second");
+        assert_eq!(rolls[2].source_id, "first");
+    }
 }

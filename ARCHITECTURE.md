@@ -536,13 +536,16 @@ Rust signature + the types it references in §2) is the stable contract.
   `delete_dyscrasia`, `roll_random_dyscrasia`.
 - **`src-tauri/src/tools/resonance.rs`** (1): `roll_resonance`.
 - **`src-tauri/src/tools/export.rs`** (1): `export_result_to_md`.
-- **`src-tauri/src/bridge/commands.rs`** (4):
-  `bridge_get_characters`, `bridge_get_status`,
+- **`src-tauri/src/bridge/commands.rs`** (5):
+  `bridge_get_characters`, `bridge_get_rolls`, `bridge_get_status`,
   `bridge_refresh`, `bridge_set_attribute`. Generic across Roll20
   and Foundry — `set_attribute`'s `name` is opaque to the frontend
   and translated per-source by the source's `BridgeSource` impl.
+  `bridge_get_rolls` snapshots the in-memory roll-history ring
+  (capacity 200, dedup by `source_id`); see the events table for the
+  paired live event.
 
-Total: 31 commands. New commands are registered in
+Total: 32 commands. New commands are registered in
 `src-tauri/src/lib.rs` (`invoke_handler(tauri::generate_handler![...])`).
 See §8 for the Tauri capability / ACL surface.
 
@@ -591,6 +594,7 @@ disabled for the session; Roll20 is unaffected.
 | `bridge://foundry/connected` | none | Foundry module opens wss connection |
 | `bridge://foundry/disconnected` | none | Foundry module closes wss connection |
 | `bridge://characters-updated` | `Vec<CanonicalCharacter>` | Any source pushed updated characters; carries the merged cache across all sources |
+| `bridge://roll-received` | `CanonicalRoll` | Foundry source decoded a `roll_result` chat message into a canonical roll; pushed into bridge state ring (capacity 200, dedup by `source_id`) and emitted in one accept-loop arm |
 
 ### Svelte cross-tool pub/sub
 
