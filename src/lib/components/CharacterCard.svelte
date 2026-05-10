@@ -1409,7 +1409,7 @@
 
   .editor-overlay {
     position: fixed; inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--shadow-strong);
     display: grid; place-items: center;
     z-index: 100;
   }
