@@ -291,7 +291,12 @@
   }
 </script>
 
-<section class="row" data-source={character.source}>
+<section
+  class="row"
+  data-source={character.source}
+  data-character-source={character.source}
+  data-character-source-id={character.source_id}
+>
   <header>
     <h2>{character.name}</h2>
     <span class="source">{character.source}</span>
@@ -381,6 +386,7 @@
         initialTags={editorTarget.kind === 'materialized' ? editorTarget.mod.tags : []}
         onSave={saveEditor}
         onCancel={closeEditor}
+        {character}
       />
     </div>
   {/if}
@@ -489,6 +495,22 @@
     .modifier-row {
       --card-overlap: 0;
       --card-shift-delta: 0;
+    }
+  }
+
+  /* Banner-click navigate target — `flash-target` is added imperatively
+     by +layout.svelte's toolEvents subscriber, so the rule must be
+     :global() to escape Svelte's component-scoped class hashing.
+     rgba uses --alert-card-dossier's RGB (#d24545) as established
+     inline-alpha precedent (no token exists for this opacity). */
+  :global(.row.flash-target) {
+    animation: flash-pulse 1.5s ease-out;
+  }
+  :global {
+    @keyframes flash-pulse {
+      0%   { box-shadow: 0 0 0 0   rgba(210, 69, 69, 0.6); }
+      50%  { box-shadow: 0 0 0 6px rgba(210, 69, 69, 0); }
+      100% { box-shadow: 0 0 0 0   rgba(210, 69, 69, 0); }
     }
   }
 </style>

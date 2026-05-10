@@ -1,25 +1,36 @@
 <script lang="ts">
-  import type { ModifierEffect, ModifierKind } from '../../../types';
-  import { FOUNDRY_ATTRIBUTE_NAMES, FOUNDRY_SKILL_NAMES } from '$lib/foundry/canonical-names';
-
-  // Canonical-path suggestions for the path-input datalist. Mirrors the path
-  // vocabulary recognized by src/lib/character/active-deltas.ts::readPath and
-  // src/lib/saved-characters/diff.ts. Adding a new path category here is
-  // additive — readPath already supports any 'head.tail' shape that matches
-  // raw.system.<head>.<tail>.value on Foundry actors.
-  const CANONICAL_PATHS: readonly string[] = [
-    ...FOUNDRY_ATTRIBUTE_NAMES.map(n => `attributes.${n}`),
-    ...FOUNDRY_SKILL_NAMES.map(n => `skills.${n}`),
-  ];
+  import type { BridgeCharacter, ModifierEffect, ModifierKind } from '../../../types';
+  import {
+    FOUNDRY_ATTRIBUTE_NAMES,
+    FOUNDRY_SKILL_NAMES,
+    FOUNDRY_VITAL_PATHS,
+    foundryDisciplineNames,
+  } from '$lib/foundry/canonical-names';
 
   interface Props {
     initialEffects: ModifierEffect[];
     initialTags: string[];
     onSave: (effects: ModifierEffect[], tags: string[]) => Promise<void>;
     onCancel: () => void;
+    /** Owning character — used to derive per-actor discipline path
+        autocomplete (`disciplines.auspex`, etc.). Optional: when absent the
+        suggestion list still includes attributes / skills / vital paths. */
+    character?: BridgeCharacter;
   }
 
-  let { initialEffects, initialTags, onSave, onCancel }: Props = $props();
+  let { initialEffects, initialTags, onSave, onCancel, character }: Props = $props();
+
+  // Canonical-path suggestions for the path-input datalist. Mirrors the path
+  // vocabulary recognized by src/lib/character/active-deltas.ts::readPath and
+  // src/lib/saved-characters/diff.ts. Adding a new path category here is
+  // additive — readPath supports any dot-path shape that walks raw.system.
+  // Per-character disciplines come from the actor's live disciplines map.
+  const pathSuggestions = $derived([
+    ...FOUNDRY_ATTRIBUTE_NAMES.map(n => `attributes.${n}`),
+    ...FOUNDRY_SKILL_NAMES.map(n => `skills.${n}`),
+    ...FOUNDRY_VITAL_PATHS,
+    ...(character ? foundryDisciplineNames(character) : []),
+  ]);
 
   let effects = $state<ModifierEffect[]>(initialEffects.map(e => ({ ...e })));
   let tags = $state<string[]>([...initialTags]);
@@ -205,7 +216,7 @@
   </footer>
 
   <datalist id="canonical-path-suggestions">
-    {#each CANONICAL_PATHS as path}
+    {#each pathSuggestions as path}
       <option value={path}></option>
     {/each}
   </datalist>

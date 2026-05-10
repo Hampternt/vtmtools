@@ -26,6 +26,7 @@
   import ModifierEffectEditor from './gm-screen/ModifierEffectEditor.svelte';
   import type { ModifierEffect } from '../../types';
   import { onMount } from 'svelte';
+  import { publishEvent } from '../../store/toolEvents';
 
   interface Props {
     character: BridgeCharacter;
@@ -71,6 +72,26 @@
     return entry.sources
       .map(s => `${s.modifierName}${s.scope ? ' — ' + s.scope : ''} (${entry.delta >= 0 ? '+' : ''}${entry.delta})`)
       .join('\n');
+  }
+
+  // View 1 / View 3 helpers — shared lookup shape mirrors the View 2 pattern.
+  function deltaFor(path: string) {
+    return activeDeltas.get(path);
+  }
+  function deltaSign(delta: number): string {
+    return delta >= 0 ? `+${delta}` : `${delta}`;
+  }
+
+  // Active-modifiers banner click → publish a cross-tool navigate event.
+  // Handled by +layout.svelte (which owns the active-tool seam — local
+  // $state activeTool + loadTool()). Banner stays generic; any future
+  // tool can dispatch the same event.
+  function onBannerClick() {
+    publishEvent({
+      type: 'navigate-to-character',
+      source: character.source,
+      sourceId: character.source_id,
+    });
   }
 
   // ── Chip click — toggle activation ────────────────────────────────────
@@ -453,38 +474,86 @@
 
   <div class="panel">
     {#if hasActiveModifiers}
-      <div class="modifier-banner" title="Active modifiers on this character">
+      <div
+        class="modifier-banner"
+        role="button"
+        tabindex="0"
+        onclick={onBannerClick}
+        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBannerClick(); } }}
+        oncontextmenu={(e) => { e.preventDefault(); onBannerClick(); }}
+        title="Click to view in GM Screen"
+      >
         <span class="banner-label">Active modifiers</span>
         <span class="banner-count">{characterModifiers.filter(m => m.isActive).length}</span>
       </div>
     {/if}
     {#if viewIndex === 1}
+      {@const hungerD = deltaFor('hunger')}
+      {@const hungerMod = hungerD ? Math.max(0, Math.min(5, hungerD.modified)) : hunger}
+      {@const bpD = deltaFor('blood.potency')}
+      {@const humanityD = deltaFor('humanity')}
+      {@const stainsD = deltaFor('humanity.stains')}
+      {@const humanityVal = humanityD ? humanityD.modified : humanity}
+      {@const stainsVal = stainsD ? stainsD.modified : stains}
+      {@const hMaxD = deltaFor('health.max')}
+      {@const hSupD = deltaFor('health.superficial')}
+      {@const hAggD = deltaFor('health.aggravated')}
+      {@const healthMaxR = hMaxD ? Math.max(0, hMaxD.modified) : healthMax}
+      {@const healthOkR = Math.max(0, healthMaxR - healthSup - healthAgg)}
+      {@const wMaxD = deltaFor('willpower.max')}
+      {@const wSupD = deltaFor('willpower.superficial')}
+      {@const wAggD = deltaFor('willpower.aggravated')}
+      {@const wpMaxR = wMaxD ? Math.max(0, wMaxD.modified) : wpMax}
+      {@const wpOkR = Math.max(0, wpMaxR - wpSup - wpAgg)}
       <div class="basics">
         <div class="vital-row">
-          <div class="hunger-cluster">
+          <div
+            class="hunger-cluster"
+            title={hungerD ? deltaTooltip('hunger') : ''}
+          >
             <div class="hunger-drops">
-              {#each dots(hunger, 5) as filled}
+              {#each dots(hungerMod, 5) as filled}
                 <svg class="blood-drop" class:filled viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg">
                   <path d="M12 2C12 2 4 14 4 20a8 8 0 0 0 16 0c0-6-8-18-8-18z" />
                 </svg>
               {/each}
             </div>
+            {#if hungerD}
+              <span class="delta-badge">{deltaSign(hungerD.delta)}</span>
+            {/if}
             {@render stepper(character, 'hunger', hunger)}
           </div>
-          <div class="bp-pill">
+          <div
+            class="bp-pill"
+            title={bpD ? deltaTooltip('blood.potency') : ''}
+          >
             <span class="qs-label">BP</span>
-            <span class="bp-value">{bp}</span>
+            {#if bpD}
+              <span class="bp-baseline-strike">{bpD.baseline}</span>
+              <span class="bp-modified">{bpD.modified}</span>
+              <span class="delta-badge">{deltaSign(bpD.delta)}</span>
+            {:else}
+              <span class="bp-value">{bp}</span>
+            {/if}
             {@render stepper(character, 'blood_potency', bp)}
           </div>
         </div>
 
         <div class="block">
-          <div class="track-label">Conscience</div>
+          <div class="track-label-row">
+            <span class="track-label">Conscience</span>
+            {#if humanityD}
+              <span class="delta-badge" title={deltaTooltip('humanity')}>{deltaSign(humanityD.delta)}</span>
+            {/if}
+            {#if stainsD}
+              <span class="delta-badge stains" title={deltaTooltip('humanity.stains')}>stains {deltaSign(stainsD.delta)}</span>
+            {/if}
+          </div>
           <div class="conscience-track">
             {#each 'CONSCIENCE'.split('') as letter, i}
               {@const pos = i + 1}
-              {@const isFilled = pos <= humanity}
-              {@const isStained = pos > 10 - stains}
+              {@const isFilled = pos <= humanityVal}
+              {@const isStained = pos > 10 - stainsVal}
               <span class="conscience-letter"
                     class:filled={isFilled}
                     class:stained={isStained && !isFilled}>{letter}</span>
@@ -499,12 +568,23 @@
         </div>
 
         <div class="block">
-          <div class="track-label">Health</div>
+          <div class="track-label-row">
+            <span class="track-label">Health</span>
+            {#if hMaxD}
+              <span class="delta-badge" title={deltaTooltip('health.max')}>{deltaSign(hMaxD.delta)}</span>
+            {/if}
+            {#if hSupD}
+              <span class="delta-badge minor" title={deltaTooltip('health.superficial')}>sup {deltaSign(hSupD.delta)}</span>
+            {/if}
+            {#if hAggD}
+              <span class="delta-badge minor" title={deltaTooltip('health.aggravated')}>agg {deltaSign(hAggD.delta)}</span>
+            {/if}
+          </div>
           <div class="track-boxes">
-            {#each Array.from({ length: healthMax }, (_, i) => i) as i}
+            {#each Array.from({ length: healthMaxR }, (_, i) => i) as i}
               <div class="box health"
-                   class:superficial={i >= healthOk && i < healthOk + healthSup}
-                   class:aggravated={i >= healthOk + healthSup}></div>
+                   class:superficial={i >= healthOkR && i < healthOkR + healthSup}
+                   class:aggravated={i >= healthOkR + healthSup}></div>
             {/each}
           </div>
           <div class="ctrl-grid">
@@ -516,13 +596,24 @@
         </div>
 
         <div class="block">
-          <div class="track-label">Willpower</div>
+          <div class="track-label-row">
+            <span class="track-label">Willpower</span>
+            {#if wMaxD}
+              <span class="delta-badge" title={deltaTooltip('willpower.max')}>{deltaSign(wMaxD.delta)}</span>
+            {/if}
+            {#if wSupD}
+              <span class="delta-badge minor" title={deltaTooltip('willpower.superficial')}>sup {deltaSign(wSupD.delta)}</span>
+            {/if}
+            {#if wAggD}
+              <span class="delta-badge minor" title={deltaTooltip('willpower.aggravated')}>agg {deltaSign(wAggD.delta)}</span>
+            {/if}
+          </div>
           <div class="track-boxes">
-            {#each Array.from({ length: wpMax }, (_, i) => i) as i}
+            {#each Array.from({ length: wpMaxR }, (_, i) => i) as i}
               <div class="box willpower"
-                   class:filled={i < wpOk}
-                   class:superficial={i >= wpOk && i < wpOk + wpSup}
-                   class:aggravated={i >= wpOk + wpSup}></div>
+                   class:filled={i < wpOkR}
+                   class:superficial={i >= wpOkR && i < wpOkR + wpSup}
+                   class:aggravated={i >= wpOkR + wpSup}></div>
             {/each}
           </div>
           <div class="ctrl-grid">
@@ -612,10 +703,21 @@
         {/if}
         {#each grouped as d, idx}
           {#if idx > 0}<hr />{/if}
+          {@const discKey = `disciplines.${d.name.toLowerCase()}`}
+          {@const discD = deltaFor(discKey)}
+          {@const discMod = discD ? Math.max(0, Math.min(5, discD.modified)) : 0}
           <div class="disc-row">
             <div class="disc-name">
               <span>{d.name}</span>
-              <span class="dots">{'●'.repeat(Math.min(d.level, 5))}</span>
+              {#if discD}
+                <span class="dots-cluster" title={deltaTooltip(discKey)}>
+                  <span class="dots-strike">{'●'.repeat(Math.min(d.level, 5))}</span>
+                  <span class="dots-modified">{'●'.repeat(discMod)}</span>
+                  <span class="delta-badge">{deltaSign(discD.delta)}</span>
+                </span>
+              {:else}
+                <span class="dots">{'●'.repeat(Math.min(d.level, 5))}</span>
+              {/if}
             </div>
             {#if d.powers.length > 0}
               <div class="powers">
@@ -776,6 +878,7 @@
         initialTags={editorTarget.tags}
         onSave={saveChipEditor}
         onCancel={closeChipEditor}
+        {character}
       />
     </div>
   </div>
@@ -1373,6 +1476,17 @@
     text-transform: uppercase;
     border-radius: calc(0.2rem * var(--card-scale, 1));
     margin-bottom: calc(0.4rem * var(--card-scale, 1));
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s, box-shadow 0.15s;
+  }
+  /* Alpha override of --alert-card-dossier (#d24545); kept inline as
+     established precedent (card-redesign spec §3.1 / plan §3 note). */
+  .modifier-banner:hover,
+  .modifier-banner:focus-visible {
+    background: rgba(210, 69, 69, 0.18);
+    box-shadow: 0 0 0 1px var(--alert-card-dossier);
+    outline: none;
   }
   .modifier-banner .banner-count {
     background: var(--alert-card-dossier);
@@ -1396,6 +1510,65 @@
     margin-left: 0.25em;
     vertical-align: super;
     letter-spacing: 0.02em;
+  }
+  /* Secondary delta variants — used when multiple per-row badges stack
+     (e.g. Health row showing max + sup + agg). The `.minor` variant
+     downweights non-primary deltas; `.stains` distinguishes humanity-stains
+     from humanity itself with a dashed underline. */
+  .delta-badge.minor {
+    font-size: 0.55em;
+    font-weight: 500;
+    opacity: 0.85;
+  }
+  .delta-badge.stains {
+    font-size: 0.55em;
+    font-weight: 500;
+    text-decoration: underline dashed;
+    text-underline-offset: 0.15em;
+  }
+
+  /* Track-label rows that carry inline delta badges next to the label.
+     Spec §4.1 places badges on the label row, not the box-row. */
+  .track-label-row {
+    display: flex;
+    align-items: baseline;
+    gap: calc(4px * var(--card-scale, 1));
+    margin-bottom: calc(3px * var(--card-scale, 1));
+  }
+  .track-label-row .track-label {
+    margin-bottom: 0;
+  }
+
+  /* BP pill — strike-through baseline + emphasized modified value.
+     Mirrors View 2's strikethrough+red-modified pattern. */
+  .bp-baseline-strike {
+    text-decoration: line-through;
+    opacity: 0.5;
+    color: var(--text-card-dossier);
+    margin-right: 0.15em;
+  }
+  .bp-modified {
+    color: var(--alert-card-dossier);
+    font-weight: 700;
+  }
+
+  /* Discipline-row dot annotations. Baseline dots dim+strike, modified
+     dots in the alert color. Same visual language as the BP pill above. */
+  .dots-cluster {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.2em;
+  }
+  .dots-strike {
+    text-decoration: line-through;
+    opacity: 0.5;
+    letter-spacing: 0.1em;
+    color: var(--text-card-dossier);
+  }
+  .dots-modified {
+    color: var(--alert-card-dossier);
+    font-weight: 700;
+    letter-spacing: 0.1em;
   }
 
   .chip[role="button"] { cursor: pointer; }

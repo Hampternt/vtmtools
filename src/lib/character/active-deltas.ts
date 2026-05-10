@@ -34,24 +34,58 @@ export interface DeltaEntry {
  * Read the integer value at a canonical path on a character.
  * Returns 0 for non-existent paths or non-numeric values.
  *
- * Supported path shapes:
- *   - 'attributes.<name>' — Foundry: raw.system.attributes.<name>.value
- *   - 'skills.<name>'     — Foundry: raw.system.skills.<name>.value
+ * Walks `path` (dot-separated) against `raw.system`. The leaf may be:
+ *   - a number directly         (e.g. `health.max`     → system.health.max)
+ *   - an object with `.value`   (e.g. `attributes.charisma` → system.attributes.charisma.value)
  *
- * Roll20: returns 0 (Roll20 sources don't expose attribute/skill data via
- * canonical paths; modifier projections on Roll20 chars render as `0 → delta`).
+ * Verified 2026-05-10 against foundry-vtm5e-actor-sample.json: disciplines schema is
+ * `system.disciplines.<name>` = { value: number, powers: [], visible, ... } — object-with-.value branch.
+ *
+ * Path coverage matrix (Foundry sources only — Roll20 returns 0):
+ *
+ *   | Canonical path           | Foundry path                          | Leaf shape       |
+ *   |--------------------------|---------------------------------------|------------------|
+ *   | attributes.<name>        | system.attributes.<name>              | { value: number }|
+ *   | skills.<name>            | system.skills.<name>                  | { value: number }|
+ *   | hunger                   | system.hunger.value                   | object → .value  |
+ *   | humanity                 | system.humanity.value                 | object → .value  |
+ *   | health.max               | system.health.max                     | number directly  |
+ *   | health.superficial       | system.health.superficial             | number directly  |
+ *   | health.aggravated        | system.health.aggravated              | number directly  |
+ *   | willpower.max            | system.willpower.max                  | number directly  |
+ *   | willpower.superficial    | system.willpower.superficial          | number directly  |
+ *   | willpower.aggravated     | system.willpower.aggravated           | number directly  |
+ *   | humanity.stains          | system.humanity.stains                | number directly  |
+ *   | blood.potency            | system.blood.potency                  | number directly  |
+ *   | disciplines.<name>       | system.disciplines.<name>             | object → .value  |
+ *
+ * Roll20 sources: returns 0 (Roll20's `raw` is a flat attributes[] array,
+ * not the `system.*` tree this resolver walks).
+ *
+ * See: docs/superpowers/specs/2026-05-10-card-modifier-coverage-finish-design.md §3.
  */
 function readPath(char: BridgeCharacter, path: string): number {
   if (char.source !== 'foundry') return 0;
-  const raw = char.raw as { system?: Record<string, Record<string, { value?: unknown }>> } | null;
+  const raw = char.raw as { system?: unknown } | null;
   if (!raw?.system) return 0;
-  const dot = path.indexOf('.');
-  if (dot < 0) return 0;
-  const head = path.slice(0, dot);
-  const tail = path.slice(dot + 1);
-  const node = raw.system[head]?.[tail];
-  const v = node?.value;
-  return typeof v === 'number' ? v : 0;
+
+  let cur: unknown = raw.system;
+  for (const seg of path.split('.')) {
+    if (cur === null || typeof cur !== 'object') return 0;
+    cur = (cur as Record<string, unknown>)[seg];
+    if (cur === undefined) return 0;
+  }
+
+  // Leaf is a number directly (e.g. health.max).
+  if (typeof cur === 'number') return cur;
+
+  // Leaf is an object with .value (e.g. attributes.charisma → { value: 3 }).
+  if (cur !== null && typeof cur === 'object') {
+    const v = (cur as { value?: unknown }).value;
+    if (typeof v === 'number') return v;
+  }
+
+  return 0;
 }
 
 /**

@@ -107,3 +107,37 @@ export const FOUNDRY_SKILL_NAMES: readonly SkillName[] = [
   'survival',
   'technology',
 ] as const;
+
+/**
+ * Canonical path strings for V5 vital tracks. Used by:
+ *   - active-deltas.readPath (path-resolver targets)
+ *   - ModifierEffectEditor path-input autocomplete
+ *
+ * Path strings match the dot-path the resolver expects (see active-deltas.ts).
+ * `health.superficial` / `health.aggravated` / `willpower.superficial` /
+ * `willpower.aggravated` paths resolve correctly but are intentionally OMITTED
+ * from autocomplete — uncommon modifier targets; user can type them by hand.
+ */
+export const FOUNDRY_VITAL_PATHS = [
+  'hunger',
+  'humanity',
+  'humanity.stains',
+  'health.max',
+  'willpower.max',
+  'blood.potency',
+] as const;
+
+/**
+ * Per-character discipline path autocomplete. Reads the actor's current
+ * disciplines map and returns canonical paths like 'disciplines.auspex'.
+ * Returns [] for non-Foundry chars or chars with no disciplines field.
+ */
+export function foundryDisciplineNames(
+  char: import('../../types').BridgeCharacter,
+): string[] {
+  if (char.source !== 'foundry') return [];
+  const raw = char.raw as { system?: { disciplines?: Record<string, unknown> } } | null;
+  const disciplines = raw?.system?.disciplines;
+  if (!disciplines || typeof disciplines !== 'object') return [];
+  return Object.keys(disciplines).map(name => `disciplines.${name}`);
+}
