@@ -1,0 +1,286 @@
+# Kumu view decoration rules — vtmtools data flow map
+#
+# WHERE TO PASTE THIS:
+#   1. Open your Kumu project.
+#   2. Open the view that uses data-sources.kumu.json.
+#   3. Click the gear icon on the view → "Advanced editor" (or open the
+#      "View source" tab in the side panel).
+#   4. Replace the contents with everything below the next divider line,
+#      then click Apply / Save.
+#
+# WHAT THIS DOES:
+#   - Shape by `category` (6 fundamental shapes: actor / external / ui /
+#     process / store / channel)
+#   - Color by `layer` (human / frontend / backend / vtt-side)
+#   - Refines process subtypes by border (api-wrapper / algorithm /
+#     bridge-umbrella / executor / seed)
+#   - Refines store subtypes by border (in-memory dashed / sqlite solid /
+#     filesystem dotted)
+#   - Decorates connection edges by `type` (invokes / reads / writes /
+#     emits / subscribes / transports / mirrors / transforms / contains
+#     / routes-through)
+#
+# IF KUMU REJECTS A SELECTOR:
+#   Kumu's syntax accepts attribute selectors like `element[category="actor"]`
+#   and CSS-like declarations. If a property name isn't recognized, replace
+#   it with the closest equivalent in Kumu's docs (e.g. `border-style` may
+#   be `dash-pattern` in some Kumu versions). The structure here is the
+#   important part — exact property names are easy to fix.
+#
+# ──────────────────────────────────────────────────────────────────────
+
+@settings {
+  background-color: #18181c;
+  font-family: Inter;
+  default-element-color: #94a3b8;
+  default-element-size: 22;
+}
+
+# ─── Shape by category (the 6 DFD shapes) ────────────────────────────
+
+element[category="actor"] {
+  shape: hexagon;
+  size: 30;
+}
+
+element[category="external"] {
+  shape: rounded-rectangle;
+  size: 28;
+  border-style: solid;
+  border-width: 2;
+}
+
+element[category="ui-surface"] {
+  shape: rounded-rectangle;
+  size: 24;
+}
+
+element[category="process"] {
+  shape: circle;
+  size: 22;
+}
+
+element[category="store"] {
+  shape: cylinder;
+  size: 26;
+}
+
+element[category="channel"] {
+  shape: circle;
+  size: 14;
+  border-style: solid;
+  border-width: 2;
+}
+
+# ─── Color by layer ──────────────────────────────────────────────────
+
+element[layer="human"]    { color: #f5b942; }
+element[layer="frontend"] { color: #2dd4bf; }
+element[layer="backend"]  { color: #f59e0b; }
+element[layer="vtt-side"] { color: #6366f1; }
+
+# ─── Process subtype refinements (border + accent color) ─────────────
+
+element[process-kind="api-wrapper"] {
+  border-style: dashed;
+  border-color: #94a3b8;
+  border-width: 2;
+}
+
+element[process-kind="algorithm"] {
+  color: #a78bfa;
+  border-color: #c4b5fd;
+}
+
+element[process-kind="bridge-umbrella"] {
+  color: #818cf8;
+  border-style: solid;
+  border-width: 3;
+  size: 24;
+}
+
+element[process-kind="seed"] {
+  color: #ef4444;
+  border-style: dotted;
+  border-width: 2;
+}
+
+element[process-kind="migration"] {
+  color: #fb7185;
+  border-style: dotted;
+  border-width: 2;
+}
+
+element[process-kind="orchestrator"] {
+  color: #fbbf24;
+  border-style: solid;
+  border-width: 3;
+  size: 28;
+}
+
+# ─── Store subtype refinements ───────────────────────────────────────
+
+element[storage="in-memory"] {
+  border-style: dashed;
+  border-color: #93c5fd;
+}
+
+element[storage="sqlite"] {
+  color: #0ea5e9;
+  border-style: solid;
+  border-color: #38bdf8;
+}
+
+element[storage="filesystem"] {
+  color: #65a30d;
+  border-style: dotted;
+  border-color: #84cc16;
+}
+
+# ─── UI subtype hints (optional — refines border emphasis) ───────────
+
+element[ui-kind="frontend-store"] {
+  border-style: dashed;
+  border-color: #5eead4;
+  size: 20;
+}
+
+element[ui-kind="route"] {
+  border-style: solid;
+  border-color: #67e8f9;
+  size: 22;
+}
+
+# ─── Channel subtype refinements ─────────────────────────────────────
+
+element[channel-kind="ws"] {
+  color: #f87171;
+}
+
+element[channel-kind="wss"] {
+  color: #dc2626;
+  border-color: #b91c1c;
+  border-width: 3;
+}
+
+element[channel-kind="tauri-event"] {
+  color: #fbbf24;
+  size: 12;
+}
+
+element[channel-kind="tool-bus"] {
+  color: #fde047;
+  size: 12;
+  border-style: dashed;
+}
+
+# ─── State badges (pre-built / dev) ──────────────────────────────────
+# Marks helpers shipped ahead of consumers, and dev-only surfaces.
+
+element[state="pre-built"] {
+  opacity: 0.6;
+}
+
+element[state="dev"] {
+  opacity: 0.7;
+  border-style: dotted;
+}
+
+# ─── Connections decorated by type ───────────────────────────────────
+
+connection[type="invokes"] {
+  color: #94a3b8;
+  line-style: solid;
+  line-width: 1.5;
+  arrow-end: arrow;
+}
+
+connection[type="reads"] {
+  color: #38bdf8;
+  line-style: solid;
+  line-width: 1;
+  arrow-end: arrow;
+}
+
+connection[type="writes"] {
+  color: #0ea5e9;
+  line-style: solid;
+  line-width: 3;
+  arrow-end: arrow;
+}
+
+connection[type="emits"] {
+  color: #fbbf24;
+  line-style: dashed;
+  line-width: 2;
+  arrow-end: arrow;
+}
+
+connection[type="subscribes"] {
+  color: #fde047;
+  line-style: dashed;
+  line-width: 2;
+  arrow-end: arrow;
+}
+
+connection[type="transports"] {
+  color: #ef4444;
+  line-style: dashed;
+  line-width: 3;
+  arrow-end: arrow;
+}
+
+connection[type="mirrors"] {
+  color: #a78bfa;
+  line-style: solid;
+  line-width: 2;
+  arrow-start: arrow;
+  arrow-end: arrow;
+}
+
+connection[type="transforms"] {
+  color: #c4b5fd;
+  line-style: solid;
+  line-width: 2;
+  arrow-end: arrow;
+}
+
+connection[type="contains"] {
+  color: #475569;
+  line-style: dotted;
+  line-width: 1.5;
+}
+
+connection[type="routes-through"] {
+  color: #64748b;
+  line-style: dotted;
+  line-width: 2;
+  arrow-end: arrow;
+}
+
+# ─── Recommended legend (add as a manual element in the view) ────────
+# To make the chart self-documenting, add a "Legend" cluster of dummy
+# elements that demonstrate each shape/color combination. Kumu doesn't
+# have a built-in legend feature, so the convention is:
+#   - drag a dummy node onto the canvas
+#   - tag it with the schema fields
+#   - its rendering acts as the legend swatch
+#
+# Suggested legend nodes (not in the dataset; add manually in the view):
+#   "[legend] actor"          -> category=actor      layer=human
+#   "[legend] external"       -> category=external   layer=vtt-side
+#   "[legend] ui tool"        -> category=ui-surface ui-kind=tool layer=frontend
+#   "[legend] frontend store" -> category=ui-surface ui-kind=frontend-store layer=frontend
+#   "[legend] api wrapper"    -> category=process    process-kind=api-wrapper layer=frontend
+#   "[legend] backend module" -> category=process    process-kind=backend-module layer=backend
+#   "[legend] algorithm"      -> category=process    process-kind=algorithm layer=backend
+#   "[legend] bridge umbrella"-> category=process    process-kind=bridge-umbrella layer=backend
+#   "[legend] sqlite store"   -> category=store      storage=sqlite layer=backend
+#   "[legend] in-memory store"-> category=store      storage=in-memory layer=backend
+#   "[legend] filesystem"     -> category=store      storage=filesystem layer=backend
+#   "[legend] ws channel"     -> category=channel    channel-kind=ws layer=backend
+#   "[legend] wss channel"    -> category=channel    channel-kind=wss layer=backend
+#   "[legend] tauri event"    -> category=channel    channel-kind=tauri-event layer=backend
+#   "[legend] tool bus"       -> category=channel    channel-kind=tool-bus layer=frontend
+#
+# You can group these in their own cluster in the view layout.

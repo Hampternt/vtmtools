@@ -4,6 +4,38 @@ This document names and describes every source of data in VTM Tools where data c
 
 ---
 
+## Companion Kumu visualization
+
+The companion file [`data-sources.kumu.json`](./data-sources.kumu.json) is a **module-level** node inventory that breaks each conceptual data source described below into its implementing files (Rust modules, typed wrappers, Svelte components, SQLite tables, channels). Use this prose document for *understanding* (what each thing is and why); use the Kumu file for *navigation* (which file holds it).
+
+The Kumu file uses a typed schema so different kinds of nodes render differently:
+
+**Categories (drives shape):**
+
+| Category | Shape | What it covers |
+|---|---|---|
+| `actor` | hexagon | Storyteller, Player |
+| `external` | rounded rectangle | Roll20 page / Foundry world / extension / module / WoD5e API |
+| `ui-surface` | rounded rectangle | Svelte tools, routes, frontend stores |
+| `process` | circle | Rust modules, typed API wrappers, algorithms, bridge umbrellas, seed/migration runners |
+| `store` | cylinder | SQLite tables, in-memory caches, filesystem outputs, in-flight DTOs |
+| `channel` | small circle | WS/WSS endpoints, Tauri events, frontend tool-event bus |
+
+**Subtype tags (drives color/border):**
+
+- `process-kind`: `backend-module` | `api-wrapper` | `algorithm` | `bridge-umbrella` | `seed` | `migration` | `orchestrator`
+- `storage`: `sqlite` | `in-memory` | `filesystem`
+- `ui-kind`: `tool` | `route` | `frontend-store`
+- `channel-kind`: `ws` | `wss` | `tauri-event` | `tool-bus`
+- `layer`: `human` | `frontend` | `backend` | `vtt-side`
+- `state` (optional): `live` | `pre-built` | `dev`
+
+**Connection vocabulary (drives edge style):** `invokes` (sync call), `reads`, `writes`, `emits`, `subscribes`, `transports` (wire frame across a channel), `mirrors` (bidirectional sync), `transforms` (pure-compute input→output), `contains` (architectural containment), `routes-through` (wire passes through a layer).
+
+The Kumu view-decoration rules that map these tags to shapes/colors live in [`data-sources.kumu-view.txt`](./data-sources.kumu-view.txt) — paste into the view's Advanced Editor.
+
+---
+
 ## GM Roll Config
 
 **Direction:** Input (user → app)
@@ -124,6 +156,41 @@ This document names and describes every source of data in VTM Tools where data c
 - The Compare flow in the Campaign tool diffs a saved row's canonical payload against the merged Bridge Live Feed and renders a per-path before/after plus a specialty-list comparator.
 
 **Currently used by:** Campaign tool (Save / Update / Delete actions; drift badge; Compare modal).
+
+---
+
+## Advantages Store
+
+**Direction:** Both (app reads and writes)
+**What it is:** SQLite `advantages` table holding V5 advantage definitions — merits, flaws, disciplines, loresheets, and similar character options. User-authored; nothing seeded.
+
+**Behavior:**
+- Full CRUD via the AdvantagesManager tool.
+- Read by the GM Screen during pool composition — selected advantages contribute to the modifier stack.
+
+**Currently used by:** AdvantagesManager (CRUD), GM Screen (pool composition).
+
+---
+
+## Modifiers + Status Templates
+
+**Direction:** Both (app reads and writes)
+**What it is:** Two SQLite tables backing the GM Screen's active-roll modifier stack — `modifiers` (ad-hoc bonuses/penalties tied to a specific in-flight roll) and `status_templates` (reusable named presets, e.g. "concealed", "wounded", "using a discipline").
+
+**Behavior:**
+- Templates are authored once and applied repeatedly; instances of a template seed into the modifier stack as concrete modifiers.
+- The modifier stack is the dice-pool delta source the GM Screen passes into `roll_skill_check` (or, on the future #9 toggle, into `game.roll_v5_pool` for a remote Foundry roll).
+
+**Currently used by:** GM Screen (compose pool, dispatch roll).
+
+---
+
+## GM Screen Pool Composition
+
+**Direction:** Internal (orchestration only — no new persistent data)
+**What it is:** Not a data source per se, but the named composition path the GM Screen walks: it pulls character context (via `tools/character.rs`), selected advantages (via `db/advantage.rs`), the active modifier stack (via `db/modifier.rs` and any applied status templates), and combines them into a complete V5 pool ready for either `shared/v5/*` (local roll) or `game.roll_v5_pool` (remote Foundry roll). The roll-source toggle (#9 from the character-tooling roadmap) is the seam between the two destinations.
+
+**Currently used by:** GM Screen.
 
 ---
 
@@ -279,17 +346,20 @@ Backend ──── Tauri Event Bridge ────→ Frontend
 
 ### Quick Reference Table
 
-| Name                    | Direction       | Storage    | Layer            |
-|-------------------------|-----------------|------------|------------------|
-| GM Roll Config          | Input           | In-memory  | Frontend         |
-| Dice Engine             | Internal        | None       | Backend          |
-| V5 Dice Helpers         | Internal        | None       | Backend          |
-| Resonance Roll Result   | Output/Internal | In-memory  | Backend→Frontend |
-| Dyscrasia Store         | Both            | SQLite     | Backend          |
-| Chronicle Store         | Both            | SQLite     | Backend          |
-| Saved Characters Store  | Both            | SQLite     | Backend          |
-| Bridge Live Feed        | Input           | In-memory  | VTT→Backend      |
-| Bridge Writeback        | Output          | None       | Backend→VTT      |
-| Markdown Export         | Output          | Filesystem | Backend          |
-| Tool Event Bus          | Internal        | In-memory  | Frontend         |
-| Tauri Event Bridge      | Internal        | None       | Backend→Frontend |
+| Name                       | Direction       | Storage    | Layer            |
+|----------------------------|-----------------|------------|------------------|
+| GM Roll Config             | Input           | In-memory  | Frontend         |
+| Dice Engine                | Internal        | None       | Backend          |
+| V5 Dice Helpers            | Internal        | None       | Backend          |
+| Resonance Roll Result      | Output/Internal | In-memory  | Backend→Frontend |
+| Dyscrasia Store            | Both            | SQLite     | Backend          |
+| Chronicle Store            | Both            | SQLite     | Backend          |
+| Saved Characters Store     | Both            | SQLite     | Backend          |
+| Advantages Store           | Both            | SQLite     | Backend          |
+| Modifiers + Status Templates | Both          | SQLite     | Backend          |
+| GM Screen Pool Composition | Internal        | None       | Backend↔Frontend |
+| Bridge Live Feed           | Input           | In-memory  | VTT→Backend      |
+| Bridge Writeback           | Output          | None       | Backend→VTT      |
+| Markdown Export            | Output          | Filesystem | Backend          |
+| Tool Event Bus             | Internal        | In-memory  | Frontend         |
+| Tauri Event Bridge         | Internal        | None       | Backend→Frontend |

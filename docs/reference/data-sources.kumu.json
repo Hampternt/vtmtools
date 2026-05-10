@@ -3,406 +3,855 @@
     {
       "label": "Storyteller",
       "type": "Actor",
-      "description": "The GM / Storyteller using the desktop app. Configures roll settings, triggers rolls, manages dyscrasias and chronicle data, and monitors the coterie via the Campaign viewer.",
-      "tags": ["actor", "user"]
+      "category": "actor",
+      "layer": "human",
+      "tags": ["actor", "user", "category:actor", "layer:human"],
+      "description": "The GM / Storyteller using the desktop app. Configures roll settings, triggers rolls, manages dyscrasias and chronicle data, and monitors the coterie via the Campaign viewer."
     },
     {
-      "label": "GM Roll Config",
-      "type": "Data Source",
-      "description": "The settings the Storyteller configures before making a resonance roll. Temperament settings (dice count, highest/lowest, thresholds) and resonance weights (per-type likelihood sliders). Ephemeral — resets on app restart.",
-      "tags": ["input", "ephemeral"],
-      "Direction": "Input",
-      "Storage": "In-memory",
-      "Layer": "Frontend"
+      "label": "Player",
+      "type": "Actor",
+      "category": "actor",
+      "layer": "human",
+      "tags": ["actor", "user", "category:actor", "layer:human"],
+      "description": "A player whose character lives in a connected VTT. Surfaces in vtmtools only as the `controlled_by` field on a CanonicalCharacter — the app does not authenticate or directly serve players. Their actions in the VTT (taking damage, gaining hunger) propagate through the bridge."
     },
-    {
-      "label": "Dice Engine",
-      "type": "Data Source",
-      "description": "Resonance-domain RNG backend (`shared/dice.rs`, `shared/resonance.rs`). Takes a GM Roll Config and produces raw roll results — temperament dice (d10 pool with advantage/disadvantage), weighted resonance type picks, and acute checks (9–10 on a d10). Distinct from `shared/v5/` (the V5 skill-check helper library — backend-only, no shipped UI consumer yet).",
-      "tags": ["internal", "backend"],
-      "Direction": "Internal",
-      "Storage": "None",
-      "Layer": "Backend"
-    },
-    {
-      "label": "Resonance Roll Result",
-      "type": "Data Source",
-      "description": "The complete outcome of a single resonance roll. Carries all temperament dice, the selected die, temperament tier, resonance type, acute check, and an optional attached dyscrasia. The main product of the Resonance Roller that flows outward to exports, the bridge writeback path (Roll20 sheets and Foundry actors), and the event bus.",
-      "tags": ["output", "internal"],
-      "Direction": "Output / Internal",
-      "Storage": "In-memory",
-      "Layer": "Backend → Frontend"
-    },
-    {
-      "label": "Roll History",
-      "type": "Data Source",
-      "description": "In-memory list of past resonance roll results for the current session. Displayed in the Resonance Roller UI. Resets when the app restarts.",
-      "tags": ["internal", "ephemeral"],
-      "Direction": "Internal",
-      "Storage": "In-memory",
-      "Layer": "Frontend"
-    },
-    {
-      "label": "Dyscrasia Store",
-      "type": "Data Source",
-      "description": "SQLite database table holding all dyscrasia entries — built-in V5 sourcebook entries (re-seeded on every startup per ADR 0002) and user-created custom entries. Each entry has a resonance type, name, description, bonus, and custom flag.",
-      "tags": ["input", "output", "persistent"],
-      "Direction": "Both",
-      "Storage": "SQLite",
-      "Layer": "Backend"
-    },
-    {
-      "label": "Chronicle Store",
-      "type": "Data Source",
-      "description": "SQLite tables (chronicles, nodes, edges) holding all user-authored game state — areas, characters, businesses, merits, influence, and typed relationships. No seeding; fully user-authored.",
-      "tags": ["input", "output", "persistent"],
-      "Direction": "Both",
-      "Storage": "SQLite",
-      "Layer": "Backend"
-    },
-    {
-      "label": "Saved Characters Store",
-      "type": "Data Source",
-      "description": "SQLite `saved_characters` table holding canonical snapshots of bridge-imported characters. Each row carries a source attribution (Roll20 / Foundry), the canonical character payload, and timestamps. Persisted independently of live VTT state, so saved characters survive bridge disconnects and let the Compare flow surface drift between saved and live.",
-      "tags": ["input", "output", "persistent"],
-      "Direction": "Both",
-      "Storage": "SQLite",
-      "Layer": "Backend"
-    },
-    {
-      "label": "Bridge Live Feed",
-      "type": "Data Source",
-      "description": "Live character data streaming from one or more VTT sessions, normalized into a source-agnostic `CanonicalCharacter` shape with shared fields (hunger, health, willpower, humanity, blood potency) plus a per-source `raw` blob. Cache key is `<source>:<source_id>`. The frontend store consumes this uniformly regardless of whether the source is Roll20 or Foundry. See ADR 0006.",
-      "tags": ["input", "live", "external", "multi-source"],
-      "Direction": "Input",
-      "Storage": "In-memory",
-      "Layer": "Backend"
-    },
-    {
-      "label": "Bridge Writeback",
-      "type": "Data Source",
-      "description": "Outbound traffic from the desktop app into a connected VTT. Three families today: (1) `bridge_set_attribute(source, source_id, name, value)` — generic per-character writes; Roll20 maps to sheet attributes, Foundry maps to `actor.update` or item create/delete via the `actor.*` helper umbrella; (2) `game.roll_v5_pool` and `game.post_chat_as_actor` — Foundry-only `game.*` umbrella helpers (FHL Phase 2) that issue dice rolls into Foundry chat or post actor-attributed chat lines via the WoD5e roll API; (3) `bridge_refresh` — request fresh snapshots.",
-      "tags": ["output", "external", "multi-source"],
-      "Direction": "Output",
-      "Storage": "None",
-      "Layer": "Backend → VTT"
-    },
-    {
-      "label": "Markdown Export",
-      "type": "Data Source",
-      "description": "Resonance roll results saved as timestamped Markdown files to ~/Documents/vtmtools/. Each file contains the full roll result, any attached dyscrasia, and an export timestamp.",
-      "tags": ["output", "persistent"],
-      "Direction": "Output",
-      "Storage": "Filesystem",
-      "Layer": "Backend"
-    },
-    {
-      "label": "Tool Event Bus",
-      "type": "Infrastructure",
-      "description": "Svelte store that lets tools broadcast events to each other without direct coupling. Currently carries `resonance_result` events (temperament, resonance type, acute status, dyscrasia name). Designed as the decoupling layer for future cross-tool features.",
-      "tags": ["internal", "bus"],
-      "Direction": "Internal",
-      "Storage": "In-memory",
-      "Layer": "Frontend"
-    },
-    {
-      "label": "Tauri Event Bridge",
-      "type": "Infrastructure",
-      "description": "Event channel carrying real-time updates from the Rust backend to the Svelte frontend using Tauri's built-in event system. Emits `bridge://roll20/connected`, `bridge://roll20/disconnected`, `bridge://foundry/connected`, `bridge://foundry/disconnected`, and `bridge://characters-updated` (carrying the merged `Vec<CanonicalCharacter>` across all sources). Distinct from the Tool Event Bus — this is backend-to-frontend, not tool-to-tool.",
-      "tags": ["internal", "bridge"],
-      "Direction": "Internal",
-      "Storage": "None",
-      "Layer": "Backend → Frontend"
-    },
-    {
-      "label": "Roll20 WS Listener",
-      "type": "Infrastructure",
-      "description": "Plain WebSocket server on `ws://127.0.0.1:7423` that connects the Tauri desktop app to the Roll20 Chrome extension. At most one extension session at a time. Carries both inbound (Roll20 live feed) and outbound (Roll20 writeback) traffic. Preserves the pre-bridge wire protocol byte-for-byte so the existing extension keeps working.",
-      "tags": ["internal", "bridge", "roll20"],
-      "Direction": "Bidirectional",
-      "Storage": "None",
-      "Layer": "Backend ↔ Extension"
-    },
-    {
-      "label": "Foundry WSS Listener",
-      "type": "Infrastructure",
-      "description": "TLS WebSocket server on `wss://127.0.0.1:7424` that connects the Tauri desktop app to the Foundry `vtmtools-bridge` module. wss is non-optional — Foundry is commonly served over HTTPS and browsers block ws://localhost from HTTPS pages as mixed content. Self-signed `localhost` cert generated by `rcgen` on first launch and persisted in the app data dir; the GM accepts the cert warning once per browser. Carries the dot-namespaced wire protocol (`actor.*`, `game.*`) plus extended Hello (protocol_version, capabilities, world_id), `bridge.subscribe`/`bridge.unsubscribe`, and a structured error envelope (Plan 0 consolidation).",
-      "tags": ["internal", "bridge", "foundry", "tls"],
-      "Direction": "Bidirectional",
-      "Storage": "None",
-      "Layer": "Backend ↔ Foundry module"
-    },
-    {
-      "label": "Resonance Roller",
-      "type": "Tool",
-      "description": "The main resonance rolling tool. Consumes GM Roll Config, drives the Dice Engine, displays results, and distributes them to exports, bridge writeback, and the event bus. Also queries the Dyscrasia Store on Acute results. Reads the merged bridge live feed for character selection (works against either source).",
-      "tags": ["tool", "frontend"]
-    },
-    {
-      "label": "Dyscrasia Manager",
-      "type": "Tool",
-      "description": "Full CRUD interface for browsing, searching, filtering, adding, editing, and deleting dyscrasias. Also supports rolling a random dyscrasia by resonance type.",
-      "tags": ["tool", "frontend"]
-    },
-    {
-      "label": "Campaign Viewer",
-      "type": "Tool",
-      "description": "Live VTT character stat display. Shows hunger, health, willpower, humanity, and blood potency for all bridge-connected characters in real time across both Roll20 and Foundry. Also hosts the Saved Characters surface — Save/Update/Delete actions persist canonical snapshots into the Saved Characters Store, and a built-in Compare modal diffs saved-vs-live (drift badge per card; per-path before/after plus specialty-list comparison in modal).",
-      "tags": ["tool", "frontend"]
-    },
-    {
-      "label": "Domains Manager",
-      "type": "Tool",
-      "description": "Hierarchical chronicle tracker. Lets the Storyteller model a game's territories, institutions, characters, and relationships as a graph of typed nodes connected by typed edges.",
-      "tags": ["tool", "frontend"]
-    },
-    {
-      "label": "Foundry Test Tool",
-      "type": "Tool",
-      "description": "Dev/QA surface for the Foundry `game.*` helpers (FHL Phase 2). Lets the operator pick a Foundry actor from the bridge live feed and exercise `game.roll_v5_pool` and `game.post_chat_as_actor` end-to-end. Not a player-facing tool; exists to smoke-test the helper umbrella while downstream consumers (#9 roll-source toggle, #11 hunger/remorse/contested) are still planned.",
-      "tags": ["tool", "frontend", "dev"]
-    },
+
     {
       "label": "Roll20 Game Session",
       "type": "External System",
-      "description": "The Roll20 browser-based virtual tabletop where the actual VTM game is played when running on Roll20. Source of all live Roll20 character data. The Roll20 extension runs inside this page.",
-      "tags": ["external", "roll20"]
-    },
-    {
-      "label": "Foundry World",
-      "type": "External System",
-      "description": "A Foundry VTT world running with the WoD5e (vtm5e) system installed. Source of all live Foundry actor data. Can be hosted anywhere (Forge, Molten, self-hosted); only the GM's browser session connects to vtmtools.",
-      "tags": ["external", "foundry"]
+      "category": "external",
+      "layer": "vtt-side",
+      "path": "(browser session at app.roll20.net)",
+      "tags": ["external", "roll20", "category:external", "layer:vtt-side"],
+      "description": "The Roll20 browser-based virtual tabletop where the actual VTM game is played when running on Roll20. Source of all live Roll20 character data. The Roll20 extension runs inside this page."
     },
     {
       "label": "Roll20 Extension",
       "type": "External System",
-      "description": "Chrome extension injected into Roll20 pages. Reads character data from Roll20's Backbone/Firebase data layer, debounces per-attribute Firebase events into 200ms whole-character snapshots, and relays them to the desktop app over `ws://127.0.0.1:7423`. Also receives writeback commands.",
-      "tags": ["external", "extension", "roll20"]
+      "category": "external",
+      "layer": "vtt-side",
+      "path": "(Chrome extension, separate repo)",
+      "tags": ["external", "extension", "roll20", "category:external", "layer:vtt-side"],
+      "description": "Chrome extension injected into Roll20 pages. Reads character data from Roll20's Backbone/Firebase data layer, debounces per-attribute Firebase events into 200ms whole-character snapshots, and relays them to the desktop app over `ws://127.0.0.1:7423`. Also receives writeback commands."
+    },
+    {
+      "label": "Foundry World",
+      "type": "External System",
+      "category": "external",
+      "layer": "vtt-side",
+      "path": "(any Foundry server with WoD5e installed)",
+      "tags": ["external", "foundry", "category:external", "layer:vtt-side"],
+      "description": "A Foundry VTT world running with the WoD5e (vtm5e) system installed. Source of all live Foundry actor data. Can be hosted anywhere (Forge, Molten, self-hosted); only the GM's browser session connects to vtmtools."
     },
     {
       "label": "Foundry Bridge Module",
       "type": "External System",
-      "description": "The `vtmtools-bridge` Foundry module installed in the GM's world. Initialization is gated on `game.user.isGM` — only the GM's browser ever connects. Hooks `updateActor` / `createActor` / `deleteActor`; pushes the full actor list on `ready` then forwards individual changes. Receives outbound `actor.*` (sheet edits) and `game.*` (rolls + chat) wire messages and dispatches to the WoD5e API. Currently at module version 0.3.0 (Phase 2 game.* helpers shipped).",
-      "tags": ["external", "module", "foundry"]
+      "category": "external",
+      "layer": "vtt-side",
+      "path": "vtmtools-bridge/ (Foundry module package)",
+      "tags": ["external", "module", "foundry", "category:external", "layer:vtt-side"],
+      "description": "The `vtmtools-bridge` Foundry module installed in the GM's world. Initialization is gated on `game.user.isGM` — only the GM's browser ever connects. Hooks `updateActor` / `createActor` / `deleteActor`; pushes the full actor list on `ready` then forwards individual changes. Receives outbound `actor.*` / `bridge.*` / `game.*` / `storyteller.*` wire messages and dispatches via handler-map (`scripts/bridge.js` + `scripts/foundry-actions/*.js`). Currently at module version 0.3.0 (Phase 2 game.* helpers shipped)."
+    },
+    {
+      "label": "WoD5e API",
+      "type": "External System",
+      "category": "external",
+      "layer": "vtt-side",
+      "path": "(WOD5E.api.* — provided by the WoD5e Foundry system)",
+      "tags": ["external", "foundry", "wod5e", "category:external", "layer:vtt-side"],
+      "description": "The Wod5e (vtm5e) system's roll API exposed inside Foundry. Foundry-side dice mechanics for V5 — hunger dice, messy criticals, rouse checks, bestial fails — all delegated here via `WOD5E.api.RollFromDataset` (full pools) and direct `WOD5E.api.Roll` (empty-pool / rouse-check). vtmtools' game.* umbrella is a thin shim; WoD5e owns the actual mechanics."
+    },
+
+    {
+      "label": "+layout.svelte",
+      "type": "UI Surface",
+      "category": "ui-surface",
+      "ui-kind": "route",
+      "layer": "frontend",
+      "path": "src/routes/+layout.svelte",
+      "tags": ["ui", "layout", "category:ui-surface", "ui-kind:route", "layer:frontend"],
+      "description": "Root SvelteKit layout. Owns the dark-only `:global(:root)` CSS token block (text/surface/border/accent/temperament) and the sidebar-plus-content frame. Lazy-loads the active tool from src/tools.ts. All tools render inside this shell."
+    },
+    {
+      "label": "+page.svelte",
+      "type": "UI Surface",
+      "category": "ui-surface",
+      "ui-kind": "route",
+      "layer": "frontend",
+      "path": "src/routes/+page.svelte",
+      "tags": ["ui", "router", "category:ui-surface", "ui-kind:route", "layer:frontend"],
+      "description": "The single page. Reads the selected tool id (sidebar state), looks up the entry in src/tools.ts, awaits the dynamic import, mounts the component."
+    },
+
+    {
+      "label": "Resonance.svelte",
+      "type": "Tool",
+      "category": "ui-surface",
+      "ui-kind": "tool",
+      "layer": "frontend",
+      "path": "src/tools/Resonance.svelte",
+      "tags": ["tool", "frontend", "resonance", "category:ui-surface", "ui-kind:tool", "layer:frontend"],
+      "description": "The main resonance rolling tool. Holds GM Roll Config in component state, drives the Dice Engine via `roll_resonance`, displays results, and distributes them to exports, bridge writeback, and the Tool Event Bus. Also queries the Dyscrasia Store on Acute results. Reads the merged bridge live feed (via the bridge store) for character selection — works against either source."
+    },
+    {
+      "label": "DyscrasiaManager.svelte",
+      "type": "Tool",
+      "category": "ui-surface",
+      "ui-kind": "tool",
+      "layer": "frontend",
+      "path": "src/tools/DyscrasiaManager.svelte",
+      "tags": ["tool", "frontend", "dyscrasias", "category:ui-surface", "ui-kind:tool", "layer:frontend"],
+      "description": "Full CRUD interface for browsing, searching, filtering, adding, editing, and deleting dyscrasias. Also supports rolling a random dyscrasia by resonance type."
+    },
+    {
+      "label": "Campaign.svelte",
+      "type": "Tool",
+      "category": "ui-surface",
+      "ui-kind": "tool",
+      "layer": "frontend",
+      "path": "src/tools/Campaign.svelte",
+      "tags": ["tool", "frontend", "campaign", "bridge-consumer", "category:ui-surface", "ui-kind:tool", "layer:frontend"],
+      "description": "Live VTT character stat display. Shows hunger, health, willpower, humanity, blood potency for all bridge-connected characters in real time across both Roll20 and Foundry. Also hosts the Saved Characters surface — Save/Update/Delete actions persist canonical snapshots, and a built-in Compare modal diffs saved-vs-live (drift badge per card; per-path before/after plus specialty-list comparison in modal)."
+    },
+    {
+      "label": "DomainsManager.svelte",
+      "type": "Tool",
+      "category": "ui-surface",
+      "ui-kind": "tool",
+      "layer": "frontend",
+      "path": "src/tools/DomainsManager.svelte",
+      "tags": ["tool", "frontend", "chronicle", "category:ui-surface", "ui-kind:tool", "layer:frontend"],
+      "description": "Hierarchical chronicle tracker. Lets the Storyteller model a game's territories, institutions, characters, and relationships as a graph of typed nodes connected by typed edges. Backed by the chronicles/nodes/edges SQLite tables; freeform node and edge type strings (ADR 0003)."
+    },
+    {
+      "label": "AdvantagesManager.svelte",
+      "type": "Tool",
+      "category": "ui-surface",
+      "ui-kind": "tool",
+      "layer": "frontend",
+      "path": "src/tools/AdvantagesManager.svelte",
+      "tags": ["tool", "frontend", "advantages", "category:ui-surface", "ui-kind:tool", "layer:frontend"],
+      "description": "Manager for V5 advantages (merits/flaws/disciplines/loresheets etc.). CRUD over the advantages SQLite table via lib/advantages/api.ts."
+    },
+    {
+      "label": "FoundryTest.svelte",
+      "type": "Tool",
+      "category": "ui-surface",
+      "ui-kind": "tool",
+      "layer": "frontend",
+      "state": "dev",
+      "path": "src/tools/FoundryTest.svelte",
+      "tags": ["tool", "frontend", "foundry", "dev", "category:ui-surface", "ui-kind:tool", "layer:frontend", "state:dev"],
+      "description": "Dev/QA surface for the Foundry `game.*` helpers (FHL Phase 2). Lets the operator pick a Foundry actor from the bridge live feed and exercise `game.roll_v5_pool` and `game.post_chat_as_actor` end-to-end. Not a player-facing tool; exists to smoke-test the helper umbrella while downstream consumers (#9 roll-source toggle, #11 hunger/remorse/contested) are still planned."
+    },
+    {
+      "label": "GmScreen.svelte",
+      "type": "Tool",
+      "category": "ui-surface",
+      "ui-kind": "tool",
+      "layer": "frontend",
+      "path": "src/tools/GmScreen.svelte",
+      "tags": ["tool", "frontend", "gm-screen", "category:ui-surface", "ui-kind:tool", "layer:frontend"],
+      "description": "Active-table GM surface. Composes V5 skill checks + status modifiers + character context to dispatch rolls (locally via shared/v5/* or remotely via the Foundry game.* umbrella, depending on roll-source toggle). Reads modifier and status-template stores; writes resonance/effects via bridge writeback."
+    },
+
+    {
+      "label": "bridge.svelte.ts",
+      "type": "Frontend Store",
+      "category": "ui-surface",
+      "ui-kind": "frontend-store",
+      "layer": "frontend",
+      "path": "src/store/bridge.svelte.ts",
+      "tags": ["store", "frontend", "bridge", "category:ui-surface", "ui-kind:frontend-store", "layer:frontend"],
+      "description": "Typed bridge store. Wraps `listen('bridge://characters-updated', …)` and per-source connect/disconnect events. Components import from here; per CLAUDE.md / ARCHITECTURE.md §5, components never call `listen()` or `invoke()` directly."
+    },
+    {
+      "label": "domains.svelte.ts",
+      "type": "Frontend Store",
+      "category": "ui-surface",
+      "ui-kind": "frontend-store",
+      "layer": "frontend",
+      "path": "src/store/domains.svelte.ts",
+      "tags": ["store", "frontend", "chronicle", "category:ui-surface", "ui-kind:frontend-store", "layer:frontend"],
+      "description": "Chronicle/node/edge UI state. Holds active-chronicle id, breadcrumb stack, expansion state. Backed by Tauri commands through lib/domains/api.ts."
+    },
+    {
+      "label": "modifiers.svelte.ts",
+      "type": "Frontend Store",
+      "category": "ui-surface",
+      "ui-kind": "frontend-store",
+      "layer": "frontend",
+      "path": "src/store/modifiers.svelte.ts",
+      "tags": ["store", "frontend", "modifiers", "category:ui-surface", "ui-kind:frontend-store", "layer:frontend"],
+      "description": "Active-roll modifier stack for the GM Screen. Holds the temporary list of bonuses/penalties contributing to the next dispatched skill check pool."
+    },
+    {
+      "label": "savedCharacters.svelte.ts",
+      "type": "Frontend Store",
+      "category": "ui-surface",
+      "ui-kind": "frontend-store",
+      "layer": "frontend",
+      "path": "src/store/savedCharacters.svelte.ts",
+      "tags": ["store", "frontend", "saved-characters", "category:ui-surface", "ui-kind:frontend-store", "layer:frontend"],
+      "description": "Cached SavedCharacter list for the Campaign tool's Saved surface. Backed by lib/saved-characters/api.ts."
+    },
+    {
+      "label": "statusTemplates.svelte.ts",
+      "type": "Frontend Store",
+      "category": "ui-surface",
+      "ui-kind": "frontend-store",
+      "layer": "frontend",
+      "path": "src/store/statusTemplates.svelte.ts",
+      "tags": ["store", "frontend", "status-templates", "category:ui-surface", "ui-kind:frontend-store", "layer:frontend"],
+      "description": "Cached status-template definitions used by the GM Screen modifier-stack composer. Backed by db/status_template.rs via lib/modifiers/api.ts."
+    },
+
+    {
+      "label": "lib/advantages/api.ts",
+      "type": "API Wrapper",
+      "category": "process",
+      "process-kind": "api-wrapper",
+      "layer": "frontend",
+      "path": "src/lib/advantages/api.ts",
+      "tags": ["api-wrapper", "frontend", "advantages", "category:process", "process-kind:api-wrapper", "layer:frontend"],
+      "description": "Typed wrapper for advantage IPC. One exported function per Tauri command in db/advantage.rs."
+    },
+    {
+      "label": "lib/bridge/api.ts",
+      "type": "API Wrapper",
+      "category": "process",
+      "process-kind": "api-wrapper",
+      "layer": "frontend",
+      "path": "src/lib/bridge/api.ts",
+      "tags": ["api-wrapper", "frontend", "bridge", "category:process", "process-kind:api-wrapper", "layer:frontend"],
+      "description": "Typed wrapper for bridge IPC: bridge_get_characters, bridge_get_status, bridge_refresh, bridge_set_attribute. Generic across Roll20 and Foundry."
+    },
+    {
+      "label": "lib/character/api.ts",
+      "type": "API Wrapper",
+      "category": "process",
+      "process-kind": "api-wrapper",
+      "layer": "frontend",
+      "path": "src/lib/character/api.ts",
+      "tags": ["api-wrapper", "frontend", "character", "category:process", "process-kind:api-wrapper", "layer:frontend"],
+      "description": "Typed wrapper for character-tooling commands in tools/character.rs. Includes character-context derivation used by the GM Screen and saved-characters surfaces."
+    },
+    {
+      "label": "lib/domains/api.ts",
+      "type": "API Wrapper",
+      "category": "process",
+      "process-kind": "api-wrapper",
+      "layer": "frontend",
+      "path": "src/lib/domains/api.ts",
+      "tags": ["api-wrapper", "frontend", "chronicle", "reference-impl", "category:process", "process-kind:api-wrapper", "layer:frontend"],
+      "description": "Typed wrapper for chronicle/node/edge CRUD + tree queries. The reference implementation cited by ARCHITECTURE.md §4 — new tools follow this shape."
+    },
+    {
+      "label": "lib/foundry-chat/api.ts",
+      "type": "API Wrapper",
+      "category": "process",
+      "process-kind": "api-wrapper",
+      "layer": "frontend",
+      "path": "src/lib/foundry-chat/api.ts",
+      "tags": ["api-wrapper", "frontend", "foundry", "category:process", "process-kind:api-wrapper", "layer:frontend"],
+      "description": "Typed wrapper for the Foundry game.* umbrella: trigger_foundry_roll (game.roll_v5_pool) and post_foundry_chat (game.post_chat_as_actor). Foundry-only — Roll20 has no equivalent."
+    },
+    {
+      "label": "lib/modifiers/api.ts",
+      "type": "API Wrapper",
+      "category": "process",
+      "process-kind": "api-wrapper",
+      "layer": "frontend",
+      "path": "src/lib/modifiers/api.ts",
+      "tags": ["api-wrapper", "frontend", "modifiers", "category:process", "process-kind:api-wrapper", "layer:frontend"],
+      "description": "Typed wrapper for modifier + status-template IPC (db/modifier.rs and db/status_template.rs)."
+    },
+    {
+      "label": "lib/saved-characters/api.ts",
+      "type": "API Wrapper",
+      "category": "process",
+      "process-kind": "api-wrapper",
+      "layer": "frontend",
+      "path": "src/lib/saved-characters/api.ts",
+      "tags": ["api-wrapper", "frontend", "saved-characters", "category:process", "process-kind:api-wrapper", "layer:frontend"],
+      "description": "Typed wrapper for saved-character CRUD (db/saved_character.rs). The payload type is BridgeCharacter (snake_case at the IPC boundary; see memory note on naming asymmetry)."
+    },
+    {
+      "label": "lib/v5/api.ts",
+      "type": "API Wrapper",
+      "category": "process",
+      "process-kind": "api-wrapper",
+      "layer": "frontend",
+      "state": "pre-built",
+      "path": "src/lib/v5/api.ts",
+      "tags": ["api-wrapper", "frontend", "v5", "pre-built", "category:process", "process-kind:api-wrapper", "layer:frontend", "state:pre-built"],
+      "description": "Typed wrapper for `roll_skill_check` (tools/skill_check.rs → shared/v5/*). Currently consumed by the GM Screen for local-roll dispatch; the V5 helper library was shipped ahead of full UI consumption per the character-tooling roadmap."
+    },
+
+    {
+      "label": "db/chronicle.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/db/chronicle.rs",
+      "tags": ["backend-module", "ipc", "chronicle", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri commands: list_chronicles, get_chronicle, create_chronicle, update_chronicle, delete_chronicle. Reads/writes the chronicles table; ON DELETE CASCADE rolls into nodes and edges."
+    },
+    {
+      "label": "db/node.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/db/node.rs",
+      "tags": ["backend-module", "ipc", "chronicle", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri commands: list_nodes, get_node, create_node, update_node, delete_node, get_parent_of, get_children_of, get_siblings_of, get_path_to_root, get_subtree. The tree queries walk only the 'contains' edge type."
+    },
+    {
+      "label": "db/edge.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/db/edge.rs",
+      "tags": ["backend-module", "ipc", "chronicle", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri commands: list_edges, list_edges_for_node, create_edge, update_edge, delete_edge. UNIQUE (from, to, edge_type) plus partial-unique 'contains' parent enforcement."
+    },
+    {
+      "label": "db/dyscrasia.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/db/dyscrasia.rs",
+      "tags": ["backend-module", "ipc", "dyscrasia", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri commands: list_dyscrasias, add_dyscrasia, update_dyscrasia, delete_dyscrasia, roll_random_dyscrasia. Selects randomly from built-in + custom rows of the matching resonance type."
+    },
+    {
+      "label": "db/advantage.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/db/advantage.rs",
+      "tags": ["backend-module", "ipc", "advantages", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri commands for advantage CRUD. Backs the AdvantagesManager tool."
+    },
+    {
+      "label": "db/modifier.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/db/modifier.rs",
+      "tags": ["backend-module", "ipc", "modifiers", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri commands for modifier CRUD (active-roll bonuses/penalties). Used by the GM Screen modifier stack."
+    },
+    {
+      "label": "db/saved_character.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/db/saved_character.rs",
+      "tags": ["backend-module", "ipc", "saved-characters", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri commands: save/list/update/delete on the saved_characters table. Payload column carries the canonical BridgeCharacter as JSON; the Compare flow diffs it against the live merged Bridge cache."
+    },
+    {
+      "label": "db/status_template.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/db/status_template.rs",
+      "tags": ["backend-module", "ipc", "status-templates", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri commands for status-template CRUD. Templates are reusable named modifier presets the GM Screen composes into a roll."
+    },
+
+    {
+      "label": "tools/resonance.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/tools/resonance.rs",
+      "tags": ["backend-module", "ipc", "resonance", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri command: roll_resonance(RollConfig) -> ResonanceRollResult. Orchestrates the temperament pool, weighted resonance pick, acute check via shared/dice.rs and shared/resonance.rs."
+    },
+    {
+      "label": "tools/export.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/tools/export.rs",
+      "tags": ["backend-module", "ipc", "export", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri command: export_result_to_md. Writes a single timestamped Markdown file to ~/Documents/vtmtools/ via tokio::fs (never std::fs per ARCHITECTURE.md §5)."
+    },
+    {
+      "label": "tools/character.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/tools/character.rs",
+      "tags": ["backend-module", "ipc", "character", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Backend character-tooling commands. Derives character context (effective pools, splat-aware fields) used by the GM Screen and saved-characters surfaces."
+    },
+    {
+      "label": "tools/foundry_chat.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/tools/foundry_chat.rs",
+      "tags": ["backend-module", "ipc", "foundry", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri commands: trigger_foundry_roll, post_foundry_chat. Validates inputs, builds game.roll_v5_pool / game.post_chat_as_actor wire envelopes, hands them to the Foundry source for transport."
+    },
+    {
+      "label": "tools/gm_screen.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/tools/gm_screen.rs",
+      "tags": ["backend-module", "ipc", "gm-screen", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Backend support for the GM Screen tool — pool composition (advantages + modifiers + status templates + character context) and roll-dispatch orchestration. Routes to shared/v5/* for local rolls or the Foundry game.* umbrella for remote rolls (future #9 toggle)."
+    },
+    {
+      "label": "tools/skill_check.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/tools/skill_check.rs",
+      "tags": ["backend-module", "ipc", "v5", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri command: roll_skill_check. Thin Tauri shim over shared/v5/* (build_pool / roll_pool / interpret / format_skill_check)."
+    },
+
+    {
+      "label": "bridge/commands.rs",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/bridge/commands.rs",
+      "tags": ["backend-module", "ipc", "bridge", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Tauri commands: bridge_get_characters, bridge_get_status, bridge_refresh, bridge_set_attribute. set_attribute's `name` is opaque to the frontend and translated per-source by each BridgeSource impl."
+    },
+    {
+      "label": "bridge/mod.rs (Bridge Core)",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/bridge/{mod.rs, source.rs, tls.rs, types.rs}",
+      "tags": ["backend-module", "bridge", "core", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "Bridge core: accept loops on both ports, the Arc<BridgeState> (per-source ConnectionInfo + merged HashMap<String, CanonicalCharacter>), the BridgeSource trait, the rcgen-driven self-signed TLS init for wss://7424, and the canonical CanonicalCharacter type. ARCHITECTURE.md §3 / §5 / ADR 0006."
+    },
+    {
+      "label": "bridge/roll20/* (Roll20 source adapter)",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/bridge/roll20/{mod.rs, types.rs, translate.rs}",
+      "tags": ["backend-module", "bridge", "roll20", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "BridgeSource impl for Roll20. Decodes InboundMsg::Characters | CharacterUpdate, translates into CanonicalCharacter via translate.rs (field-picking per docs/reference/roll20-bundle.md), builds outbound set_attribute / refresh JSON frames. Cache key 'roll20:<id>'."
+    },
+    {
+      "label": "bridge/foundry/* (Foundry source adapter)",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "backend-module",
+      "layer": "backend",
+      "path": "src-tauri/src/bridge/foundry/{mod.rs, types.rs, translate.rs}",
+      "tags": ["backend-module", "bridge", "foundry", "category:process", "process-kind:backend-module", "layer:backend"],
+      "description": "BridgeSource impl for Foundry. Decodes FoundryInbound::Hello | Actors | ActorUpdate, translates the actor.system blob (vampire/werewolf/hunter splat fields side-by-side per docs/reference/foundry-vtm5e-paths.md) into CanonicalCharacter. Cache key 'foundry:<id>'. Outbound frames built by the action umbrellas."
+    },
+
+    {
+      "label": "actor.* umbrella",
+      "type": "Bridge Umbrella",
+      "category": "process",
+      "process-kind": "bridge-umbrella",
+      "layer": "backend",
+      "path": "src-tauri/src/bridge/foundry/actions/actor.rs + vtmtools-bridge/scripts/foundry-actions/actor.js",
+      "tags": ["bridge-umbrella", "foundry", "actor", "category:process", "process-kind:bridge-umbrella", "layer:backend"],
+      "description": "Per-actor sheet edits. Verbs: update_field, create_feature, create_item_simple, append_private_notes_line, delete_items_by_prefix, delete_item_by_id, apply_dyscrasia. Rust builders ↔ JS executors. The JS side calls actor.update / createEmbeddedDocuments on Foundry."
+    },
+    {
+      "label": "bridge.* umbrella",
+      "type": "Bridge Umbrella",
+      "category": "process",
+      "process-kind": "bridge-umbrella",
+      "layer": "backend",
+      "path": "src-tauri/src/bridge/foundry/actions/bridge.rs + vtmtools-bridge/scripts/foundry-actions/bridge.js",
+      "tags": ["bridge-umbrella", "foundry", "lifecycle", "category:process", "process-kind:bridge-umbrella", "layer:backend"],
+      "description": "Connection lifecycle and metadata: extended Hello (protocol_version, capabilities, world_id), bridge.subscribe / bridge.unsubscribe, structured error envelope (Plan 0 consolidation). Not a domain umbrella — owns the wire-protocol negotiation surface."
+    },
+    {
+      "label": "game.* umbrella",
+      "type": "Bridge Umbrella",
+      "category": "process",
+      "process-kind": "bridge-umbrella",
+      "layer": "backend",
+      "path": "src-tauri/src/bridge/foundry/actions/game.rs + vtmtools-bridge/scripts/foundry-actions/game.js",
+      "tags": ["bridge-umbrella", "foundry", "rolls", "fhl-phase-2", "category:process", "process-kind:bridge-umbrella", "layer:backend"],
+      "description": "Foundry-only roll + chat helpers (FHL Phase 2). game.roll_v5_pool delegates to WOD5E.api.RollFromDataset; game.post_chat_as_actor uses ChatMessage.create + getSpeaker. Hunger / messy / rouse / bestial mechanics are owned by WoD5e — vtmtools is a thin shim."
+    },
+    {
+      "label": "storyteller.* umbrella",
+      "type": "Bridge Umbrella",
+      "category": "process",
+      "process-kind": "bridge-umbrella",
+      "layer": "backend",
+      "path": "src-tauri/src/bridge/foundry/actions/storyteller.rs + vtmtools-bridge/scripts/foundry-actions/storyteller.js",
+      "tags": ["bridge-umbrella", "foundry", "storyteller", "category:process", "process-kind:bridge-umbrella", "layer:backend"],
+      "description": "Storyteller-scope helpers (cross-actor, scene-level operations). Reserved umbrella per the Foundry helper library roadmap — exact verbs evolve as the Storyteller-side features land."
+    },
+
+    {
+      "label": "lib.rs (IPC handler registry + boot)",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "orchestrator",
+      "layer": "backend",
+      "path": "src-tauri/src/lib.rs",
+      "tags": ["backend-module", "boot", "ipc", "category:process", "process-kind:orchestrator", "layer:backend"],
+      "description": "Tauri Builder setup. Registers every command via `invoke_handler(tauri::generate_handler![...])`, builds the SqliteConnectOptions pool with PRAGMA foreign_keys=ON, runs migrations, calls db::seed (ADR 0002), and inserts BridgeSource impls into the Arc<BridgeState> sources map before start_servers. The single seam where the entire backend wires together — ARCHITECTURE.md §9."
+    },
+
+    {
+      "label": "shared/dice.rs + shared/resonance.rs (Resonance Engine)",
+      "type": "Algorithm",
+      "category": "process",
+      "process-kind": "algorithm",
+      "layer": "backend",
+      "path": "src-tauri/src/shared/{dice.rs, resonance.rs}",
+      "tags": ["algorithm", "rng", "resonance", "category:process", "process-kind:algorithm", "layer:backend"],
+      "description": "Pure-Rust resonance dice library: d10 pool with take_high/take_low, threshold-based temperament tier (Negligible/Fleeting/Intense), weighted resonance type pick (SliderLevel multipliers), acute check (9–10 on a single d10). Distinct from shared/v5/* (the V5 skill-check engine). All RNG runs server-side."
+    },
+    {
+      "label": "shared/v5/* (V5 Skill-Check Engine)",
+      "type": "Algorithm",
+      "category": "process",
+      "process-kind": "algorithm",
+      "layer": "backend",
+      "state": "pre-built",
+      "path": "src-tauri/src/shared/v5/{pool.rs, dice.rs, interpret.rs, difficulty.rs, message.rs, skill_check.rs, types.rs}",
+      "tags": ["algorithm", "rng", "v5", "pre-built", "category:process", "process-kind:algorithm", "layer:backend", "state:pre-built"],
+      "description": "Pure-Rust V5 skill-check library: build_pool (attribute + skill + modifiers), roll_pool (regular dice + hunger dice), interpret (successes / messy crit / bestial fail), compare (vs difficulty), format_skill_check (chat-line message). The GM Screen consumes it via roll_skill_check; broader UI consumption lands with #9 (roll-source toggle) and #11 (hunger/remorse/contested). Pre-built per the character-tooling roadmap."
+    },
+
+    {
+      "label": "db/seed.rs (Destructive reseed)",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "seed",
+      "layer": "backend",
+      "path": "src-tauri/src/db/seed.rs",
+      "tags": ["seed", "boot", "dyscrasia", "category:process", "process-kind:seed", "layer:backend"],
+      "description": "Deletes all is_custom=0 dyscrasia rows on every startup and reinserts the canonical V5 set. ADR 0002 — the destructive logic must NOT be reverted to a count-check guard. Custom (is_custom=1) entries are preserved across reseeds."
+    },
+    {
+      "label": "DB Migrations (sqlx::migrate!)",
+      "type": "Backend Module",
+      "category": "process",
+      "process-kind": "migration",
+      "layer": "backend",
+      "path": "src-tauri/migrations/{0001_initial, 0002_chronicle_graph, 0003_advantages, 0004_saved_characters, 0005_modifiers}.sql",
+      "tags": ["migration", "boot", "schema", "category:process", "process-kind:migration", "layer:backend"],
+      "description": "Forward-only schema migrations applied via sqlx::migrate! at startup. Five files at present: initial dyscrasias schema → chronicle/nodes/edges graph → advantages → saved_characters → modifiers + status_templates."
+    },
+
+    {
+      "label": "Resonance Roll Result",
+      "type": "Data Source",
+      "category": "store",
+      "storage": "in-memory",
+      "layer": "backend",
+      "path": "(in-flight DTO; see shared/types.rs::ResonanceRollResult)",
+      "tags": ["dto", "in-memory", "category:store", "storage:in-memory", "layer:backend"],
+      "description": "The complete outcome of a single resonance roll. Carries all temperament dice, the selected die, temperament tier, resonance type, acute check, and an optional attached dyscrasia. The product of tools/resonance.rs that flows outward to UI display, Markdown export, the bridge writeback path, and the Tool Event Bus."
+    },
+    {
+      "label": "GM Roll Config (component state)",
+      "type": "Data Source",
+      "category": "store",
+      "storage": "in-memory",
+      "layer": "frontend",
+      "path": "(state inside Resonance.svelte)",
+      "tags": ["config", "ephemeral", "in-memory", "category:store", "storage:in-memory", "layer:frontend"],
+      "description": "The settings the Storyteller configures before making a resonance roll: TemperamentConfig (dice_count, take_highest, negligible_max, fleeting_max) plus ResonanceWeights (per-type SliderLevel). Lives in component state — resets on app restart, not persisted to SQLite."
+    },
+    {
+      "label": "Roll History (frontend)",
+      "type": "Data Source",
+      "category": "store",
+      "storage": "in-memory",
+      "layer": "frontend",
+      "path": "(state inside Resonance.svelte)",
+      "tags": ["history", "ephemeral", "in-memory", "category:store", "storage:in-memory", "layer:frontend"],
+      "description": "In-memory list of past resonance roll results for the current session. Resets when the app restarts. Displayed in the Resonance Roller UI."
+    },
+    {
+      "label": "BridgeState (canonical character cache)",
+      "type": "Data Source",
+      "category": "store",
+      "storage": "in-memory",
+      "layer": "backend",
+      "path": "src-tauri/src/bridge/mod.rs::BridgeState",
+      "tags": ["cache", "in-memory", "merged", "category:store", "storage:in-memory", "layer:backend"],
+      "description": "Arc<BridgeState> holding the merged HashMap<String, CanonicalCharacter> across all sources (key '<source>:<source_id>'), per-source ConnectionInfo (connected flag + outbound mpsc::Sender), and the registered BridgeSource impls. Shared between every accept loop and every Tauri command handler. Source-of-truth for everything the bridge://characters-updated event carries. ADR 0006."
+    },
+
+    {
+      "label": "dyscrasias (SQLite table)",
+      "type": "Data Source",
+      "category": "store",
+      "storage": "sqlite",
+      "layer": "backend",
+      "path": "src-tauri/migrations/0001_initial.sql",
+      "tags": ["persistent", "sqlite", "dyscrasias", "category:store", "storage:sqlite", "layer:backend"],
+      "description": "Holds dyscrasia entries. is_custom=0 rows are destructively reseeded on every startup (ADR 0002); is_custom=1 rows persist. resonance_type CHECK constraint enforces the spelling 'Melancholy' (not 'Melancholic') — see ARCHITECTURE.md §6 invariants."
+    },
+    {
+      "label": "chronicles + nodes + edges (Chronicle Store)",
+      "type": "Data Source",
+      "category": "store",
+      "storage": "sqlite",
+      "layer": "backend",
+      "path": "src-tauri/migrations/0002_chronicle_graph.sql",
+      "tags": ["persistent", "sqlite", "chronicle", "graph", "category:store", "storage:sqlite", "layer:backend"],
+      "description": "Three-table chronicle graph. node.type and edge.edge_type are freeform user-authored strings (ADR 0003). ON DELETE CASCADE rolls chronicle deletions through nodes through edges. Partial unique index forbids more than one 'contains' parent per node — the contains sub-graph is a strict tree."
+    },
+    {
+      "label": "advantages (SQLite table)",
+      "type": "Data Source",
+      "category": "store",
+      "storage": "sqlite",
+      "layer": "backend",
+      "path": "src-tauri/migrations/0003_advantages.sql",
+      "tags": ["persistent", "sqlite", "advantages", "category:store", "storage:sqlite", "layer:backend"],
+      "description": "Holds V5 advantage definitions (merits/flaws/disciplines/loresheets). Backs the AdvantagesManager tool."
+    },
+    {
+      "label": "saved_characters (SQLite table)",
+      "type": "Data Source",
+      "category": "store",
+      "storage": "sqlite",
+      "layer": "backend",
+      "path": "src-tauri/migrations/0004_saved_characters.sql",
+      "tags": ["persistent", "sqlite", "saved-characters", "category:store", "storage:sqlite", "layer:backend"],
+      "description": "Canonical-payload snapshots of bridge-imported characters. Each row: source attribution (Roll20/Foundry), source id, BridgeCharacter payload (snake_case at IPC boundary), timestamps. Persisted independently of live VTT state — survives bridge disconnect. Compare modal in Campaign diffs saved-vs-live."
+    },
+    {
+      "label": "modifiers + status_templates (SQLite tables)",
+      "type": "Data Source",
+      "category": "store",
+      "storage": "sqlite",
+      "layer": "backend",
+      "path": "src-tauri/migrations/0005_modifiers.sql",
+      "tags": ["persistent", "sqlite", "modifiers", "status-templates", "category:store", "storage:sqlite", "layer:backend"],
+      "description": "Two tables for the GM Screen's modifier-stack composer. modifiers: ad-hoc bonuses/penalties; status_templates: reusable named presets the GM can apply repeatedly (e.g. 'concealed', 'wounded', 'using a discipline')."
+    },
+    {
+      "label": "Markdown export dir (~/Documents/vtmtools/)",
+      "type": "Data Source",
+      "category": "store",
+      "storage": "filesystem",
+      "layer": "backend",
+      "path": "~/Documents/vtmtools/<timestamp>.md",
+      "tags": ["filesystem", "export", "category:store", "storage:filesystem", "layer:backend"],
+      "description": "One timestamped Markdown file per export, written by tools/export.rs via tokio::fs. Each file contains the full ResonanceRollResult, attached dyscrasia (if any), and an export timestamp. One of two write paths in the security scope (ARCHITECTURE.md §8)."
+    },
+
+    {
+      "label": "ws://127.0.0.1:7423 (Roll20 wire)",
+      "type": "Wire Endpoint",
+      "category": "channel",
+      "channel-kind": "ws",
+      "layer": "backend",
+      "path": "(localhost loopback only; never bind 0.0.0.0)",
+      "tags": ["wire", "ws", "roll20", "category:channel", "channel-kind:ws", "layer:backend"],
+      "description": "Plain WebSocket port. Connects the Tauri app to the Roll20 Chrome extension. Preserves the pre-bridge wire protocol byte-for-byte so the existing extension keeps working. Bidirectional: inbound Characters/CharacterUpdate, outbound set_attribute/refresh."
+    },
+    {
+      "label": "wss://127.0.0.1:7424 (Foundry wire)",
+      "type": "Wire Endpoint",
+      "category": "channel",
+      "channel-kind": "wss",
+      "layer": "backend",
+      "path": "(localhost loopback, TLS via self-signed `localhost` cert)",
+      "tags": ["wire", "wss", "tls", "foundry", "category:channel", "channel-kind:wss", "layer:backend"],
+      "description": "TLS WebSocket port. Connects the Tauri app to the Foundry vtmtools-bridge module. wss is non-optional because Foundry is commonly served over HTTPS and browsers block ws://localhost from HTTPS pages as mixed content. Self-signed cert generated by rcgen on first launch and persisted in the app data dir; GM accepts the cert warning once per browser. Carries dot-namespaced wire frames (actor.* / bridge.* / game.* / storyteller.*)."
+    },
+    {
+      "label": "bridge://characters-updated",
+      "type": "Tauri Event",
+      "category": "channel",
+      "channel-kind": "tauri-event",
+      "layer": "backend",
+      "tags": ["tauri-event", "bridge", "characters", "category:channel", "channel-kind:tauri-event", "layer:backend"],
+      "description": "Backend-to-frontend event carrying the full merged Vec<CanonicalCharacter> across all sources. Frontend re-renders from the full list, never from a diff. Fired any time any source pushes an update."
+    },
+    {
+      "label": "bridge://*/connected · disconnected (lifecycle)",
+      "type": "Tauri Event",
+      "category": "channel",
+      "channel-kind": "tauri-event",
+      "layer": "backend",
+      "tags": ["tauri-event", "bridge", "lifecycle", "category:channel", "channel-kind:tauri-event", "layer:backend"],
+      "description": "Per-source bridge connection lifecycle events: bridge://roll20/connected, bridge://roll20/disconnected, bridge://foundry/connected, bridge://foundry/disconnected. Frontend toggles the per-source connection pip in the sidebar. Disconnect is expected flow, not error."
+    },
+    {
+      "label": "Tool Event Bus",
+      "type": "Channel",
+      "category": "channel",
+      "channel-kind": "tool-bus",
+      "layer": "frontend",
+      "path": "src/store/toolEvents.ts",
+      "tags": ["tool-bus", "pubsub", "decoupling", "category:channel", "channel-kind:tool-bus", "layer:frontend"],
+      "description": "Svelte writable store carrying frontend-to-frontend events for cross-tool coordination without direct coupling. Currently emits resonance_result (temperament + resonance type + acute + dyscrasia name); no subscribers yet — kept as the seam for future cross-tool features. Distinct from the Tauri Event Bridge (backend-to-frontend)."
     }
   ],
+
   "connections": [
-    {
-      "from": "Storyteller", "to": "GM Roll Config",
-      "type": "configures", "direction": "directed",
-      "label": "TemperamentConfig + ResonanceWeights",
-      "description": "GM dials in dice_count, take_highest, negligible/fleeting thresholds, and per-type SliderLevel positions via the Resonance Roller settings panel."
-    },
-    {
-      "from": "Storyteller", "to": "Resonance Roller",
-      "type": "triggers rolls", "direction": "directed",
-      "label": "click → invoke('roll_resonance', RollConfig)",
-      "description": "GM clicks Roll. Component calls the typed wrapper, which invokes the Tauri command."
-    },
-    {
-      "from": "Storyteller", "to": "Dyscrasia Manager",
-      "type": "manages", "direction": "directed",
-      "label": "CRUD on DyscrasiaEntry",
-      "description": "Add / edit / delete / search / random-roll-by-type via the Manager UI."
-    },
-    {
-      "from": "Storyteller", "to": "Campaign Viewer",
-      "type": "manages and monitors", "direction": "directed",
-      "label": "Save / Update / Delete / Compare",
-      "description": "GM saves bridge-imported characters as canonical snapshots and opens the Compare modal to inspect saved-vs-live drift."
-    },
-    {
-      "from": "Storyteller", "to": "Domains Manager",
-      "type": "manages", "direction": "directed",
-      "label": "CRUD on Chronicle / Node / Edge",
-      "description": "Author chronicles and the typed-graph nodes/edges that represent areas, characters, businesses, and relationships."
-    },
-    {
-      "from": "Storyteller", "to": "Foundry Test Tool",
-      "type": "exercises (dev)", "direction": "directed",
-      "label": "fire test RollV5PoolInput / PostChatAsActorInput",
-      "description": "Dev surface; GM picks a Foundry actor and submits sample game.* envelopes to verify the helper umbrella end-to-end."
-    },
+    { "from": "Storyteller", "to": "Resonance.svelte", "type": "invokes", "direction": "directed", "label": "configures + clicks Roll", "description": "GM dials TemperamentConfig + ResonanceWeights and triggers a roll." },
+    { "from": "Storyteller", "to": "DyscrasiaManager.svelte", "type": "invokes", "direction": "directed", "label": "CRUD + roll-by-type" },
+    { "from": "Storyteller", "to": "Campaign.svelte", "type": "invokes", "direction": "directed", "label": "watch live + Save/Compare" },
+    { "from": "Storyteller", "to": "DomainsManager.svelte", "type": "invokes", "direction": "directed", "label": "chronicle authoring" },
+    { "from": "Storyteller", "to": "AdvantagesManager.svelte", "type": "invokes", "direction": "directed", "label": "advantage CRUD" },
+    { "from": "Storyteller", "to": "FoundryTest.svelte", "type": "invokes", "direction": "directed", "label": "exercise game.* (dev)" },
+    { "from": "Storyteller", "to": "GmScreen.svelte", "type": "invokes", "direction": "directed", "label": "compose pool + dispatch roll" },
 
-    {
-      "from": "GM Roll Config", "to": "Resonance Roller",
-      "type": "feeds", "direction": "directed",
-      "label": "RollConfig { temperament, weights }",
-      "description": "Frontend builds a RollConfig from the settings panel state and passes it to the Tauri invocation."
-    },
-    {
-      "from": "Resonance Roller", "to": "Dice Engine",
-      "type": "invokes", "direction": "directed",
-      "label": "invoke('roll_resonance', { config: RollConfig }) → ResonanceRollResult",
-      "description": "Single Tauri command — all randomness runs on the backend."
-    },
-    {
-      "from": "Dice Engine", "to": "Resonance Roll Result",
-      "type": "produces", "direction": "directed",
-      "label": "ResonanceRollResult",
-      "description": "{ temperament_dice: Vec<u8>, temperament_die: u8, temperament: Negligible|Fleeting|Intense, resonance_type?: enum, resonance_die?: u8, acute_die?: u8, is_acute: bool, dyscrasia?: DyscrasiaEntry }"
-    },
-    {
-      "from": "Resonance Roll Result", "to": "Resonance Roller",
-      "type": "displayed by", "direction": "directed",
-      "label": "ResonanceRollResult → result card",
-      "description": "Component renders dice, temperament tier, resonance type, acute status, and (if attached) the dyscrasia."
-    },
-    {
-      "from": "Resonance Roll Result", "to": "Roll History",
-      "type": "stored in", "direction": "directed",
-      "label": "ResonanceRollResult appended",
-      "description": "In-memory list, reset on app restart."
-    },
-    {
-      "from": "Resonance Roll Result", "to": "Tool Event Bus",
-      "type": "published to", "direction": "directed",
-      "label": "{ type: 'resonance_result', temperament, resonance_type, is_acute, dyscrasia_name? }",
-      "description": "publishEvent() on the Svelte tool-events store — currently no subscribers, kept as the cross-tool decoupling seam."
-    },
-    {
-      "from": "Resonance Roll Result", "to": "Markdown Export",
-      "type": "exported to", "direction": "directed",
-      "label": "export_result_to_md(result) → ~/Documents/vtmtools/<timestamp>.md",
-      "description": "Tauri command writes a single timestamped file containing the full result + dyscrasia + export time."
-    },
-    {
-      "from": "Resonance Roll Result", "to": "Bridge Writeback",
-      "type": "written back via", "direction": "directed",
-      "label": "bridge_set_attribute(source, source_id, name='resonance', value)",
-      "description": "Generic per-character write; per-source semantics (Roll20: sheet attribute write; Foundry: WoD5e Item create after deleting prior resonance items)."
-    },
-    {
-      "from": "Resonance Roller", "to": "Dyscrasia Store",
-      "type": "queries on Acute", "direction": "directed",
-      "label": "roll_random_dyscrasia(resonance_type) → DyscrasiaEntry",
-      "description": "Fired only when is_acute = true; selects randomly from built-in + custom rows of the matching resonance type."
-    },
+    { "from": "+layout.svelte", "to": "+page.svelte", "type": "contains", "direction": "directed", "label": "renders" },
+    { "from": "+page.svelte", "to": "Resonance.svelte", "type": "invokes", "direction": "directed", "label": "lazy-load on selection" },
+    { "from": "+page.svelte", "to": "DyscrasiaManager.svelte", "type": "invokes", "direction": "directed", "label": "lazy-load on selection" },
+    { "from": "+page.svelte", "to": "Campaign.svelte", "type": "invokes", "direction": "directed", "label": "lazy-load on selection" },
+    { "from": "+page.svelte", "to": "DomainsManager.svelte", "type": "invokes", "direction": "directed", "label": "lazy-load on selection" },
+    { "from": "+page.svelte", "to": "AdvantagesManager.svelte", "type": "invokes", "direction": "directed", "label": "lazy-load on selection" },
+    { "from": "+page.svelte", "to": "FoundryTest.svelte", "type": "invokes", "direction": "directed", "label": "lazy-load on selection" },
+    { "from": "+page.svelte", "to": "GmScreen.svelte", "type": "invokes", "direction": "directed", "label": "lazy-load on selection" },
 
-    {
-      "from": "Dyscrasia Manager", "to": "Dyscrasia Store",
-      "type": "reads and writes", "direction": "mutual",
-      "label": "list/add/update/delete + roll_random_dyscrasia",
-      "description": "Five Tauri commands cover full CRUD + the random-by-type roll. DyscrasiaEntry { id, resonance_type, name, description, bonus, is_custom }."
-    },
-    {
-      "from": "Domains Manager", "to": "Chronicle Store",
-      "type": "reads and writes", "direction": "mutual",
-      "label": "Chronicle / Node / Edge CRUD + tree queries",
-      "description": "20 Tauri commands across chronicle.rs, node.rs, edge.rs. Includes derived tree queries (parent_of, children_of, path_to_root, subtree) over the 'contains' edge type."
-    },
-    {
-      "from": "Campaign Viewer", "to": "Saved Characters Store",
-      "type": "reads and writes", "direction": "mutual",
-      "label": "SavedCharacter { id, source, source_id, payload: BridgeCharacter, created_at, updated_at }",
-      "description": "Four Tauri commands (save/list/update/delete) on the saved_characters SQLite table. payload is the canonical bridge shape captured at save time; the Compare modal diffs it against the current Bridge Live Feed."
-    },
+    { "from": "Resonance.svelte", "to": "GM Roll Config (component state)", "type": "writes", "direction": "directed", "label": "settings panel state" },
+    { "from": "GM Roll Config (component state)", "to": "Resonance.svelte", "type": "reads", "direction": "directed", "label": "build RollConfig" },
+    { "from": "Resonance.svelte", "to": "lib/bridge/api.ts", "type": "invokes", "direction": "directed", "label": "bridge_set_attribute + bridge_refresh" },
+    { "from": "Resonance.svelte", "to": "bridge.svelte.ts", "type": "subscribes", "direction": "directed", "label": "merged character list for picker" },
+    { "from": "Resonance.svelte", "to": "Roll History (frontend)", "type": "writes", "direction": "directed", "label": "append result" },
+    { "from": "Roll History (frontend)", "to": "Resonance.svelte", "type": "reads", "direction": "directed", "label": "render history" },
+    { "from": "Resonance.svelte", "to": "Tool Event Bus", "type": "emits", "direction": "directed", "label": "publishEvent('resonance_result', …)" },
+    { "from": "Resonance.svelte", "to": "tools/resonance.rs", "type": "invokes", "direction": "directed", "label": "invoke('roll_resonance', RollConfig)" },
+    { "from": "Resonance.svelte", "to": "tools/export.rs", "type": "invokes", "direction": "directed", "label": "invoke('export_result_to_md', result)" },
 
-    {
-      "from": "Foundry Test Tool", "to": "Bridge Writeback",
-      "type": "exercises game.* helpers via", "direction": "directed",
-      "label": "trigger_foundry_roll(RollV5PoolInput) | post_foundry_chat(PostChatAsActorInput)",
-      "description": "Two Tauri commands behind src/lib/foundry-chat/api.ts. RollV5PoolInput { actor_id, value_paths, selectors?, difficulty?, label? }; PostChatAsActorInput { actor_id, content, roll_mode? }."
-    },
+    { "from": "DyscrasiaManager.svelte", "to": "db/dyscrasia.rs", "type": "invokes", "direction": "directed", "label": "list / add / update / delete / random" },
+    { "from": "Campaign.svelte", "to": "bridge.svelte.ts", "type": "subscribes", "direction": "directed", "label": "live cards" },
+    { "from": "Campaign.svelte", "to": "lib/saved-characters/api.ts", "type": "invokes", "direction": "directed", "label": "Save / Update / Delete + Compare diff" },
+    { "from": "Campaign.svelte", "to": "savedCharacters.svelte.ts", "type": "subscribes", "direction": "directed", "label": "saved list cache" },
+    { "from": "DomainsManager.svelte", "to": "lib/domains/api.ts", "type": "invokes", "direction": "directed", "label": "chronicle/node/edge CRUD + tree queries" },
+    { "from": "DomainsManager.svelte", "to": "domains.svelte.ts", "type": "subscribes", "direction": "directed", "label": "active chronicle + breadcrumb" },
+    { "from": "AdvantagesManager.svelte", "to": "lib/advantages/api.ts", "type": "invokes", "direction": "directed", "label": "advantage CRUD" },
+    { "from": "FoundryTest.svelte", "to": "lib/foundry-chat/api.ts", "type": "invokes", "direction": "directed", "label": "trigger_foundry_roll / post_foundry_chat" },
+    { "from": "FoundryTest.svelte", "to": "bridge.svelte.ts", "type": "subscribes", "direction": "directed", "label": "filter source==='foundry' for picker" },
+    { "from": "GmScreen.svelte", "to": "lib/v5/api.ts", "type": "invokes", "direction": "directed", "label": "roll_skill_check (local)" },
+    { "from": "GmScreen.svelte", "to": "lib/foundry-chat/api.ts", "type": "invokes", "direction": "directed", "label": "trigger_foundry_roll (remote, future #9 toggle)" },
+    { "from": "GmScreen.svelte", "to": "lib/character/api.ts", "type": "invokes", "direction": "directed", "label": "character context derivation" },
+    { "from": "GmScreen.svelte", "to": "lib/modifiers/api.ts", "type": "invokes", "direction": "directed", "label": "modifier + status template CRUD" },
+    { "from": "GmScreen.svelte", "to": "modifiers.svelte.ts", "type": "subscribes", "direction": "directed", "label": "active modifier stack" },
+    { "from": "GmScreen.svelte", "to": "statusTemplates.svelte.ts", "type": "subscribes", "direction": "directed", "label": "preset list" },
 
-    {
-      "from": "Roll20 Game Session", "to": "Roll20 Extension",
-      "type": "exposes data to", "direction": "directed",
-      "label": "Backbone models + per-attribute Firebase events",
-      "description": "Extension content script reads Roll20's internal Backbone data layer and listens to Firebase change events on each attribute."
-    },
-    {
-      "from": "Roll20 Extension", "to": "Roll20 WS Listener",
-      "type": "sends snapshots via", "direction": "directed",
-      "label": "InboundMsg::Characters | InboundMsg::CharacterUpdate (whole-character)",
-      "description": "Per-attribute events are debounced 200ms into a single whole-character JSON: { id, name, controlled_by, attributes: [{ name, current, max }, …] }."
-    },
-    {
-      "from": "Roll20 WS Listener", "to": "Bridge Live Feed",
-      "type": "delivers to", "direction": "directed",
-      "label": "→ CanonicalCharacter (translated)",
-      "description": "Roll20Source::handle_inbound picks fields per docs/reference/roll20-bundle.md and writes a CanonicalCharacter into the merged cache keyed by 'roll20:<id>'."
-    },
-    {
-      "from": "Bridge Writeback", "to": "Roll20 WS Listener",
-      "type": "sends commands via", "direction": "directed",
-      "label": "{ type: 'set_attribute' | 'refresh', … }",
-      "description": "Outbound JSON frame built by Roll20Source::build_set_attribute / build_refresh."
-    },
-    {
-      "from": "Roll20 WS Listener", "to": "Roll20 Extension",
-      "type": "relays commands to", "direction": "directed",
-      "label": "outbound JSON frame",
-      "description": "Same wire shape the extension sends back; preserves the pre-bridge protocol byte-for-byte."
-    },
-    {
-      "from": "Roll20 Extension", "to": "Roll20 Game Session",
-      "type": "writes back to", "direction": "directed",
-      "label": "Backbone setAttribute(name, value)",
-      "description": "Extension translates the wire frame into Roll20 Backbone setter calls; creates the attribute if missing."
-    },
+    { "from": "lib/advantages/api.ts", "to": "db/advantage.rs", "type": "invokes", "direction": "directed", "label": "Tauri IPC" },
+    { "from": "lib/bridge/api.ts", "to": "bridge/commands.rs", "type": "invokes", "direction": "directed", "label": "Tauri IPC" },
+    { "from": "lib/character/api.ts", "to": "tools/character.rs", "type": "invokes", "direction": "directed", "label": "Tauri IPC" },
+    { "from": "lib/domains/api.ts", "to": "db/chronicle.rs", "type": "invokes", "direction": "directed", "label": "Tauri IPC" },
+    { "from": "lib/domains/api.ts", "to": "db/node.rs", "type": "invokes", "direction": "directed", "label": "Tauri IPC" },
+    { "from": "lib/domains/api.ts", "to": "db/edge.rs", "type": "invokes", "direction": "directed", "label": "Tauri IPC" },
+    { "from": "lib/foundry-chat/api.ts", "to": "tools/foundry_chat.rs", "type": "invokes", "direction": "directed", "label": "Tauri IPC" },
+    { "from": "lib/modifiers/api.ts", "to": "db/modifier.rs", "type": "invokes", "direction": "directed", "label": "Tauri IPC" },
+    { "from": "lib/modifiers/api.ts", "to": "db/status_template.rs", "type": "invokes", "direction": "directed", "label": "Tauri IPC" },
+    { "from": "lib/saved-characters/api.ts", "to": "db/saved_character.rs", "type": "invokes", "direction": "directed", "label": "Tauri IPC" },
+    { "from": "lib/v5/api.ts", "to": "tools/skill_check.rs", "type": "invokes", "direction": "directed", "label": "Tauri IPC" },
 
-    {
-      "from": "Foundry World", "to": "Foundry Bridge Module",
-      "type": "exposes data to", "direction": "directed",
-      "label": "game.actors + updateActor / createActor / deleteActor hooks",
-      "description": "Module reads the actor list on 'ready' and forwards subsequent change events; runs in GM browser only (gated on game.user.isGM)."
-    },
-    {
-      "from": "Foundry Bridge Module", "to": "Foundry WSS Listener",
-      "type": "sends snapshots via", "direction": "directed",
-      "label": "FoundryInbound::Hello | Actors | ActorUpdate",
-      "description": "Hello carries protocol_version + capabilities + world_id (Plan 0 consolidation). Actors / ActorUpdate carry FoundryActor { id, name, owner, system: actor.system blob }. Frame uses TLS over wss://localhost:7424."
-    },
-    {
-      "from": "Foundry WSS Listener", "to": "Bridge Live Feed",
-      "type": "delivers to", "direction": "directed",
-      "label": "→ CanonicalCharacter (translated from FoundryActor)",
-      "description": "FoundrySource::translate picks fields per docs/reference/foundry-vtm5e-paths.md (vampire/werewolf/hunter splat fields side-by-side). Cache key 'foundry:<id>'."
-    },
-    {
-      "from": "Bridge Writeback", "to": "Foundry WSS Listener",
-      "type": "sends commands via", "direction": "directed",
-      "label": "actor.* / game.* / refresh envelopes",
-      "description": "actor.update_field, actor.create_feature, actor.create_item_simple, actor.append_private_notes_line, actor.delete_items_by_prefix, actor.delete_item_by_id, actor.apply_dyscrasia, game.roll_v5_pool, game.post_chat_as_actor — each owns a typed Rust builder in bridge/foundry/actions/<umbrella>.rs."
-    },
-    {
-      "from": "Foundry WSS Listener", "to": "Foundry Bridge Module",
-      "type": "relays commands to", "direction": "directed",
-      "label": "dot-namespaced JSON frame { type: '<umbrella>.<verb>', … }",
-      "description": "bridge.js handler-map dispatch routes by msg.type prefix into foundry-actions/<umbrella>.js executors."
-    },
-    {
-      "from": "Foundry Bridge Module", "to": "Foundry World",
-      "type": "writes back to", "direction": "directed",
-      "label": "actor.update / createEmbeddedDocuments / ChatMessage.create / WOD5E.api.RollFromDataset",
-      "description": "Executors call the Foundry / WoD5e APIs directly; V5 dice mechanics (hunger, messy crit, rouse, bestial fail) delegated to WoD5e's roll machinery."
-    },
+    { "from": "db/chronicle.rs", "to": "chronicles + nodes + edges (Chronicle Store)", "type": "writes", "direction": "directed", "label": "chronicle CRUD" },
+    { "from": "db/node.rs", "to": "chronicles + nodes + edges (Chronicle Store)", "type": "writes", "direction": "directed", "label": "node CRUD + tree walks" },
+    { "from": "db/edge.rs", "to": "chronicles + nodes + edges (Chronicle Store)", "type": "writes", "direction": "directed", "label": "edge CRUD" },
+    { "from": "db/dyscrasia.rs", "to": "dyscrasias (SQLite table)", "type": "writes", "direction": "directed", "label": "CRUD + random query" },
+    { "from": "db/advantage.rs", "to": "advantages (SQLite table)", "type": "writes", "direction": "directed", "label": "advantage CRUD" },
+    { "from": "db/modifier.rs", "to": "modifiers + status_templates (SQLite tables)", "type": "writes", "direction": "directed", "label": "modifier CRUD" },
+    { "from": "db/status_template.rs", "to": "modifiers + status_templates (SQLite tables)", "type": "writes", "direction": "directed", "label": "template CRUD" },
+    { "from": "db/saved_character.rs", "to": "saved_characters (SQLite table)", "type": "writes", "direction": "directed", "label": "snapshot CRUD" },
 
-    {
-      "from": "Bridge Live Feed", "to": "Tauri Event Bridge",
-      "type": "emits via", "direction": "directed",
-      "label": "emit('bridge://characters-updated', Vec<CanonicalCharacter>)",
-      "description": "Whole merged cache across all sources is pushed as the event payload — frontend re-renders from the full list, never from a diff."
-    },
-    {
-      "from": "Tauri Event Bridge", "to": "Campaign Viewer",
-      "type": "updates", "direction": "directed",
-      "label": "bridge://characters-updated → bridge.svelte.ts store",
-      "description": "Component subscribes to the typed bridge store (never listen() directly) and re-renders cards for all connected characters."
-    },
-    {
-      "from": "Tauri Event Bridge", "to": "Resonance Roller",
-      "type": "updates character list", "direction": "directed",
-      "label": "bridge://characters-updated → character picker",
-      "description": "Roller reads the merged store to populate the writeback target dropdown — works against any source."
-    },
-    {
-      "from": "Tauri Event Bridge", "to": "Foundry Test Tool",
-      "type": "updates Foundry character list", "direction": "directed",
-      "label": "bridge://characters-updated → filter(source === 'foundry')",
-      "description": "Test tool restricts the picker to Foundry actors because game.* helpers are Foundry-only."
-    }
+    { "from": "tools/resonance.rs", "to": "shared/dice.rs + shared/resonance.rs (Resonance Engine)", "type": "transforms", "direction": "directed", "label": "RollConfig → ResonanceRollResult" },
+    { "from": "tools/resonance.rs", "to": "Resonance Roll Result", "type": "writes", "direction": "directed", "label": "produces result DTO" },
+    { "from": "Resonance Roll Result", "to": "Resonance.svelte", "type": "invokes", "direction": "directed", "label": "rendered as result card" },
+    { "from": "Resonance Roll Result", "to": "tools/export.rs", "type": "transforms", "direction": "directed", "label": "DTO → timestamped Markdown file" },
+    { "from": "Resonance Roll Result", "to": "lib/bridge/api.ts", "type": "transforms", "direction": "directed", "label": "DTO → bridge_set_attribute(name='resonance', value)" },
+    { "from": "Resonance Roll Result", "to": "Tool Event Bus", "type": "emits", "direction": "directed", "label": "publishEvent('resonance_result', {...})" },
+    { "from": "tools/resonance.rs", "to": "db/dyscrasia.rs", "type": "invokes", "direction": "directed", "label": "roll_random_dyscrasia on Acute" },
+    { "from": "tools/export.rs", "to": "Markdown export dir (~/Documents/vtmtools/)", "type": "writes", "direction": "directed", "label": "tokio::fs (never std::fs)" },
+    { "from": "tools/character.rs", "to": "BridgeState (canonical character cache)", "type": "reads", "direction": "directed", "label": "character context derivation" },
+    { "from": "tools/character.rs", "to": "saved_characters (SQLite table)", "type": "reads", "direction": "directed", "label": "saved-vs-live diffs" },
+    { "from": "tools/foundry_chat.rs", "to": "game.* umbrella", "type": "invokes", "direction": "directed", "label": "build wire envelope" },
+    { "from": "tools/gm_screen.rs", "to": "shared/v5/* (V5 Skill-Check Engine)", "type": "transforms", "direction": "directed", "label": "build_pool → roll_pool → interpret (local)" },
+    { "from": "tools/gm_screen.rs", "to": "tools/foundry_chat.rs", "type": "invokes", "direction": "directed", "label": "remote roll via game.roll_v5_pool (#9 toggle, future)" },
+    { "from": "tools/gm_screen.rs", "to": "db/modifier.rs", "type": "invokes", "direction": "directed", "label": "active modifier stack" },
+    { "from": "tools/gm_screen.rs", "to": "db/advantage.rs", "type": "invokes", "direction": "directed", "label": "advantage lookups" },
+    { "from": "tools/skill_check.rs", "to": "shared/v5/* (V5 Skill-Check Engine)", "type": "transforms", "direction": "directed", "label": "thin Tauri shim" },
+
+    { "from": "bridge/commands.rs", "to": "BridgeState (canonical character cache)", "type": "reads", "direction": "directed", "label": "get_characters / get_status" },
+    { "from": "bridge/commands.rs", "to": "bridge/mod.rs (Bridge Core)", "type": "invokes", "direction": "directed", "label": "set_attribute / refresh dispatch" },
+    { "from": "bridge/mod.rs (Bridge Core)", "to": "BridgeState (canonical character cache)", "type": "writes", "direction": "directed", "label": "merged cache mutation" },
+    { "from": "bridge/mod.rs (Bridge Core)", "to": "ws://127.0.0.1:7423 (Roll20 wire)", "type": "transports", "direction": "directed", "label": "accept loop binds" },
+    { "from": "bridge/mod.rs (Bridge Core)", "to": "wss://127.0.0.1:7424 (Foundry wire)", "type": "transports", "direction": "directed", "label": "accept loop binds (TLS-gated)" },
+    { "from": "bridge/mod.rs (Bridge Core)", "to": "bridge://characters-updated", "type": "emits", "direction": "directed", "label": "after every cache update" },
+    { "from": "bridge/mod.rs (Bridge Core)", "to": "bridge://*/connected · disconnected (lifecycle)", "type": "emits", "direction": "directed", "label": "per-source connection state" },
+    { "from": "bridge/mod.rs (Bridge Core)", "to": "bridge/roll20/* (Roll20 source adapter)", "type": "contains", "direction": "directed", "label": "BridgeSource impl" },
+    { "from": "bridge/mod.rs (Bridge Core)", "to": "bridge/foundry/* (Foundry source adapter)", "type": "contains", "direction": "directed", "label": "BridgeSource impl" },
+
+    { "from": "ws://127.0.0.1:7423 (Roll20 wire)", "to": "bridge/roll20/* (Roll20 source adapter)", "type": "transports", "direction": "directed", "label": "InboundMsg frames" },
+    { "from": "bridge/roll20/* (Roll20 source adapter)", "to": "BridgeState (canonical character cache)", "type": "writes", "direction": "directed", "label": "translate.rs → CanonicalCharacter ('roll20:<id>')" },
+    { "from": "bridge/roll20/* (Roll20 source adapter)", "to": "ws://127.0.0.1:7423 (Roll20 wire)", "type": "transports", "direction": "directed", "label": "outbound set_attribute / refresh" },
+
+    { "from": "wss://127.0.0.1:7424 (Foundry wire)", "to": "bridge/foundry/* (Foundry source adapter)", "type": "transports", "direction": "directed", "label": "FoundryInbound frames" },
+    { "from": "bridge/foundry/* (Foundry source adapter)", "to": "BridgeState (canonical character cache)", "type": "writes", "direction": "directed", "label": "translate.rs → CanonicalCharacter ('foundry:<id>')" },
+    { "from": "bridge/foundry/* (Foundry source adapter)", "to": "actor.* umbrella", "type": "routes-through", "direction": "directed", "label": "outbound dispatch" },
+    { "from": "bridge/foundry/* (Foundry source adapter)", "to": "bridge.* umbrella", "type": "routes-through", "direction": "directed", "label": "outbound dispatch" },
+    { "from": "bridge/foundry/* (Foundry source adapter)", "to": "game.* umbrella", "type": "routes-through", "direction": "directed", "label": "outbound dispatch" },
+    { "from": "bridge/foundry/* (Foundry source adapter)", "to": "storyteller.* umbrella", "type": "routes-through", "direction": "directed", "label": "outbound dispatch" },
+    { "from": "actor.* umbrella", "to": "wss://127.0.0.1:7424 (Foundry wire)", "type": "transports", "direction": "directed", "label": "actor.* dot-namespaced frames" },
+    { "from": "bridge.* umbrella", "to": "wss://127.0.0.1:7424 (Foundry wire)", "type": "transports", "direction": "directed", "label": "bridge.* dot-namespaced frames" },
+    { "from": "game.* umbrella", "to": "wss://127.0.0.1:7424 (Foundry wire)", "type": "transports", "direction": "directed", "label": "game.* dot-namespaced frames" },
+    { "from": "storyteller.* umbrella", "to": "wss://127.0.0.1:7424 (Foundry wire)", "type": "transports", "direction": "directed", "label": "storyteller.* dot-namespaced frames" },
+
+    { "from": "bridge://characters-updated", "to": "bridge.svelte.ts", "type": "subscribes", "direction": "directed", "label": "listen + typed publish to subscribers" },
+    { "from": "bridge://*/connected · disconnected (lifecycle)", "to": "bridge.svelte.ts", "type": "subscribes", "direction": "directed", "label": "per-source connection pip" },
+
+    { "from": "Roll20 Game Session", "to": "Roll20 Extension", "type": "reads", "direction": "directed", "label": "Backbone + Firebase per-attribute events" },
+    { "from": "Roll20 Extension", "to": "ws://127.0.0.1:7423 (Roll20 wire)", "type": "transports", "direction": "directed", "label": "200ms-debounced whole-character snapshots" },
+    { "from": "ws://127.0.0.1:7423 (Roll20 wire)", "to": "Roll20 Extension", "type": "transports", "direction": "directed", "label": "outbound set_attribute / refresh" },
+    { "from": "Roll20 Extension", "to": "Roll20 Game Session", "type": "writes", "direction": "directed", "label": "Backbone setAttribute" },
+
+    { "from": "Foundry World", "to": "Foundry Bridge Module", "type": "reads", "direction": "directed", "label": "game.actors + updateActor/createActor/deleteActor hooks" },
+    { "from": "Foundry Bridge Module", "to": "wss://127.0.0.1:7424 (Foundry wire)", "type": "transports", "direction": "directed", "label": "FoundryInbound::Hello | Actors | ActorUpdate" },
+    { "from": "wss://127.0.0.1:7424 (Foundry wire)", "to": "Foundry Bridge Module", "type": "transports", "direction": "directed", "label": "outbound actor.* / bridge.* / game.* / storyteller.*" },
+    { "from": "Foundry Bridge Module", "to": "Foundry World", "type": "writes", "direction": "directed", "label": "actor.update / createEmbeddedDocuments" },
+    { "from": "Foundry Bridge Module", "to": "WoD5e API", "type": "invokes", "direction": "directed", "label": "WOD5E.api.RollFromDataset / Roll / ChatMessage.create" },
+    { "from": "WoD5e API", "to": "Foundry World", "type": "writes", "direction": "directed", "label": "rolls into Foundry chat; sheet-side mutations" },
+
+    { "from": "Player", "to": "Roll20 Game Session", "type": "writes", "direction": "directed", "label": "sheet edits propagate via Firebase" },
+    { "from": "Player", "to": "Foundry World", "type": "writes", "direction": "directed", "label": "sheet edits trigger updateActor hook" },
+
+    { "from": "lib.rs (IPC handler registry + boot)", "to": "DB Migrations (sqlx::migrate!)", "type": "invokes", "direction": "directed", "label": "sqlx::migrate! on startup" },
+    { "from": "lib.rs (IPC handler registry + boot)", "to": "db/seed.rs (Destructive reseed)", "type": "invokes", "direction": "directed", "label": "after migrations" },
+    { "from": "lib.rs (IPC handler registry + boot)", "to": "bridge/mod.rs (Bridge Core)", "type": "invokes", "direction": "directed", "label": "start_servers" },
+    { "from": "DB Migrations (sqlx::migrate!)", "to": "dyscrasias (SQLite table)", "type": "writes", "direction": "directed", "label": "0001_initial.sql" },
+    { "from": "DB Migrations (sqlx::migrate!)", "to": "chronicles + nodes + edges (Chronicle Store)", "type": "writes", "direction": "directed", "label": "0002_chronicle_graph.sql" },
+    { "from": "DB Migrations (sqlx::migrate!)", "to": "advantages (SQLite table)", "type": "writes", "direction": "directed", "label": "0003_advantages.sql" },
+    { "from": "DB Migrations (sqlx::migrate!)", "to": "saved_characters (SQLite table)", "type": "writes", "direction": "directed", "label": "0004_saved_characters.sql" },
+    { "from": "DB Migrations (sqlx::migrate!)", "to": "modifiers + status_templates (SQLite tables)", "type": "writes", "direction": "directed", "label": "0005_modifiers.sql" },
+    { "from": "db/seed.rs (Destructive reseed)", "to": "dyscrasias (SQLite table)", "type": "writes", "direction": "directed", "label": "delete is_custom=0 + reinsert (ADR 0002)" }
   ]
 }
