@@ -381,6 +381,7 @@
         initialTags={editorTarget.kind === 'materialized' ? editorTarget.mod.tags : []}
         onSave={saveEditor}
         onCancel={closeEditor}
+        {character}
       />
     </div>
   {/if}
