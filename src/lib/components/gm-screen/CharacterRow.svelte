@@ -7,6 +7,7 @@
   import ModifierCard from './ModifierCard.svelte';
   import ModifierEffectEditor from './ModifierEffectEditor.svelte';
   import RollDispatcherPopover from './RollDispatcherPopover.svelte';
+  import ActiveEffectsSummary from './ActiveEffectsSummary.svelte';
 
   interface Props {
     character: BridgeCharacter;
@@ -319,6 +320,8 @@
     {/if}
   </header>
 
+  <div class="row-body">
+  <ActiveEffectsSummary {character} modifiers={charMods} />
   <div
     class="modifier-row"
     style="--cards: {visibleCards.length};"
@@ -362,6 +365,7 @@
       />
     {/each}
     <button class="add-modifier" onclick={addFreeModifier}>+ Add modifier</button>
+  </div>
   </div>
 
   {#if pushNotice}
@@ -420,6 +424,16 @@
   .roll-trigger:hover {
     background: var(--bg-raised);
   }
+
+  /* Flex wrapper that places ActiveEffectsSummary on the left of the
+     modifier carousel. Both children align top so a tall summary doesn't
+     stretch the carousel. */
+  .row-body {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+  }
+  .row-body > .modifier-row { flex: 1; min-width: 0; }
 
   .modifier-row {
     --card-trans-duration: 600ms;
