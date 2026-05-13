@@ -254,6 +254,14 @@ export interface CharacterModifier {
   isActive: boolean;
   isHidden: boolean;
   originTemplateId: number | null;
+  /**
+   * Source labels captured from the Foundry item's `system.bonuses[]` at
+   * "Save as local override" time. Non-empty marks this modifier as a
+   * Foundry override → push uses surgical replace (removes captured-label
+   * bonuses + our own prior pushes before appending). Empty = hand-rolled
+   * modifier with additive push.
+   */
+  foundryCapturedLabels: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -267,6 +275,7 @@ export interface NewCharacterModifierInput {
   binding: ModifierBinding;
   tags: string[];
   originTemplateId: number | null;
+  foundryCapturedLabels: string[];   // NEW — empty array = hand-rolled
 }
 
 export interface ModifierPatchInput {

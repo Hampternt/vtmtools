@@ -280,6 +280,7 @@
       binding: { kind: 'free' },
       tags: [],
       originTemplateId: null,
+      foundryCapturedLabels: [],
     });
   }
 
@@ -346,6 +347,7 @@
               isActive: false,
               isHidden: false,
               originTemplateId: null,
+              foundryCapturedLabels: [],
               createdAt: '',
               updatedAt: '',
             }
