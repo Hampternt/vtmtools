@@ -42,6 +42,20 @@
      * read the templates store here.
      */
     originTemplateName?: string | null;
+    /**
+     * True when this materialized modifier is a Foundry override
+     * (foundryCapturedLabels non-empty) whose effects don't match the
+     * item's current always-active live bonuses. Drives the yellow
+     * mismatch asterisk.
+     */
+    showMismatch?: boolean;
+    /**
+     * "Save as local override" handler. When set (i.e. on virtual cards),
+     * renders the save-as-override button. Clicking creates a
+     * CharacterModifier with effects mirroring the current always-active
+     * bonuses + captures their source labels.
+     */
+    onSaveAsOverride?: () => void;
   }
 
   let {
@@ -51,6 +65,8 @@
     canReset = false, onReset,
     onToggleActive, onOpenEditor, onHide,
     originTemplateName = null,
+    showMismatch = false,
+    onSaveAsOverride,
   }: Props = $props();
 
   let cogEl: HTMLButtonElement | undefined = $state();
@@ -85,7 +101,7 @@
 >
   <div class="head">
     <span class="name" title={modifier.name}>
-      {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}
+      {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}{#if showMismatch}<span class="mismatch-mark" title="Saved override differs from current Foundry bonus">*</span>{/if}
       {#if isStale}<span class="stale" title="Source merit removed">stale</span>{/if}
     </span>
     <button
@@ -138,6 +154,14 @@
       class:on={modifier.isActive}
       onclick={onToggleActive}
     >{modifier.isActive ? 'ON' : 'OFF'}</button>
+    {#if onSaveAsOverride}
+      <button
+        class="save-override"
+        title="Snapshot the live Foundry bonuses into a saved local override"
+        aria-label="Save as local override"
+        onclick={onSaveAsOverride}
+      >💾</button>
+    {/if}
     {#if canPush}
       <button
         class="push"
@@ -242,6 +266,12 @@
     white-space: nowrap;
   }
   .virtual-mark { color: var(--accent-amber); margin-left: 0.15rem; }
+  .mismatch-mark {
+    color: var(--accent-amber);
+    margin-left: 0.15rem;
+    font-weight: 700;
+    cursor: help;
+  }
   .stale { font-size: 0.65rem; color: var(--accent-amber); margin-left: 0.4rem; }
   .origin {
     margin: 0;
@@ -347,6 +377,20 @@
   .modifier-card:hover .push,
   .push:focus { opacity: 1; }
   .push:hover { background: var(--accent); color: var(--text-primary); border-color: var(--accent-bright); }
+  .save-override {
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-faint);
+    border-radius: 0.3rem;
+    padding: 0.15rem 0.45rem;
+    font-size: 0.7rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+  }
+  .modifier-card:hover .save-override,
+  .save-override:focus { opacity: 1; }
+  .save-override:hover { background: var(--accent); color: var(--text-primary); border-color: var(--accent-bright); }
   .reset {
     background: var(--bg-input);
     color: var(--text-secondary);

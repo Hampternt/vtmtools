@@ -116,6 +116,30 @@
     });
   }
 
+  /** Stable string key for a (value, paths) tuple, used for unordered set
+   *  equality. `paths` ordering within one tuple IS significant (spec §3.3).
+   */
+  function effectKey(value: number, paths: string[]): string {
+    return JSON.stringify([value, paths]);
+  }
+
+  /** True when this materialized modifier is a Foundry override
+   *  (foundryCapturedLabels non-empty) AND its Pool effects don't match
+   *  the item's current always-active live bonuses (own-pushes excluded).
+   *  See spec §3.3.
+   */
+  function isOverrideOutOfSync(mod: CharacterModifier): boolean {
+    if (mod.foundryCapturedLabels.length === 0) return false;
+    if (mod.binding.kind !== 'advantage') return false;
+    const live = bonusesFor(mod.binding.item_id);
+    const liveSet = new Set(live.map(b => effectKey(b.value, b.paths)));
+    const saved = mod.effects.filter(e => e.kind === 'pool');
+    const savedSet = new Set(saved.map(e => effectKey(e.delta ?? 0, e.paths ?? [])));
+    if (liveSet.size !== savedSet.size) return true;
+    for (const k of liveSet) if (!savedSet.has(k)) return true;
+    return false;
+  }
+
   // Build the card list per spec §8.1.
   type CardEntry =
     | { kind: 'materialized'; mod: CharacterModifier; isStale: boolean }
@@ -190,6 +214,43 @@
       name: virt.name,
       description: virt.description,
     });
+  }
+
+  /**
+   * Save-as-local-override action. Distinct from `materialize`:
+   *   - materialize: creates an empty modifier (no effects, no captured
+   *     labels) on first user engagement; subsequent edits build up local
+   *     effects from scratch.
+   *   - saveAsOverride: snapshots the current always-active bonuses on the
+   *     item into a CharacterModifier whose effects mirror the bonuses
+   *     AND whose foundryCapturedLabels record the source-label set.
+   *     Push then becomes surgical.
+   */
+  async function saveAsOverride(virt: VirtualCard): Promise<CharacterModifier> {
+    const sourceBonuses = bonusesFor(virt.item._id);
+    const effects: ModifierEffect[] = sourceBonuses.map(b => ({
+      kind: 'pool',
+      scope: null,
+      delta: b.value,
+      note: null,
+      paths: b.paths,
+    }));
+    const capturedLabels = sourceBonuses.map(b => b.source ?? '');
+    const created = await modifiers.add({
+      source: character.source,
+      sourceId: character.source_id,
+      name: virt.name,
+      description: virt.description,
+      effects,
+      binding: { kind: 'advantage', item_id: virt.item._id },
+      tags: [],
+      originTemplateId: null,
+      foundryCapturedLabels: capturedLabels,
+    });
+    // Flip is_active=true so the override is immediately applied in renders
+    // that consume active modifiers (active-effects summary, deltas, etc.).
+    await modifiers.setActive(created.id, true);
+    return created;
   }
 
   async function handleToggleActive(e: CardEntry): Promise<void> {
@@ -397,6 +458,10 @@
         originTemplateName={entry.kind === 'materialized' && entry.mod.originTemplateId != null
           ? (statusTemplates.byId(entry.mod.originTemplateId)?.name ?? null)
           : null}
+        showMismatch={entry.kind === 'materialized' ? isOverrideOutOfSync(entry.mod) : false}
+        onSaveAsOverride={entry.kind === 'virtual'
+          ? () => saveAsOverride(entry.virt).catch(err => console.error('[gm-screen] save-as-override failed:', err))
+          : undefined}
       />
     {/each}
     <button class="add-modifier" onclick={addFreeModifier}>+ Add modifier</button>
