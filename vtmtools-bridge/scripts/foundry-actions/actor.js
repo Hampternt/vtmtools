@@ -1,7 +1,7 @@
 // Foundry actor.* helper executors.
 // See docs/superpowers/specs/2026-04-26-foundry-helper-library-roadmap.md.
 
-import { actorToWire, hookActorChanges } from "../translate.js";
+import { actorToWire, hookActorChanges, hookItemChanges } from "../translate.js";
 
 const MODULE_ID = "vtmtools-bridge";
 
@@ -26,6 +26,7 @@ export const actorsSubscriber = {
       console.log(`[${MODULE_ID}] actorsSubscriber: pushed ${actors.length} actors`);
     }
     hookActorChanges(socket);
+    hookItemChanges(socket);
     _attached = { socket };
   },
 
