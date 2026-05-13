@@ -29,6 +29,14 @@ pub enum FoundryInbound {
     /// Inbound roll result captured by the Foundry-side `createChatMessage`
     /// hook. Fields are decoded into `CanonicalRoll` by `translate_roll`.
     RollResult { message: FoundryRollMessage },
+    /// A Foundry item was deleted from an actor. Triggered by the
+    /// `deleteItem` hook in `vtmtools-bridge/scripts/translate.js`.
+    /// `actor_id` is the Foundry actor `_id` (canonical `source_id`);
+    /// `item_id` is the deleted item's `_id`.
+    ItemDeleted {
+        actor_id: String,
+        item_id: String,
+    },
 }
 
 /// Wire shape for a Foundry roll result. JS-side `messageToWire`
@@ -219,5 +227,18 @@ mod tests {
         }"#;
         let actor: FoundryActor = serde_json::from_str(wire).expect("legacy parses");
         assert_eq!(actor.id, "abc");
+    }
+
+    #[test]
+    fn foundry_inbound_deserializes_item_deleted() {
+        let wire = r#"{"type":"item_deleted","actor_id":"actor-a","item_id":"merit-1"}"#;
+        let parsed: FoundryInbound = serde_json::from_str(wire).expect("parses");
+        match parsed {
+            FoundryInbound::ItemDeleted { actor_id, item_id } => {
+                assert_eq!(actor_id, "actor-a");
+                assert_eq!(item_id, "merit-1");
+            }
+            _ => panic!("expected ItemDeleted, got {parsed:?}"),
+        }
     }
 }

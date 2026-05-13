@@ -17,7 +17,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, Mutex};
@@ -284,6 +284,41 @@ async fn handle_connection<S>(
                         InboundEvent::RollReceived(roll) => {
                             state.push_roll(roll.clone()).await;
                             let _ = handle.emit("bridge://roll-received", &roll);
+                        }
+                        InboundEvent::ItemDeleted { source, source_id, item_id } => {
+                            // Lookup the pool via Tauri's managed-state map.
+                            // DbState is registered in lib.rs::run setup,
+                            // before bridge servers are spawned, so this
+                            // never fails in practice. If it ever did
+                            // (no pool managed), skip the reap silently —
+                            // a stale orphan card is preferable to a panic.
+                            let pool = match handle.try_state::<crate::DbState>() {
+                                Some(s) => Arc::clone(&s.0),
+                                None => {
+                                    eprintln!(
+                                        "[bridge:{}] ItemDeleted: no DbState managed, skipping reap",
+                                        kind.as_str()
+                                    );
+                                    continue;
+                                }
+                            };
+                            match crate::db::modifier::db_delete_by_advantage_binding(
+                                &pool, &source, &source_id, &item_id,
+                            ).await {
+                                Ok(ids) if !ids.is_empty() => {
+                                    let _ = handle.emit(
+                                        "modifiers://rows-reaped",
+                                        serde_json::json!({ "ids": ids }),
+                                    );
+                                }
+                                Ok(_) => {} // idempotent — no rows matched, nothing to emit
+                                Err(e) => {
+                                    eprintln!(
+                                        "[bridge:{}] ItemDeleted reap failed: {e}",
+                                        kind.as_str()
+                                    );
+                                }
+                            }
                         }
                     }
                 }

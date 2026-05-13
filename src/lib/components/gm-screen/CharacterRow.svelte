@@ -127,9 +127,10 @@
     return mod.foundryCapturedLabels.length > 0 && mod.binding.kind === 'advantage';
   }
 
-  // Build the card list per spec §8.1.
+  // Build the card list per spec §8.1 (updated 2026-05-13 — advantage-orphan
+  // branch removed; orphan reaping happens backend-side on deleteItem).
   type CardEntry =
-    | { kind: 'materialized'; mod: CharacterModifier; isStale: boolean }
+    | { kind: 'materialized'; mod: CharacterModifier }
     | { kind: 'virtual'; virt: VirtualCard };
 
   let cardEntries = $derived.by((): CardEntry[] => {
@@ -139,7 +140,7 @@
     for (const item of advantageItems) {
       const matched = charMods.find(m => m.binding.kind === 'advantage' && m.binding.item_id === item._id);
       if (matched) {
-        entries.push({ kind: 'materialized', mod: matched, isStale: false });
+        entries.push({ kind: 'materialized', mod: matched });
       } else {
         entries.push({ kind: 'virtual', virt: {
           item,
@@ -149,13 +150,12 @@
       }
     }
 
-    // (3) Append free-floating modifiers (and any 'advantage' mods whose item was deleted — these become stale).
-    const knownAdvantageItemIds = new Set(advantageItems.map(it => it._id));
+    // (3) Append free-floating modifiers. Advantage-bound orphans no longer
+    // render here — the deleteItem hook in vtmtools-bridge triggers a DB delete
+    // that arrives via `modifiers://rows-reaped`, removing them from the store.
     for (const m of charMods) {
       if (m.binding.kind === 'free') {
-        entries.push({ kind: 'materialized', mod: m, isStale: false });
-      } else if (m.binding.kind === 'advantage' && !knownAdvantageItemIds.has(m.binding.item_id)) {
-        entries.push({ kind: 'materialized', mod: m, isStale: true });
+        entries.push({ kind: 'materialized', mod: m });
       }
     }
     return entries;
@@ -268,7 +268,6 @@
     if (character.source !== 'foundry') return false;
     if (e.kind !== 'materialized') return false;            // virtual = no DB row yet
     if (e.mod.binding.kind !== 'advantage') return false;
-    if (e.isStale) return false;
     return e.mod.effects.some(eff => eff.kind === 'pool');
   }
 
@@ -424,7 +423,6 @@
             }
           : entry.mod}
         isVirtual={entry.kind === 'virtual'}
-        isStale={entry.kind === 'materialized' && entry.isStale}
         bonuses={entry.kind === 'virtual'
           ? bonusesFor(entry.virt.item._id)
           : entry.mod.binding.kind === 'advantage'

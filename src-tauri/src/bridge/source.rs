@@ -13,6 +13,14 @@ pub enum InboundEvent {
     CharactersUpdated(Vec<CanonicalCharacter>),
     /// Source pushed a roll result.
     RollReceived(CanonicalRoll),
+    /// Foundry-side item deletion — frontend modifier rows tied to this
+    /// item must be reaped. Caller in `bridge::mod` runs the DB delete and
+    /// emits `modifiers://rows-reaped`. Spec §5.2.
+    ItemDeleted {
+        source: crate::bridge::types::SourceKind,
+        source_id: String,
+        item_id: String,
+    },
 }
 
 /// Per-source protocol adapter. Sources are stateless transformers;

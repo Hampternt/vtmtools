@@ -67,6 +67,18 @@ export function hookItemChanges(socket) {
           type: "actor_update",
           actor: actorToWire(actor),
         }));
+        // Explicit cleanup signal for live-item deletion — backend reaps
+        // any advantage-bound character_modifiers row pointing at this
+        // item. Sent IN ADDITION to actor_update so bridge state stays
+        // accurate AND the modifier row is removed. See spec §3.2 of
+        // docs/superpowers/specs/2026-05-13-gm-screen-live-data-priority-design.md.
+        if (ev === "deleteItem") {
+          socket.send(JSON.stringify({
+            type: "item_deleted",
+            actor_id: actor.id,
+            item_id: item.id,
+          }));
+        }
       } catch (e) {
         console.warn(`[${MODULE_ID}] failed to push ${ev}:`, e);
       }
