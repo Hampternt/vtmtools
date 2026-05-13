@@ -73,3 +73,30 @@ export function hookItemChanges(socket) {
     });
   }
 }
+
+export function hookEffectChanges(socket) {
+  for (const ev of ["createActiveEffect", "updateActiveEffect", "deleteActiveEffect"]) {
+    Hooks.on(ev, (effect) => {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      // Effect parent can be either an Actor (actor-level effect) or an Item
+      // (item-attached effect, in which case the Actor is the item's parent).
+      // Skip world-level effects and any other unexpected attachment.
+      const parent = effect?.parent;
+      let actor = null;
+      if (parent?.documentName === "Actor") {
+        actor = parent;
+      } else if (parent?.documentName === "Item" && parent.parent?.documentName === "Actor") {
+        actor = parent.parent;
+      }
+      if (!actor) return;
+      try {
+        socket.send(JSON.stringify({
+          type: "actor_update",
+          actor: actorToWire(actor),
+        }));
+      } catch (e) {
+        console.warn(`[${MODULE_ID}] failed to push ${ev}:`, e);
+      }
+    });
+  }
+}
