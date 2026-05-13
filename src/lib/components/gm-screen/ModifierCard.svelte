@@ -19,6 +19,12 @@
      * sheet directly and render even on virtual cards.
      */
     bonuses?: FoundryItemBonus[];
+    /**
+     * Conditional bonuses (activeWhen.check != 'always') skipped from the
+     * read-through. Rendered as a small "(N conditionals)" badge with a
+     * tooltip listing the labels + their `activeWhen.check` reasons.
+     */
+    conditionalsSkipped?: FoundryItemBonus[];
     /** True when this card is push-to-Foundry-eligible: Foundry source,
      *  advantage binding, materialized, with at least one pool effect. */
     canPush?: boolean;
@@ -40,6 +46,7 @@
 
   let {
     modifier, isVirtual = false, isStale = false, bonuses = [],
+    conditionalsSkipped = [],
     canPush = false, onPush,
     canReset = false, onReset,
     onToggleActive, onOpenEditor, onHide,
@@ -100,6 +107,16 @@
         </p>
       {/each}
     </div>
+  {/if}
+  {#if conditionalsSkipped.length > 0}
+    <p
+      class="conditionals-badge"
+      title={conditionalsSkipped
+        .map(b => `${b.source ?? '(unnamed)'} — ${b.activeWhen?.check ?? '?'}`)
+        .join('\n')}
+    >
+      ({conditionalsSkipped.length} conditional{conditionalsSkipped.length === 1 ? '' : 's'})
+    </p>
   {/if}
   <div class="effects">
     {#if modifier.effects.length === 0}
@@ -269,6 +286,17 @@
     color: var(--text-muted);
     font-style: italic;
     min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .conditionals-badge {
+    margin: 0;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    font-style: italic;
+    cursor: help;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

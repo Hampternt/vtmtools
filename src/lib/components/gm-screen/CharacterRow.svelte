@@ -75,21 +75,44 @@
   ));
 
   /** Read sheet-attached bonuses (system.bonuses[]) off a Foundry feature
-   *  item by its _id. Returns [] when the item is gone or has no bonuses. */
+   *  item by its _id, keeping only `activeWhen.check === 'always'` (and
+   *  bonuses with missing/null activeWhen — treated as always by Foundry).
+   *  Filters out own-pushed bonuses. Returns [] when the item is gone or
+   *  has no qualifying bonuses. */
   function bonusesFor(itemId: string): FoundryItemBonus[] {
     const item = advantageItems.find(it => it._id === itemId);
     if (!item) return [];
     const raw = (item.system as Record<string, unknown>)?.bonuses;
     if (!Array.isArray(raw)) return [];
     return (raw as FoundryItemBonus[]).filter(b => {
+      // Drop own-pushed bonuses (would loop on re-pull).
       const src = b.source ?? '';
-      // Filter out anything tagged with a LIVE modifier id (those are shown
-      // in the local effects section). Orphans (stale ids) intentionally
-      // pass through so the GM can spot them.
       for (const prefix of liveTagPrefixes) {
         if (src === prefix || src.startsWith(prefix + ':')) return false;
       }
-      return true;
+      // Keep only always-active. Missing activeWhen treated as always per
+      // Foundry behavior (defensive — WoD5e always writes activeWhen but
+      // legacy data or other sources may omit it).
+      const check = b.activeWhen?.check ?? 'always';
+      return check === 'always';
+    });
+  }
+
+  /** Returns the conditional bonuses (activeWhen.check != 'always') for an
+   *  item, after own-push filtering. Used to render the "(N conditionals)"
+   *  badge. */
+  function conditionalsFor(itemId: string): FoundryItemBonus[] {
+    const item = advantageItems.find(it => it._id === itemId);
+    if (!item) return [];
+    const raw = (item.system as Record<string, unknown>)?.bonuses;
+    if (!Array.isArray(raw)) return [];
+    return (raw as FoundryItemBonus[]).filter(b => {
+      const src = b.source ?? '';
+      for (const prefix of liveTagPrefixes) {
+        if (src === prefix || src.startsWith(prefix + ':')) return false;
+      }
+      const check = b.activeWhen?.check ?? 'always';
+      return check !== 'always';
     });
   }
 
@@ -358,6 +381,11 @@
           ? bonusesFor(entry.virt.item._id)
           : entry.mod.binding.kind === 'advantage'
             ? bonusesFor(entry.mod.binding.item_id)
+            : []}
+        conditionalsSkipped={entry.kind === 'virtual'
+          ? conditionalsFor(entry.virt.item._id)
+          : entry.mod.binding.kind === 'advantage'
+            ? conditionalsFor(entry.mod.binding.item_id)
             : []}
         onToggleActive={() => handleToggleActive(entry)}
         onHide={() => handleHide(entry)}
