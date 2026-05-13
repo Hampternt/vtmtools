@@ -19,6 +19,12 @@
      * sheet directly and render even on virtual cards.
      */
     bonuses?: FoundryItemBonus[];
+    /**
+     * Conditional bonuses (activeWhen.check != 'always') skipped from the
+     * read-through. Rendered as a small "(N conditionals)" badge with a
+     * tooltip listing the labels + their `activeWhen.check` reasons.
+     */
+    conditionalsSkipped?: FoundryItemBonus[];
     /** True when this card is push-to-Foundry-eligible: Foundry source,
      *  advantage binding, materialized, with at least one pool effect. */
     canPush?: boolean;
@@ -36,14 +42,31 @@
      * read the templates store here.
      */
     originTemplateName?: string | null;
+    /**
+     * True when this materialized modifier is a saved Foundry override
+     * (created via "Save as local override"). Drives the yellow origin
+     * asterisk that signals "this card's data comes from a saved local
+     * copy that supersedes the live Foundry read-through".
+     */
+    showOverride?: boolean;
+    /**
+     * "Save as local override" handler. When set (i.e. on virtual cards),
+     * renders the save-as-override button. Clicking creates a
+     * CharacterModifier with effects mirroring the current always-active
+     * bonuses + captures their source labels.
+     */
+    onSaveAsOverride?: () => void;
   }
 
   let {
     modifier, isVirtual = false, isStale = false, bonuses = [],
+    conditionalsSkipped = [],
     canPush = false, onPush,
     canReset = false, onReset,
     onToggleActive, onOpenEditor, onHide,
     originTemplateName = null,
+    showOverride = false,
+    onSaveAsOverride,
   }: Props = $props();
 
   let cogEl: HTMLButtonElement | undefined = $state();
@@ -78,7 +101,7 @@
 >
   <div class="head">
     <span class="name" title={modifier.name}>
-      {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}
+      {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}{#if showOverride}<span class="override-mark" title="Saved local override — this card's data comes from your saved copy, which supersedes the live Foundry read-through">*</span>{/if}
       {#if isStale}<span class="stale" title="Source merit removed">stale</span>{/if}
     </span>
     <button
@@ -101,6 +124,16 @@
       {/each}
     </div>
   {/if}
+  {#if conditionalsSkipped.length > 0}
+    <p
+      class="conditionals-badge"
+      title={conditionalsSkipped
+        .map(b => `${b.source ?? '(unnamed)'} — ${b.activeWhen?.check ?? '?'}`)
+        .join('\n')}
+    >
+      ({conditionalsSkipped.length} conditional{conditionalsSkipped.length === 1 ? '' : 's'})
+    </p>
+  {/if}
   <div class="effects">
     {#if modifier.effects.length === 0}
       <p class="no-effect">(no effect)</p>
@@ -121,6 +154,14 @@
       class:on={modifier.isActive}
       onclick={onToggleActive}
     >{modifier.isActive ? 'ON' : 'OFF'}</button>
+    {#if onSaveAsOverride}
+      <button
+        class="save-override"
+        title="Snapshot the live Foundry bonuses into a saved local override"
+        aria-label="Save as local override"
+        onclick={onSaveAsOverride}
+      >💾</button>
+    {/if}
     {#if canPush}
       <button
         class="push"
@@ -225,6 +266,12 @@
     white-space: nowrap;
   }
   .virtual-mark { color: var(--accent-amber); margin-left: 0.15rem; }
+  .override-mark {
+    color: var(--accent-amber);
+    margin-left: 0.15rem;
+    font-weight: 700;
+    cursor: help;
+  }
   .stale { font-size: 0.65rem; color: var(--accent-amber); margin-left: 0.4rem; }
   .origin {
     margin: 0;
@@ -269,6 +316,17 @@
     color: var(--text-muted);
     font-style: italic;
     min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .conditionals-badge {
+    margin: 0;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    font-style: italic;
+    cursor: help;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -319,6 +377,20 @@
   .modifier-card:hover .push,
   .push:focus { opacity: 1; }
   .push:hover { background: var(--accent); color: var(--text-primary); border-color: var(--accent-bright); }
+  .save-override {
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-faint);
+    border-radius: 0.3rem;
+    padding: 0.15rem 0.45rem;
+    font-size: 0.7rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+  }
+  .modifier-card:hover .save-override,
+  .save-override:focus { opacity: 1; }
+  .save-override:hover { background: var(--accent); color: var(--text-primary); border-color: var(--accent-bright); }
   .reset {
     background: var(--bg-input);
     color: var(--text-secondary);

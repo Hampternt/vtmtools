@@ -75,22 +75,56 @@
   ));
 
   /** Read sheet-attached bonuses (system.bonuses[]) off a Foundry feature
-   *  item by its _id. Returns [] when the item is gone or has no bonuses. */
+   *  item by its _id, keeping only `activeWhen.check === 'always'` (and
+   *  bonuses with missing/null activeWhen — treated as always by Foundry).
+   *  Filters out own-pushed bonuses. Returns [] when the item is gone or
+   *  has no qualifying bonuses. */
   function bonusesFor(itemId: string): FoundryItemBonus[] {
     const item = advantageItems.find(it => it._id === itemId);
     if (!item) return [];
     const raw = (item.system as Record<string, unknown>)?.bonuses;
     if (!Array.isArray(raw)) return [];
     return (raw as FoundryItemBonus[]).filter(b => {
+      // Drop own-pushed bonuses (would loop on re-pull).
       const src = b.source ?? '';
-      // Filter out anything tagged with a LIVE modifier id (those are shown
-      // in the local effects section). Orphans (stale ids) intentionally
-      // pass through so the GM can spot them.
       for (const prefix of liveTagPrefixes) {
         if (src === prefix || src.startsWith(prefix + ':')) return false;
       }
-      return true;
+      // Keep only always-active. Missing activeWhen treated as always per
+      // Foundry behavior (defensive — WoD5e always writes activeWhen but
+      // legacy data or other sources may omit it).
+      const check = b.activeWhen?.check ?? 'always';
+      return check === 'always';
     });
+  }
+
+  /** Returns the conditional bonuses (activeWhen.check != 'always') for an
+   *  item, after own-push filtering. Used to render the "(N conditionals)"
+   *  badge. */
+  function conditionalsFor(itemId: string): FoundryItemBonus[] {
+    const item = advantageItems.find(it => it._id === itemId);
+    if (!item) return [];
+    const raw = (item.system as Record<string, unknown>)?.bonuses;
+    if (!Array.isArray(raw)) return [];
+    return (raw as FoundryItemBonus[]).filter(b => {
+      const src = b.source ?? '';
+      for (const prefix of liveTagPrefixes) {
+        if (src === prefix || src.startsWith(prefix + ':')) return false;
+      }
+      const check = b.activeWhen?.check ?? 'always';
+      return check !== 'always';
+    });
+  }
+
+  /** True when this materialized modifier is a saved Foundry override
+   *  (created via "Save as local override" — `foundryCapturedLabels`
+   *  non-empty AND advantage-bound). Drives the origin-marker asterisk
+   *  on the card so the GM can tell at a glance that the displayed data
+   *  comes from a saved local copy rather than a live read-through.
+   *  See spec §3.3.
+   */
+  function isSavedOverride(mod: CharacterModifier): boolean {
+    return mod.foundryCapturedLabels.length > 0 && mod.binding.kind === 'advantage';
   }
 
   // Build the card list per spec §8.1.
@@ -167,6 +201,43 @@
       name: virt.name,
       description: virt.description,
     });
+  }
+
+  /**
+   * Save-as-local-override action. Distinct from `materialize`:
+   *   - materialize: creates an empty modifier (no effects, no captured
+   *     labels) on first user engagement; subsequent edits build up local
+   *     effects from scratch.
+   *   - saveAsOverride: snapshots the current always-active bonuses on the
+   *     item into a CharacterModifier whose effects mirror the bonuses
+   *     AND whose foundryCapturedLabels record the source-label set.
+   *     Push then becomes surgical.
+   */
+  async function saveAsOverride(virt: VirtualCard): Promise<CharacterModifier> {
+    const sourceBonuses = bonusesFor(virt.item._id);
+    const effects: ModifierEffect[] = sourceBonuses.map(b => ({
+      kind: 'pool',
+      scope: null,
+      delta: b.value,
+      note: null,
+      paths: b.paths,
+    }));
+    const capturedLabels = sourceBonuses.map(b => b.source ?? '');
+    const created = await modifiers.add({
+      source: character.source,
+      sourceId: character.source_id,
+      name: virt.name,
+      description: virt.description,
+      effects,
+      binding: { kind: 'advantage', item_id: virt.item._id },
+      tags: [],
+      originTemplateId: null,
+      foundryCapturedLabels: capturedLabels,
+    });
+    // Flip is_active=true so the override is immediately applied in renders
+    // that consume active modifiers (active-effects summary, deltas, etc.).
+    await modifiers.setActive(created.id, true);
+    return created;
   }
 
   async function handleToggleActive(e: CardEntry): Promise<void> {
@@ -280,6 +351,7 @@
       binding: { kind: 'free' },
       tags: [],
       originTemplateId: null,
+      foundryCapturedLabels: [],
     });
   }
 
@@ -346,6 +418,7 @@
               isActive: false,
               isHidden: false,
               originTemplateId: null,
+              foundryCapturedLabels: [],
               createdAt: '',
               updatedAt: '',
             }
@@ -357,6 +430,11 @@
           : entry.mod.binding.kind === 'advantage'
             ? bonusesFor(entry.mod.binding.item_id)
             : []}
+        conditionalsSkipped={entry.kind === 'virtual'
+          ? conditionalsFor(entry.virt.item._id)
+          : entry.mod.binding.kind === 'advantage'
+            ? conditionalsFor(entry.mod.binding.item_id)
+            : []}
         onToggleActive={() => handleToggleActive(entry)}
         onHide={() => handleHide(entry)}
         onOpenEditor={(anchor) => openEditor(entry, anchor)}
@@ -367,6 +445,10 @@
         originTemplateName={entry.kind === 'materialized' && entry.mod.originTemplateId != null
           ? (statusTemplates.byId(entry.mod.originTemplateId)?.name ?? null)
           : null}
+        showOverride={entry.kind === 'materialized' ? isSavedOverride(entry.mod) : false}
+        onSaveAsOverride={entry.kind === 'virtual'
+          ? () => saveAsOverride(entry.virt).catch(err => console.error('[gm-screen] save-as-override failed:', err))
+          : undefined}
       />
     {/each}
     <button class="add-modifier" onclick={addFreeModifier}>+ Add modifier</button>

@@ -32,6 +32,9 @@ fn row_to_modifier(r: &sqlx::sqlite::SqliteRow) -> Result<CharacterModifier, Str
     let tags_json: String = r.get("tags_json");
     let tags: Vec<String> = serde_json::from_str(&tags_json)
         .map_err(|e| format!("db/modifier.list: tags deserialize: {e}"))?;
+    let captured_json: String = r.try_get("foundry_captured_labels_json").unwrap_or_else(|_| "[]".to_string());
+    let foundry_captured_labels: Vec<String> = serde_json::from_str(&captured_json)
+        .map_err(|e| format!("db/modifier.list: captured labels deserialize: {e}"))?;
     Ok(CharacterModifier {
         id: r.get("id"),
         source,
@@ -44,6 +47,7 @@ fn row_to_modifier(r: &sqlx::sqlite::SqliteRow) -> Result<CharacterModifier, Str
         is_active: r.get::<bool, _>("is_active"),
         is_hidden: r.get::<bool, _>("is_hidden"),
         origin_template_id: r.get("origin_template_id"),
+        foundry_captured_labels,
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),
     })
@@ -57,7 +61,7 @@ pub(crate) async fn db_list(
     let rows = sqlx::query(
         "SELECT id, source, source_id, name, description, effects_json,
                 binding_json, tags_json, is_active, is_hidden,
-                origin_template_id, created_at, updated_at
+                origin_template_id, foundry_captured_labels_json, created_at, updated_at
          FROM character_modifiers
          WHERE source = ? AND source_id = ?
          ORDER BY id ASC"
@@ -74,7 +78,7 @@ pub(crate) async fn db_list_all(pool: &SqlitePool) -> Result<Vec<CharacterModifi
     let rows = sqlx::query(
         "SELECT id, source, source_id, name, description, effects_json,
                 binding_json, tags_json, is_active, is_hidden,
-                origin_template_id, created_at, updated_at
+                origin_template_id, foundry_captured_labels_json, created_at, updated_at
          FROM character_modifiers
          ORDER BY id ASC"
     )
@@ -115,12 +119,14 @@ pub(crate) async fn db_add(
         .map_err(|e| format!("db/modifier.add: serialize binding: {e}"))?;
     let tags_json = serde_json::to_string(&input.tags)
         .map_err(|e| format!("db/modifier.add: serialize tags: {e}"))?;
+    let captured_labels_json = serde_json::to_string(&input.foundry_captured_labels)
+        .map_err(|e| format!("db/modifier.add: serialize captured labels: {e}"))?;
 
     let result = sqlx::query(
         "INSERT INTO character_modifiers
          (source, source_id, name, description, effects_json, binding_json, tags_json,
-          origin_template_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+          origin_template_id, foundry_captured_labels_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(source_to_str(&input.source))
     .bind(&input.source_id)
@@ -130,6 +136,7 @@ pub(crate) async fn db_add(
     .bind(&binding_json)
     .bind(&tags_json)
     .bind(input.origin_template_id)
+    .bind(&captured_labels_json)
     .execute(pool)
     .await
     .map_err(|e| format!("db/modifier.add: {e}"))?;
@@ -151,7 +158,7 @@ pub(crate) async fn db_get(pool: &SqlitePool, id: i64) -> Result<CharacterModifi
     let row = sqlx::query(
         "SELECT id, source, source_id, name, description, effects_json,
                 binding_json, tags_json, is_active, is_hidden,
-                origin_template_id, created_at, updated_at
+                origin_template_id, foundry_captured_labels_json, created_at, updated_at
          FROM character_modifiers WHERE id = ?"
     )
     .bind(id)
@@ -334,8 +341,9 @@ pub(crate) async fn db_materialize_advantage(
 
     let result = sqlx::query(
         "INSERT INTO character_modifiers
-         (source, source_id, name, description, effects_json, binding_json, tags_json)
-         VALUES (?, ?, ?, ?, '[]', ?, '[]')"
+         (source, source_id, name, description, effects_json, binding_json, tags_json,
+          foundry_captured_labels_json)
+         VALUES (?, ?, ?, ?, '[]', ?, '[]', '[]')"
     )
     .bind(source_to_str(source))
     .bind(source_id)
@@ -455,6 +463,7 @@ mod tests {
             binding: ModifierBinding::Free,
             tags: vec!["Social".to_string()],
             origin_template_id: None,
+            foundry_captured_labels: vec![],
         }
     }
 
@@ -664,6 +673,7 @@ mod tests {
             binding: ModifierBinding::Advantage { item_id: "item-y".into() },
             tags: vec!["combat".into()],
             origin_template_id: None,
+            foundry_captured_labels: vec![],
         };
         let added = db_add(&pool, new).await.unwrap();
         let loaded = get_modifier_by_id(&pool, added.id).await.unwrap();

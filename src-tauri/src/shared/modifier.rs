@@ -16,6 +16,13 @@ pub struct CharacterModifier {
     pub is_active: bool,
     pub is_hidden: bool,
     pub origin_template_id: Option<i64>,
+    /// Source labels (`bonus.source` strings) that this modifier "captured"
+    /// when it was created via "Save as local override". Non-empty marks
+    /// this row as a Foundry override → push becomes surgical-replace
+    /// (drops bonuses whose source ∈ this list before appending ours).
+    /// Empty = hand-rolled modifier with additive push semantics.
+    #[serde(default)]
+    pub foundry_captured_labels: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -69,6 +76,8 @@ pub struct NewCharacterModifier {
     pub binding: ModifierBinding,
     pub tags: Vec<String>,
     pub origin_template_id: Option<i64>,
+    #[serde(default)]
+    pub foundry_captured_labels: Vec<String>,
 }
 
 /// Patch shape for `update_character_modifier`. Active/hidden have dedicated
@@ -163,5 +172,68 @@ mod tests {
         assert_eq!(round_trip.len(), 4);
         assert_eq!(round_trip[3].kind, ModifierKind::Stat);
         assert_eq!(round_trip[3].paths, vec!["attributes.charisma".to_string()]);
+    }
+
+    #[test]
+    fn character_modifier_captured_labels_round_trip_json() {
+        let json = serde_json::json!({
+            "id": 7,
+            "source": "foundry",
+            "sourceId": "actor-x",
+            "name": "Resilience",
+            "description": "",
+            "effects": [],
+            "binding": { "kind": "advantage", "item_id": "merit-1" },
+            "tags": [],
+            "isActive": true,
+            "isHidden": false,
+            "originTemplateId": null,
+            "foundryCapturedLabels": ["Buff Modifier", "Fortify"],
+            "createdAt": "2026-05-12 00:00:00",
+            "updatedAt": "2026-05-12 00:00:00",
+        });
+        let m: CharacterModifier = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(m.foundry_captured_labels, vec!["Buff Modifier", "Fortify"]);
+        let round_trip = serde_json::to_value(&m).expect("serialize");
+        assert_eq!(round_trip["foundryCapturedLabels"], serde_json::json!(["Buff Modifier", "Fortify"]));
+    }
+
+    #[test]
+    fn character_modifier_missing_captured_labels_defaults_to_empty() {
+        // Legacy rows from before the migration / IPC payloads without the field.
+        let json = serde_json::json!({
+            "id": 1,
+            "source": "foundry",
+            "sourceId": "actor-x",
+            "name": "Legacy",
+            "description": "",
+            "effects": [],
+            "binding": { "kind": "free" },
+            "tags": [],
+            "isActive": false,
+            "isHidden": false,
+            "originTemplateId": null,
+            "createdAt": "2026-05-12 00:00:00",
+            "updatedAt": "2026-05-12 00:00:00",
+        });
+        let m: CharacterModifier = serde_json::from_value(json).expect("deserialize");
+        assert!(m.foundry_captured_labels.is_empty());
+    }
+
+    #[test]
+    fn new_character_modifier_captured_labels_round_trip_json() {
+        let json = serde_json::json!({
+            "source": "foundry",
+            "sourceId": "actor-x",
+            "name": "Resilience",
+            "description": "",
+            "effects": [],
+            "binding": { "kind": "advantage", "item_id": "merit-1" },
+            "tags": [],
+            "originTemplateId": null,
+            "foundryCapturedLabels": ["Buff Modifier"],
+        });
+        let n: NewCharacterModifier = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(n.foundry_captured_labels, vec!["Buff Modifier"]);
     }
 }

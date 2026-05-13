@@ -77,12 +77,50 @@ fn effect_to_bonus(
     }))
 }
 
-/// Filter existing bonuses (drop ones tagged as ours), then append `ours`.
-/// Player-added bonuses and bonuses from other modifiers are preserved.
-fn merge_bonuses(existing: &[Value], modifier_id: i64, ours: Vec<Value>) -> Vec<Value> {
+/// True iff the bonus's `source` matches one of the captured labels AND
+/// the bonus is `activeWhen.check == "always"`. Used by the surgical-push
+/// branch to identify which non-own bonuses to remove on push.
+///
+/// Conditional bonuses are preserved (untouched) — even if their label
+/// happens to be in `captured_labels`, they survive because the GM never
+/// captured a non-always bonus (the read-through walker filters those out).
+/// Belt-and-suspenders: the activeWhen check here defends against the
+/// edge case where a label was reused for both an always and a conditional
+/// bonus on the same item.
+fn is_captured(bonus: &Value, captured_labels: &[String]) -> bool {
+    if captured_labels.is_empty() {
+        return false;
+    }
+    let Some(source) = bonus.get("source").and_then(|v| v.as_str()) else {
+        return false;
+    };
+    if !captured_labels.iter().any(|label| label == source) {
+        return false;
+    }
+    let check = bonus
+        .get("activeWhen")
+        .and_then(|aw| aw.get("check"))
+        .and_then(|c| c.as_str())
+        .unwrap_or("always"); // missing activeWhen ⇒ treat as always
+    check == "always"
+}
+
+/// Filter existing bonuses, then append `ours`.
+///
+/// Always drops bonuses tagged as ours (`is_ours`). If `captured_labels` is
+/// non-empty (saved override path), ALSO drops bonuses where `is_captured`
+/// matches — i.e. the always-active player-added bonuses the override
+/// captured at save time. Player-added bonuses whose label is NOT in the
+/// captured set (e.g. added after the override was saved) are preserved.
+fn merge_bonuses(
+    existing: &[Value],
+    modifier_id: i64,
+    captured_labels: &[String],
+    ours: Vec<Value>,
+) -> Vec<Value> {
     let mut out: Vec<Value> = existing
         .iter()
-        .filter(|b| !is_ours(b, modifier_id))
+        .filter(|b| !is_ours(b, modifier_id) && !is_captured(b, captured_labels))
         .cloned()
         .collect();
     out.extend(ours);
@@ -198,7 +236,7 @@ pub(crate) async fn do_push_to_foundry(
         .unwrap_or_default();
 
     // 5. Merge and send.
-    let merged = merge_bonuses(&existing, m.id, new_bonuses.clone());
+    let merged = merge_bonuses(&existing, m.id, &m.foundry_captured_labels, new_bonuses.clone());
     let payload = crate::bridge::foundry::actions::actor::build_update_item_field(
         &m.source_id,
         &item_id,
@@ -306,7 +344,7 @@ mod tests {
             json!({"source": "GM Screen #5", "value": 9, "paths": []}),       // ours (no name suffix)
         ];
         let ours = vec![json!({"source": "GM Screen #5: A", "value": 99, "paths": ["new"]})];
-        let merged = merge_bonuses(&existing, 5, ours);
+        let merged = merge_bonuses(&existing, 5, &[], ours);
         assert_eq!(merged.len(), 4, "kept 3 non-ours + 1 new");
         assert!(merged.iter().any(|b| b["source"] == "Player Buff"));
         assert!(merged.iter().any(|b| b["source"] == "GM Screen #50: B"));
@@ -320,7 +358,7 @@ mod tests {
 
     #[test]
     fn merge_with_no_existing_bonuses_just_appends() {
-        let merged = merge_bonuses(&[], 1, vec![json!({"source": "GM Screen #1: X"})]);
+        let merged = merge_bonuses(&[], 1, &[], vec![json!({"source": "GM Screen #1: X"})]);
         assert_eq!(merged.len(), 1);
     }
 
@@ -328,10 +366,114 @@ mod tests {
     fn merge_idempotent_under_repeated_push() {
         let initial: Vec<Value> = vec![];
         let ours_v1 = vec![json!({"source": "GM Screen #2: X", "value": 1, "paths": ["a"]})];
-        let after_first = merge_bonuses(&initial, 2, ours_v1);
+        let after_first = merge_bonuses(&initial, 2, &[], ours_v1);
         let ours_v2 = vec![json!({"source": "GM Screen #2: X", "value": 1, "paths": ["a"]})];
-        let after_second = merge_bonuses(&after_first, 2, ours_v2);
+        let after_second = merge_bonuses(&after_first, 2, &[], ours_v2);
         assert_eq!(after_first, after_second, "re-push yields the same array");
+    }
+
+    #[test]
+    fn is_captured_matches_label_only_when_always_active() {
+        let labels = vec!["Buff Modifier".to_string()];
+
+        let always_match = json!({
+            "source": "Buff Modifier",
+            "value": 2,
+            "paths": ["attributes.strength"],
+            "activeWhen": { "check": "always", "path": "", "value": "" }
+        });
+        assert!(is_captured(&always_match, &labels), "always + matching label captured");
+
+        let conditional_match = json!({
+            "source": "Buff Modifier",
+            "value": 2,
+            "paths": ["attributes.strength"],
+            "activeWhen": { "check": "isEqual", "path": "hunger.value", "value": "5" }
+        });
+        assert!(!is_captured(&conditional_match, &labels), "conditional bonus not captured even if label matches");
+
+        let always_other_label = json!({
+            "source": "Frenzy Bonus",
+            "value": 1,
+            "paths": ["attributes.composure"],
+            "activeWhen": { "check": "always", "path": "", "value": "" }
+        });
+        assert!(!is_captured(&always_other_label, &labels), "non-matching label never captured");
+
+        let missing_active_when_treated_as_always = json!({
+            "source": "Buff Modifier",
+            "value": 2,
+            "paths": ["attributes.strength"]
+        });
+        assert!(is_captured(&missing_active_when_treated_as_always, &labels),
+                "missing activeWhen defaults to always (Foundry-side fallback)");
+    }
+
+    #[test]
+    fn is_captured_empty_labels_short_circuits() {
+        let bonus = json!({
+            "source": "Anything",
+            "value": 1,
+            "paths": [],
+            "activeWhen": { "check": "always", "path": "", "value": "" }
+        });
+        assert!(!is_captured(&bonus, &[]));
+    }
+
+    #[test]
+    fn merge_surgical_removes_captured_labels() {
+        let existing = vec![
+            json!({                                                 // captured player bonus — removed
+                "source": "Buff Modifier", "value": 2, "paths": ["attributes.strength"],
+                "activeWhen": { "check": "always", "path": "", "value": "" }
+            }),
+            json!({                                                 // new player bonus (not captured) — preserved
+                "source": "Frenzy Bonus", "value": 1, "paths": ["attributes.composure"],
+                "activeWhen": { "check": "always", "path": "", "value": "" }
+            }),
+            json!({                                                 // our prior push — removed
+                "source": "GM Screen #7: Override", "value": 3, "paths": ["attributes.strength"],
+                "activeWhen": { "check": "always", "path": "", "value": "" }
+            }),
+            json!({                                                 // captured-label conditional — preserved (activeWhen != always)
+                "source": "Buff Modifier", "value": 5, "paths": ["attributes.strength"],
+                "activeWhen": { "check": "isEqual", "path": "hunger.value", "value": "5" }
+            }),
+        ];
+        let labels = vec!["Buff Modifier".to_string()];
+        let ours = vec![json!({
+            "source": "GM Screen #7: Override", "value": 3, "paths": ["attributes.strength"],
+            "activeWhen": { "check": "always", "path": "", "value": "" }
+        })];
+        let merged = merge_bonuses(&existing, 7, &labels, ours);
+        assert_eq!(merged.len(), 3, "kept new-player + conditional + new ours");
+        assert!(merged.iter().any(|b| b["source"] == "Frenzy Bonus"));
+        assert!(merged.iter().any(|b| b["source"] == "Buff Modifier" && b["activeWhen"]["check"] == "isEqual"));
+        assert!(merged.iter().any(|b| b["source"] == "GM Screen #7: Override"));
+        assert!(!merged.iter().any(|b| b["source"] == "Buff Modifier" && b["activeWhen"]["check"] == "always"),
+                "captured always-active label was removed");
+    }
+
+    #[test]
+    fn merge_additive_when_no_captured_labels() {
+        // Empty captured_labels ⇒ behaves exactly like the legacy additive merge:
+        // only own-tagged bonuses removed, all player bonuses preserved.
+        let existing = vec![
+            json!({"source": "Player Buff", "value": 1, "paths": ["x"],
+                   "activeWhen": { "check": "always", "path": "", "value": "" }}),
+            json!({"source": "GM Screen #5: A", "value": 2, "paths": ["y"],
+                   "activeWhen": { "check": "always", "path": "", "value": "" }}),
+        ];
+        let ours = vec![json!({"source": "GM Screen #5: A", "value": 99, "paths": ["new"],
+                               "activeWhen": { "check": "always", "path": "", "value": "" }})];
+        let merged = merge_bonuses(&existing, 5, &[], ours);
+        assert_eq!(merged.len(), 2);
+        assert!(merged.iter().any(|b| b["source"] == "Player Buff"));
+        let ours_new = merged
+            .iter()
+            .find(|b| b["source"] == "GM Screen #5: A")
+            .unwrap();
+        assert_eq!(ours_new["value"], 99);
     }
 
     // --- Disconnect-guard integration test --------------------------------
@@ -430,6 +572,7 @@ mod tests {
             },
             tags: vec![],
             origin_template_id: None,
+            foundry_captured_labels: vec![],
         };
         let added = crate::db::modifier::db_add(&pool, new).await.unwrap();
 
