@@ -32,6 +32,13 @@ impl BridgeSource for FoundrySource {
                 let canonical = translate_roll::to_canonical_roll(&message);
                 return Ok(vec![InboundEvent::RollReceived(canonical)]);
             }
+            FoundryInbound::ItemDeleted { actor_id, item_id } => {
+                return Ok(vec![InboundEvent::ItemDeleted {
+                    source: crate::bridge::types::SourceKind::Foundry,
+                    source_id: actor_id,
+                    item_id,
+                }]);
+            }
         };
         let canonical: Vec<_> = actors.iter().map(translate::to_canonical).collect();
         Ok(vec![InboundEvent::CharactersUpdated(canonical)])
@@ -79,5 +86,33 @@ fn parse_value(s: &str) -> Value {
         Value::from(false)
     } else {
         Value::from(s)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bridge::source::InboundEvent;
+    use crate::bridge::types::SourceKind;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn item_deleted_inbound_produces_modifier_reap_event() {
+        let source = FoundrySource;
+        let msg = json!({
+            "type": "item_deleted",
+            "actor_id": "actor-a",
+            "item_id": "merit-1",
+        });
+        let events = source.handle_inbound(msg).await.expect("handles");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            InboundEvent::ItemDeleted { source, source_id, item_id } => {
+                assert_eq!(*source, SourceKind::Foundry);
+                assert_eq!(source_id, "actor-a");
+                assert_eq!(item_id, "merit-1");
+            }
+            other => panic!("expected ItemDeleted event, got {other:?}"),
+        }
     }
 }
