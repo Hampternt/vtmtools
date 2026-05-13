@@ -61,7 +61,7 @@ pub(crate) async fn db_list(
     let rows = sqlx::query(
         "SELECT id, source, source_id, name, description, effects_json,
                 binding_json, tags_json, is_active, is_hidden,
-                origin_template_id, created_at, updated_at
+                origin_template_id, foundry_captured_labels_json, created_at, updated_at
          FROM character_modifiers
          WHERE source = ? AND source_id = ?
          ORDER BY id ASC"
@@ -78,7 +78,7 @@ pub(crate) async fn db_list_all(pool: &SqlitePool) -> Result<Vec<CharacterModifi
     let rows = sqlx::query(
         "SELECT id, source, source_id, name, description, effects_json,
                 binding_json, tags_json, is_active, is_hidden,
-                origin_template_id, created_at, updated_at
+                origin_template_id, foundry_captured_labels_json, created_at, updated_at
          FROM character_modifiers
          ORDER BY id ASC"
     )
@@ -119,12 +119,14 @@ pub(crate) async fn db_add(
         .map_err(|e| format!("db/modifier.add: serialize binding: {e}"))?;
     let tags_json = serde_json::to_string(&input.tags)
         .map_err(|e| format!("db/modifier.add: serialize tags: {e}"))?;
+    let captured_labels_json = serde_json::to_string(&input.foundry_captured_labels)
+        .map_err(|e| format!("db/modifier.add: serialize captured labels: {e}"))?;
 
     let result = sqlx::query(
         "INSERT INTO character_modifiers
          (source, source_id, name, description, effects_json, binding_json, tags_json,
-          origin_template_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+          origin_template_id, foundry_captured_labels_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(source_to_str(&input.source))
     .bind(&input.source_id)
@@ -134,6 +136,7 @@ pub(crate) async fn db_add(
     .bind(&binding_json)
     .bind(&tags_json)
     .bind(input.origin_template_id)
+    .bind(&captured_labels_json)
     .execute(pool)
     .await
     .map_err(|e| format!("db/modifier.add: {e}"))?;
@@ -155,7 +158,7 @@ pub(crate) async fn db_get(pool: &SqlitePool, id: i64) -> Result<CharacterModifi
     let row = sqlx::query(
         "SELECT id, source, source_id, name, description, effects_json,
                 binding_json, tags_json, is_active, is_hidden,
-                origin_template_id, created_at, updated_at
+                origin_template_id, foundry_captured_labels_json, created_at, updated_at
          FROM character_modifiers WHERE id = ?"
     )
     .bind(id)
@@ -338,8 +341,9 @@ pub(crate) async fn db_materialize_advantage(
 
     let result = sqlx::query(
         "INSERT INTO character_modifiers
-         (source, source_id, name, description, effects_json, binding_json, tags_json)
-         VALUES (?, ?, ?, ?, '[]', ?, '[]')"
+         (source, source_id, name, description, effects_json, binding_json, tags_json,
+          foundry_captured_labels_json)
+         VALUES (?, ?, ?, ?, '[]', ?, '[]', '[]')"
     )
     .bind(source_to_str(source))
     .bind(source_id)
