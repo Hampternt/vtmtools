@@ -22,6 +22,7 @@ import type {
   PushReport,
   SourceKind,
 } from '../types';
+import { listen } from '@tauri-apps/api/event';
 
 let _list = $state<CharacterModifier[]>([]);
 let _loading = $state(false);
@@ -72,6 +73,15 @@ export const modifiers = {
     if (_initialized) return;
     _initialized = true;
     await refresh();
+    // Subscribe to backend-initiated row reaps (live deleteItem from Foundry).
+    // The event carries the exact ids to drop — no refetch needed. The store's
+    // long-standing "no auto-refetch on bridge state" invariant (see header
+    // comment) is preserved: this is an explicit cleanup signal, not a state
+    // diff. Spec §6.2 of
+    // docs/superpowers/specs/2026-05-13-gm-screen-live-data-priority-design.md.
+    void listen<{ ids: number[] }>('modifiers://rows-reaped', (e) => {
+      for (const id of e.payload.ids) dropRow(id);
+    });
   },
   async refresh(): Promise<void> { await refresh(); },
 
