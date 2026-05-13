@@ -32,6 +32,9 @@ fn row_to_modifier(r: &sqlx::sqlite::SqliteRow) -> Result<CharacterModifier, Str
     let tags_json: String = r.get("tags_json");
     let tags: Vec<String> = serde_json::from_str(&tags_json)
         .map_err(|e| format!("db/modifier.list: tags deserialize: {e}"))?;
+    let captured_json: String = r.try_get("foundry_captured_labels_json").unwrap_or_else(|_| "[]".to_string());
+    let foundry_captured_labels: Vec<String> = serde_json::from_str(&captured_json)
+        .map_err(|e| format!("db/modifier.list: captured labels deserialize: {e}"))?;
     Ok(CharacterModifier {
         id: r.get("id"),
         source,
@@ -44,6 +47,7 @@ fn row_to_modifier(r: &sqlx::sqlite::SqliteRow) -> Result<CharacterModifier, Str
         is_active: r.get::<bool, _>("is_active"),
         is_hidden: r.get::<bool, _>("is_hidden"),
         origin_template_id: r.get("origin_template_id"),
+        foundry_captured_labels,
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),
     })
@@ -455,6 +459,7 @@ mod tests {
             binding: ModifierBinding::Free,
             tags: vec!["Social".to_string()],
             origin_template_id: None,
+            foundry_captured_labels: vec![],
         }
     }
 
@@ -664,6 +669,7 @@ mod tests {
             binding: ModifierBinding::Advantage { item_id: "item-y".into() },
             tags: vec!["combat".into()],
             origin_template_id: None,
+            foundry_captured_labels: vec![],
         };
         let added = db_add(&pool, new).await.unwrap();
         let loaded = get_modifier_by_id(&pool, added.id).await.unwrap();

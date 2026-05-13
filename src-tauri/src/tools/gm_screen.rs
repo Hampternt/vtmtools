@@ -430,6 +430,7 @@ mod tests {
             },
             tags: vec![],
             origin_template_id: None,
+            foundry_captured_labels: vec![],
         };
         let added = crate::db::modifier::db_add(&pool, new).await.unwrap();
 
