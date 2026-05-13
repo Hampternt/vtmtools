@@ -356,6 +356,37 @@ pub(crate) async fn db_materialize_advantage(
     db_get(pool, result.last_insert_rowid()).await
 }
 
+/// Delete all advantage-bound modifier rows for `(source, source_id)` whose
+/// binding `item_id` matches. Returns the deleted row ids. Idempotent —
+/// no matches returns an empty Vec. Gated on `binding_json.kind = 'advantage'`
+/// so free-floating modifiers are never affected.
+///
+/// Triggered by the Foundry `item_deleted` wire shape from
+/// `vtmtools-bridge/scripts/translate.js` when a player or GM deletes a merit
+/// on the Foundry sheet — see spec §3.2.
+pub(crate) async fn db_delete_by_advantage_binding(
+    pool: &SqlitePool,
+    source: &SourceKind,
+    source_id: &str,
+    item_id: &str,
+) -> Result<Vec<i64>, String> {
+    let rows = sqlx::query(
+        "DELETE FROM character_modifiers
+         WHERE source = ? AND source_id = ?
+           AND json_extract(binding_json, '$.kind') = 'advantage'
+           AND json_extract(binding_json, '$.item_id') = ?
+         RETURNING id"
+    )
+    .bind(source_to_str(source))
+    .bind(source_id)
+    .bind(item_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("db/modifier.delete_by_advantage_binding: {e}"))?;
+
+    Ok(rows.iter().map(|r| r.get::<i64, _>("id")).collect())
+}
+
 #[tauri::command]
 pub async fn materialize_advantage_modifier(
     pool: tauri::State<'_, crate::DbState>,
@@ -712,5 +743,87 @@ mod tests {
         let back: crate::shared::modifier::ModifierEffect =
             serde_json::from_str(&json).unwrap();
         assert_eq!(back, new_shape);
+    }
+
+    #[tokio::test]
+    async fn delete_by_advantage_binding_returns_ids_for_matches() {
+        let pool = fresh_pool().await;
+        // Two advantage-bound rows on the same character pointing at item "merit-1".
+        sqlx::query(
+            r#"INSERT INTO character_modifiers
+               (source, source_id, name, binding_json)
+               VALUES ('foundry', 'actor-a', 'M1',
+                       '{"kind":"advantage","item_id":"merit-1"}'),
+                      ('foundry', 'actor-a', 'M2',
+                       '{"kind":"advantage","item_id":"merit-1"}')"#,
+        )
+        .execute(&pool).await.unwrap();
+
+        let ids = db_delete_by_advantage_binding(
+            &pool, &SourceKind::Foundry, "actor-a", "merit-1",
+        ).await.unwrap();
+
+        assert_eq!(ids.len(), 2, "both matching rows deleted");
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM character_modifiers"
+        ).fetch_one(&pool).await.unwrap();
+        assert_eq!(remaining, 0);
+    }
+
+    #[tokio::test]
+    async fn delete_by_advantage_binding_idempotent_when_no_match() {
+        let pool = fresh_pool().await;
+        let ids = db_delete_by_advantage_binding(
+            &pool, &SourceKind::Foundry, "actor-a", "merit-1",
+        ).await.unwrap();
+        assert!(ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_by_advantage_binding_does_not_delete_free_modifiers() {
+        let pool = fresh_pool().await;
+        sqlx::query(
+            r#"INSERT INTO character_modifiers
+               (source, source_id, name, binding_json)
+               VALUES ('foundry', 'actor-a', 'FreeMod', '{"kind":"free"}')"#,
+        )
+        .execute(&pool).await.unwrap();
+
+        // Even calling with a junk item_id on the same actor: free rows untouched.
+        let ids = db_delete_by_advantage_binding(
+            &pool, &SourceKind::Foundry, "actor-a", "merit-1",
+        ).await.unwrap();
+        assert!(ids.is_empty());
+
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM character_modifiers"
+        ).fetch_one(&pool).await.unwrap();
+        assert_eq!(remaining, 1, "free modifier still present");
+    }
+
+    #[tokio::test]
+    async fn delete_by_advantage_binding_scoped_to_source_and_source_id() {
+        let pool = fresh_pool().await;
+        sqlx::query(
+            r#"INSERT INTO character_modifiers
+               (source, source_id, name, binding_json)
+               VALUES ('foundry', 'actor-a', 'OnA',
+                       '{"kind":"advantage","item_id":"merit-1"}'),
+                      ('foundry', 'actor-b', 'OnB',
+                       '{"kind":"advantage","item_id":"merit-1"}'),
+                      ('roll20',  'actor-a', 'R20',
+                       '{"kind":"advantage","item_id":"merit-1"}')"#,
+        )
+        .execute(&pool).await.unwrap();
+
+        let ids = db_delete_by_advantage_binding(
+            &pool, &SourceKind::Foundry, "actor-a", "merit-1",
+        ).await.unwrap();
+        assert_eq!(ids.len(), 1, "only the (foundry, actor-a) row");
+
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM character_modifiers"
+        ).fetch_one(&pool).await.unwrap();
+        assert_eq!(remaining, 2, "actor-b and roll20 rows untouched");
     }
 }
