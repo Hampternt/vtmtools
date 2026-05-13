@@ -116,28 +116,15 @@
     });
   }
 
-  /** Stable string key for a (value, paths) tuple, used for unordered set
-   *  equality. `paths` ordering within one tuple IS significant (spec §3.3).
-   */
-  function effectKey(value: number, paths: string[]): string {
-    return JSON.stringify([value, paths]);
-  }
-
-  /** True when this materialized modifier is a Foundry override
-   *  (foundryCapturedLabels non-empty) AND its Pool effects don't match
-   *  the item's current always-active live bonuses (own-pushes excluded).
+  /** True when this materialized modifier is a saved Foundry override
+   *  (created via "Save as local override" — `foundryCapturedLabels`
+   *  non-empty AND advantage-bound). Drives the origin-marker asterisk
+   *  on the card so the GM can tell at a glance that the displayed data
+   *  comes from a saved local copy rather than a live read-through.
    *  See spec §3.3.
    */
-  function isOverrideOutOfSync(mod: CharacterModifier): boolean {
-    if (mod.foundryCapturedLabels.length === 0) return false;
-    if (mod.binding.kind !== 'advantage') return false;
-    const live = bonusesFor(mod.binding.item_id);
-    const liveSet = new Set(live.map(b => effectKey(b.value, b.paths)));
-    const saved = mod.effects.filter(e => e.kind === 'pool');
-    const savedSet = new Set(saved.map(e => effectKey(e.delta ?? 0, e.paths ?? [])));
-    if (liveSet.size !== savedSet.size) return true;
-    for (const k of liveSet) if (!savedSet.has(k)) return true;
-    return false;
+  function isSavedOverride(mod: CharacterModifier): boolean {
+    return mod.foundryCapturedLabels.length > 0 && mod.binding.kind === 'advantage';
   }
 
   // Build the card list per spec §8.1.
@@ -458,7 +445,7 @@
         originTemplateName={entry.kind === 'materialized' && entry.mod.originTemplateId != null
           ? (statusTemplates.byId(entry.mod.originTemplateId)?.name ?? null)
           : null}
-        showMismatch={entry.kind === 'materialized' ? isOverrideOutOfSync(entry.mod) : false}
+        showOverride={entry.kind === 'materialized' ? isSavedOverride(entry.mod) : false}
         onSaveAsOverride={entry.kind === 'virtual'
           ? () => saveAsOverride(entry.virt).catch(err => console.error('[gm-screen] save-as-override failed:', err))
           : undefined}

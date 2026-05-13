@@ -43,12 +43,12 @@
      */
     originTemplateName?: string | null;
     /**
-     * True when this materialized modifier is a Foundry override
-     * (foundryCapturedLabels non-empty) whose effects don't match the
-     * item's current always-active live bonuses. Drives the yellow
-     * mismatch asterisk.
+     * True when this materialized modifier is a saved Foundry override
+     * (created via "Save as local override"). Drives the yellow origin
+     * asterisk that signals "this card's data comes from a saved local
+     * copy that supersedes the live Foundry read-through".
      */
-    showMismatch?: boolean;
+    showOverride?: boolean;
     /**
      * "Save as local override" handler. When set (i.e. on virtual cards),
      * renders the save-as-override button. Clicking creates a
@@ -65,7 +65,7 @@
     canReset = false, onReset,
     onToggleActive, onOpenEditor, onHide,
     originTemplateName = null,
-    showMismatch = false,
+    showOverride = false,
     onSaveAsOverride,
   }: Props = $props();
 
@@ -101,7 +101,7 @@
 >
   <div class="head">
     <span class="name" title={modifier.name}>
-      {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}{#if showMismatch}<span class="mismatch-mark" title="Saved override differs from current Foundry bonus">*</span>{/if}
+      {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}{#if showOverride}<span class="override-mark" title="Saved local override — this card's data comes from your saved copy, which supersedes the live Foundry read-through">*</span>{/if}
       {#if isStale}<span class="stale" title="Source merit removed">stale</span>{/if}
     </span>
     <button
@@ -266,7 +266,7 @@
     white-space: nowrap;
   }
   .virtual-mark { color: var(--accent-amber); margin-left: 0.15rem; }
-  .mismatch-mark {
+  .override-mark {
     color: var(--accent-amber);
     margin-left: 0.15rem;
     font-weight: 700;
