@@ -622,6 +622,7 @@ disabled for the session; Roll20 is unaffected.
 | `bridge://foundry/disconnected` | none | Foundry module closes wss connection |
 | `bridge://characters-updated` | `Vec<CanonicalCharacter>` | Any source pushed updated characters; carries the merged cache across all sources |
 | `bridge://roll-received` | `CanonicalRoll` | Foundry source decoded a `roll_result` chat message into a canonical roll; pushed into bridge state ring (capacity 200, dedup by `source_id`) and emitted in one accept-loop arm |
+| `modifiers://rows-reaped` | `{ ids: number[] }` | Backend reaped advantage-bound `character_modifiers` rows after a Foundry `deleteItem` hook (via `item_deleted` wire); frontend modifier store drops the listed ids |
 
 ### Svelte cross-tool pub/sub
 
