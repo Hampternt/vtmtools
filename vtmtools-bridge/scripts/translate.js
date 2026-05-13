@@ -53,3 +53,50 @@ export function hookActorChanges(socket) {
     });
   }
 }
+
+export function hookItemChanges(socket) {
+  for (const ev of ["createItem", "updateItem", "deleteItem"]) {
+    Hooks.on(ev, (item) => {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      const actor = item?.parent;
+      // Skip world-directory items (parent === null) and the theoretical
+      // case of an item embedded somewhere other than an Actor.
+      if (!actor || actor.documentName !== "Actor") return;
+      try {
+        socket.send(JSON.stringify({
+          type: "actor_update",
+          actor: actorToWire(actor),
+        }));
+      } catch (e) {
+        console.warn(`[${MODULE_ID}] failed to push ${ev}:`, e);
+      }
+    });
+  }
+}
+
+export function hookEffectChanges(socket) {
+  for (const ev of ["createActiveEffect", "updateActiveEffect", "deleteActiveEffect"]) {
+    Hooks.on(ev, (effect) => {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      // Effect parent can be either an Actor (actor-level effect) or an Item
+      // (item-attached effect, in which case the Actor is the item's parent).
+      // Skip world-level effects and any other unexpected attachment.
+      const parent = effect?.parent;
+      let actor = null;
+      if (parent?.documentName === "Actor") {
+        actor = parent;
+      } else if (parent?.documentName === "Item" && parent.parent?.documentName === "Actor") {
+        actor = parent.parent;
+      }
+      if (!actor) return;
+      try {
+        socket.send(JSON.stringify({
+          type: "actor_update",
+          actor: actorToWire(actor),
+        }));
+      } catch (e) {
+        console.warn(`[${MODULE_ID}] failed to push ${ev}:`, e);
+      }
+    });
+  }
+}
