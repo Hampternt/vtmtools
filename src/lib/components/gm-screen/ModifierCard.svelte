@@ -10,8 +10,6 @@
     modifier: CharacterModifier;
     /** Marks an advantage-derived card not yet materialized — UI shows asterisk */
     isVirtual?: boolean;
-    /** Marks a stale card whose source merit was deleted — UI shows badge */
-    isStale?: boolean;
     /**
      * Sheet-attached bonuses (system.bonuses[]) from the source Foundry
      * feature item, when the card is advantage-bound. Distinct from
@@ -59,7 +57,7 @@
   }
 
   let {
-    modifier, isVirtual = false, isStale = false, bonuses = [],
+    modifier, isVirtual = false, bonuses = [],
     conditionalsSkipped = [],
     canPush = false, onPush,
     canReset = false, onReset,
@@ -102,7 +100,6 @@
   <div class="head">
     <span class="name" title={modifier.name}>
       {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}{#if showOverride}<span class="override-mark" title="Saved local override — this card's data comes from your saved copy, which supersedes the live Foundry read-through">*</span>{/if}
-      {#if isStale}<span class="stale" title="Source merit removed">stale</span>{/if}
     </span>
     <button
       bind:this={cogEl}
@@ -272,7 +269,6 @@
     font-weight: 700;
     cursor: help;
   }
-  .stale { font-size: 0.65rem; color: var(--accent-amber); margin-left: 0.4rem; }
   .origin {
     margin: 0;
     font-size: 0.6rem;
