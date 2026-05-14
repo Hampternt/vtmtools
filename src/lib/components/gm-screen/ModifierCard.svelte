@@ -189,6 +189,22 @@
   });
 
   let dragDisabled = $derived(isVirtual);
+
+  // Static overflow heuristic (spec §6.2) — count every body element that
+  // renders a line, including the conditional ones. Tune the threshold if
+  // cards routinely under- or over-pill in practice.
+  let bodyLineCount = $derived.by(() => {
+    let n = 1; // .card-name
+    if (originTemplateName) n += 1;
+    n += bonuses.length;
+    if (conditionalsSkipped.length > 0) n += 1;
+    n += Math.max(modifier.effects.length, 1); // effects (or "(no effect)" placeholder)
+    if (modifier.tags.length > 0) n += 1;
+    return n;
+  });
+  const OVERFLOW_THRESHOLD = 5;
+  let hasOverflow = $derived(bodyLineCount > OVERFLOW_THRESHOLD);
+  let hiddenCount = $derived(Math.max(0, bodyLineCount - OVERFLOW_THRESHOLD));
 </script>
 
 <div
@@ -253,6 +269,15 @@
         </div>
       {/if}
     </div>
+  {#if hasOverflow}
+    <button
+      type="button"
+      class="overflow-pill"
+      title="Open full card"
+      aria-label="Open full card"
+      onclick={(e) => { e.stopPropagation(); if (cardEl) onOpenEditor(cardEl); }}
+    >+{hiddenCount} <span class="glyph">⤢</span></button>
+  {/if}
   <CardContextMenu open={ctxOpen} anchor={ctxAnchor} actions={cardActions} onClose={closeCtx} />
 </div>
 
@@ -426,6 +451,30 @@
   }
   .tag { color: var(--text-muted); }
 
+  .overflow-pill {
+    position: absolute;
+    bottom: 0.3rem;
+    right: 0.5rem;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-faint);
+    color: var(--text-primary);
+    font-size: 0.6rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    cursor: pointer;
+    z-index: 2;
+    transition: background 120ms ease, border-color 120ms ease;
+    font-family: inherit;
+  }
+  .overflow-pill:hover {
+    background: var(--accent);
+    border-color: var(--accent-bright);
+  }
+  .overflow-pill .glyph {
+    margin-left: 0.2rem;
+    opacity: 0.7;
+  }
+
   .card-body {
     display: flex;
     flex-direction: column;
@@ -434,10 +483,13 @@
     min-width: 0;
     /* min-height: 0 overrides the default `min-height: auto` on flex children,
        which would otherwise let content (tags, many bonuses) grow past the
-       card-body's flex allocation. Combined with overflow: hidden here so
-       any excess clips inside card-body. */
+       card-body's flex allocation. Combined with overflow: hidden here so any
+       excess clips inside card-body rather than displacing the card boundary. */
     min-height: 0;
     overflow: hidden;
+    -webkit-mask-image: linear-gradient(180deg, black 80%, transparent);
+            mask-image: linear-gradient(180deg, black 80%, transparent);
+    cursor: pointer;
   }
 
   .modifier-card[data-zone="situational"] {
