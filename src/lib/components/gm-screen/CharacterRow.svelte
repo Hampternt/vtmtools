@@ -9,6 +9,8 @@
   import ModifierEffectEditor from './ModifierEffectEditor.svelte';
   import RollDispatcherPopover from './RollDispatcherPopover.svelte';
   import ActiveEffectsSummary from './ActiveEffectsSummary.svelte';
+  import DropZone from '$lib/components/dnd/DropZone.svelte';
+  import type { DropTarget } from '$lib/dnd/types';
 
   interface Props {
     character: BridgeCharacter;
@@ -16,6 +18,13 @@
     showHidden: boolean;
   }
   let { character, activeFilterTags, showHidden }: Props = $props();
+
+  // DnD drop targets — one per zone, carrying the character so cross-row
+  // moves (v2) can compare source.character to target.character. v1 only
+  // emits move-zone actions (same-row); cross-row drops still register a
+  // target but the matrix rejects them.
+  let characterTarget = $derived<DropTarget>({ kind: 'character-zone', character });
+  let situationalTarget = $derived<DropTarget>({ kind: 'situational-zone', character });
 
   // Editor popover state — anchored to the cog via getBoundingClientRect()
   // (spec §7.3 "anchored to the cog itself, not a modal"). popoverPos uses
@@ -472,27 +481,31 @@
   <div class="zone-stack">
     <div class="zone-column" data-zone="character">
       <div class="zone-label">Character</div>
-      <div
-        class="modifier-row"
-        style="--cards: {characterCards.length};"
-      >
-        {#each characterCards as entry, i (entry.kind === 'virtual' ? `v-${entry.virt.item._id}` : `m-${entry.mod.id}`)}
-          {@render renderCard(entry)}
-        {/each}
-        <button class="add-modifier" onclick={() => addFreeModifier('character')}>+ Add modifier</button>
-      </div>
+      <DropZone target={characterTarget}>
+        <div
+          class="modifier-row"
+          style="--cards: {characterCards.length};"
+        >
+          {#each characterCards as entry, i (entry.kind === 'virtual' ? `v-${entry.virt.item._id}` : `m-${entry.mod.id}`)}
+            {@render renderCard(entry)}
+          {/each}
+          <button class="add-modifier" onclick={() => addFreeModifier('character')}>+ Add modifier</button>
+        </div>
+      </DropZone>
     </div>
     <div class="zone-column" data-zone="situational">
       <div class="zone-label">Situational</div>
-      <div
-        class="modifier-row"
-        style="--cards: {situationalCards.length};"
-      >
-        {#each situationalCards as entry, i (entry.kind === 'virtual' ? `v-${entry.virt.item._id}` : `m-${entry.mod.id}`)}
-          {@render renderCard(entry)}
-        {/each}
-        <button class="add-modifier" onclick={() => addFreeModifier('situational')}>+ Add modifier</button>
-      </div>
+      <DropZone target={situationalTarget}>
+        <div
+          class="modifier-row"
+          style="--cards: {situationalCards.length};"
+        >
+          {#each situationalCards as entry, i (entry.kind === 'virtual' ? `v-${entry.virt.item._id}` : `m-${entry.mod.id}`)}
+            {@render renderCard(entry)}
+          {/each}
+          <button class="add-modifier" onclick={() => addFreeModifier('situational')}>+ Add modifier</button>
+        </div>
+      </DropZone>
     </div>
   </div>
   </div>

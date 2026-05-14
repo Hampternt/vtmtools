@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { CharacterModifier, ModifierEffect, FoundryItemBonus } from '../../../types';
+  import DragSource from '../dnd/DragSource.svelte';
+  import type { DragSource as DragSourceType } from '../../dnd/types';
 
   interface Props {
     /**
@@ -98,6 +100,16 @@
     const stats = b.paths.map(prettyPath).join(', ');
     return stats ? `${sign}${b.value} ${stats}` : `${sign}${b.value}`;
   }
+
+  // DnD pickup source. Virtual cards (id=0) are pickup-disabled — they have
+  // no DB row yet, so emitting a DragSource pointing at id=0 would confuse
+  // the matrix. The GM materializes first (toggle / cog) before reshuffling.
+  let dragSource = $derived.by((): DragSourceType => {
+    if (modifier.binding.kind === 'advantage') return { kind: 'advantage', mod: modifier };
+    return { kind: 'free-mod', mod: modifier };
+  });
+
+  let dragDisabled = $derived(isVirtual);
 </script>
 
 <div
@@ -106,59 +118,61 @@
   data-hidden={modifier.isHidden ? 'true' : 'false'}
   data-zone={modifier.zone}
 >
-  <div class="card-body">
-    {#if modifier.zone === 'situational'}
-      <span class="zone-chip" aria-label="Situational modifier">Situational</span>
-    {/if}
-    <div class="head">
-      <span class="name" title={modifier.name}>
-        {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}{#if showOverride}<span class="override-mark" title="Saved local override — this card's data comes from your saved copy, which supersedes the live Foundry read-through">*</span>{/if}
-      </span>
-      <button
-        bind:this={cogEl}
-        class="cog"
-        title="Edit effects"
-        onclick={() => cogEl && onOpenEditor(cogEl)}
-      >⚙</button>
-    </div>
-    {#if originTemplateName}
-      <p class="origin">from "{originTemplateName}"</p>
-    {/if}
-    {#if bonuses.length > 0}
-      <div class="bonuses">
-        {#each bonuses as b}
-          <p class="bonus" title={`${summarizeBonus(b)}${b.source ? ' — ' + b.source : ''}`}>
-            <span class="bonus-value">{summarizeBonus(b)}</span>
-            {#if b.source}<span class="bonus-source">{b.source}</span>{/if}
-          </p>
-        {/each}
+  <DragSource source={dragSource} disabled={dragDisabled}>
+    <div class="card-body">
+      {#if modifier.zone === 'situational'}
+        <span class="zone-chip" aria-label="Situational modifier">Situational</span>
+      {/if}
+      <div class="head">
+        <span class="name" title={modifier.name}>
+          {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}{#if showOverride}<span class="override-mark" title="Saved local override — this card's data comes from your saved copy, which supersedes the live Foundry read-through">*</span>{/if}
+        </span>
+        <button
+          bind:this={cogEl}
+          class="cog"
+          title="Edit effects"
+          onclick={() => cogEl && onOpenEditor(cogEl)}
+        >⚙</button>
       </div>
-    {/if}
-    {#if conditionalsSkipped.length > 0}
-      <p
-        class="conditionals-badge"
-        title={conditionalsSkipped
-          .map(b => `${b.source ?? '(unnamed)'} — ${b.activeWhen?.check ?? '?'}`)
-          .join('\n')}
-      >
-        ({conditionalsSkipped.length} conditional{conditionalsSkipped.length === 1 ? '' : 's'})
-      </p>
-    {/if}
-    <div class="effects">
-      {#if modifier.effects.length === 0}
-        <p class="no-effect">(no effect)</p>
-      {:else}
-        {#each modifier.effects as e}
-          <p class="effect" title={summarize(e)}>{summarize(e)}</p>
-        {/each}
+      {#if originTemplateName}
+        <p class="origin">from "{originTemplateName}"</p>
+      {/if}
+      {#if bonuses.length > 0}
+        <div class="bonuses">
+          {#each bonuses as b}
+            <p class="bonus" title={`${summarizeBonus(b)}${b.source ? ' — ' + b.source : ''}`}>
+              <span class="bonus-value">{summarizeBonus(b)}</span>
+              {#if b.source}<span class="bonus-source">{b.source}</span>{/if}
+            </p>
+          {/each}
+        </div>
+      {/if}
+      {#if conditionalsSkipped.length > 0}
+        <p
+          class="conditionals-badge"
+          title={conditionalsSkipped
+            .map(b => `${b.source ?? '(unnamed)'} — ${b.activeWhen?.check ?? '?'}`)
+            .join('\n')}
+        >
+          ({conditionalsSkipped.length} conditional{conditionalsSkipped.length === 1 ? '' : 's'})
+        </p>
+      {/if}
+      <div class="effects">
+        {#if modifier.effects.length === 0}
+          <p class="no-effect">(no effect)</p>
+        {:else}
+          {#each modifier.effects as e}
+            <p class="effect" title={summarize(e)}>{summarize(e)}</p>
+          {/each}
+        {/if}
+      </div>
+      {#if modifier.tags.length > 0}
+        <div class="tags">
+          {#each modifier.tags as t}<span class="tag">#{t}</span>{/each}
+        </div>
       {/if}
     </div>
-    {#if modifier.tags.length > 0}
-      <div class="tags">
-        {#each modifier.tags as t}<span class="tag">#{t}</span>{/each}
-      </div>
-    {/if}
-  </div>
+  </DragSource>
   <div class="foot">
     <button
       class="toggle"
@@ -261,6 +275,24 @@
   .modifier-card:has(+ :global(.modifier-card:hover))                                                                       { --shift-x: calc(var(--card-shift-delta) * -3); }
   .modifier-card:has(+ :global(.modifier-card) + :global(.modifier-card:hover))                                             { --shift-x: calc(var(--card-shift-delta) * -2); }
   .modifier-card:has(+ :global(.modifier-card) + :global(.modifier-card) + :global(.modifier-card:hover))                   { --shift-x: calc(var(--card-shift-delta) * -1); }
+
+  /* Suppress the hover lift + box-shadow + neighbour-shift cascade while a
+     DnD pickup is held (ancestor toggled by GmScreen.svelte). Cursor sweep
+     across the row during a pickup must not trigger the hover animation.
+     The `!important` is bounded to .dnd-active so it cannot leak. */
+  :global(.dnd-active) .modifier-card:hover {
+    transform: translateX(calc(var(--base-x) + var(--shift-x))) !important;
+    box-shadow: none !important;
+    z-index: calc(100 - var(--distance));
+  }
+  :global(.dnd-active) .modifier-card:hover + :global(.modifier-card),
+  :global(.dnd-active) .modifier-card:hover + :global(.modifier-card) + :global(.modifier-card),
+  :global(.dnd-active) .modifier-card:hover + :global(.modifier-card) + :global(.modifier-card) + :global(.modifier-card),
+  :global(.dnd-active) .modifier-card:has(+ :global(.modifier-card:hover)),
+  :global(.dnd-active) .modifier-card:has(+ :global(.modifier-card) + :global(.modifier-card:hover)),
+  :global(.dnd-active) .modifier-card:has(+ :global(.modifier-card) + :global(.modifier-card) + :global(.modifier-card:hover)) {
+    --shift-x: 0rem !important;
+  }
 
   .modifier-card[data-active="true"] {
     border-color: var(--accent-bright);

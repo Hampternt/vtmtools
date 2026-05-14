@@ -7,6 +7,9 @@
   import TagFilterBar from '$lib/components/gm-screen/TagFilterBar.svelte';
   import CharacterRow from '$lib/components/gm-screen/CharacterRow.svelte';
   import StatusPaletteDock from '$lib/components/gm-screen/StatusPaletteDock.svelte';
+  import HeldCardOverlay from '$lib/components/dnd/HeldCardOverlay.svelte';
+  import DropMenu from '$lib/components/dnd/DropMenu.svelte';
+  import { dndStore } from '$lib/dnd/store.svelte';
   import type { BridgeCharacter, SourceKind } from '../types';
 
   onMount(() => {
@@ -62,9 +65,52 @@
       .map(savedAsBridge);
     return [...live, ...savedOnly];
   });
+
+  // Drives the .dnd-active ancestor flag — ModifierCard CSS keys off this
+  // to suppress hover transforms during a pickup, and we use it to swap
+  // the cursor to grabbing.
+  let dndActive = $derived(dndStore.held !== null);
+
+  // Global cleanup listeners — install only while a pickup is held, tear
+  // down on idle. Cleanup edges: Esc / right-click / window blur /
+  // pointercancel / click-outside-drop-zone. See spec §"Cleanup edges".
+  $effect(() => {
+    if (!dndStore.held) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') dndStore.cancel();
+    };
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      dndStore.cancel();
+    };
+    const onBlur = () => dndStore.cancel();
+    const onPointerCancel = () => dndStore.cancel();
+    const onGlobalDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      // DropZone's pointerdown stops propagation, so this only fires for
+      // clicks outside any drop zone — cancel the pickup.
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest('.dnd-drop-zone')) return;
+      dndStore.cancel();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('contextmenu', onContextMenu);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('pointercancel', onPointerCancel);
+    window.addEventListener('pointerdown', onGlobalDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('contextmenu', onContextMenu);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('pointercancel', onPointerCancel);
+      window.removeEventListener('pointerdown', onGlobalDown);
+    };
+  });
 </script>
 
-<div class="gm-screen">
+<div class="gm-screen" class:dnd-active={dndActive}>
   <header class="title-bar">
     <h1>🛡 GM Screen</h1>
     <div class="toggles">
@@ -144,6 +190,9 @@
 
     <StatusPaletteDock {focusedCharacter} />
   </div>
+
+  <HeldCardOverlay />
+  <DropMenu />
 </div>
 
 <style>
@@ -192,4 +241,14 @@
     font-size: 0.8rem;
   }
   .meta { color: var(--text-muted); font-size: 0.7rem; font-family: monospace; }
+
+  /* During a DnD pickup, every descendant cursor reads as grabbing so the
+     user sees a consistent held state across hovering anything in the
+     screen. !important wins over per-element cursor styles. */
+  .gm-screen.dnd-active {
+    cursor: grabbing;
+  }
+  .gm-screen.dnd-active * {
+    cursor: grabbing !important;
+  }
 </style>
