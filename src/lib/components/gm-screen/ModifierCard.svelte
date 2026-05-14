@@ -414,6 +414,15 @@
     white-space: nowrap;
   }
 
+  /* Narrow-width adaptation. The .modifier-row declares container-type
+     in CharacterRow.svelte; this rule fires when the card's container
+     (the row) is ≤ 60rem wide, which is when card-width is at or near
+     the clamp() floor. The 60rem threshold corresponds to roughly 4
+     cards at 9rem + gaps; tune if cards feel cramped at typical widths. */
+  @container modrow (max-width: 60rem) {
+    .bonus-source { display: none; }
+  }
+
   .conditionals-badge {
     margin: 0;
     font-size: 0.6rem;
