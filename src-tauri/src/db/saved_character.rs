@@ -353,6 +353,136 @@ pub async fn patch_saved_field(
     db_patch_field(&pool.0, id, &name, &value).await
 }
 
+/// Result counters returned by `db_reconcile_vtt_presence`.
+#[derive(Debug, Default)]
+pub struct ReconcileStats {
+    /// Rows where `deleted_in_vtt_at` was newly set (was NULL → now non-NULL,
+    /// or refreshed from a prior timestamp — both count).
+    pub stamped: u64,
+    /// Rows where `deleted_in_vtt_at` was cleared (was non-NULL → now NULL).
+    pub cleared: u64,
+}
+
+/// Set `deleted_in_vtt_at = datetime('now')` for the saved record matching
+/// `(source, source_id)`. Idempotent — re-stamps to the latest timestamp
+/// if already set. Returns `Ok(true)` if a row was updated, `Ok(false)`
+/// if no row matched. Called from `bridge::accept_loop` on
+/// `CharacterRemoved` events.
+pub async fn db_mark_deleted_in_vtt(
+    pool: &SqlitePool,
+    source: SourceKind,
+    source_id: &str,
+) -> Result<bool, String> {
+    let result = sqlx::query(
+        "UPDATE saved_characters
+            SET deleted_in_vtt_at = datetime('now')
+          WHERE source = ? AND source_id = ?"
+    )
+    .bind(source_to_str(&source))
+    .bind(source_id)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/saved_character.mark_deleted_in_vtt: {e}"))?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Set `deleted_in_vtt_at = NULL` for the saved record matching
+/// `(source, source_id)`. No-op if already NULL or row absent. Returns
+/// `Ok(true)` if a row was updated. Called from `bridge::accept_loop`
+/// on `CharacterUpdated` events.
+pub async fn db_clear_deleted_in_vtt(
+    pool: &SqlitePool,
+    source: SourceKind,
+    source_id: &str,
+) -> Result<bool, String> {
+    let result = sqlx::query(
+        "UPDATE saved_characters
+            SET deleted_in_vtt_at = NULL
+          WHERE source = ? AND source_id = ?
+            AND deleted_in_vtt_at IS NOT NULL"
+    )
+    .bind(source_to_str(&source))
+    .bind(source_id)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/saved_character.clear_deleted_in_vtt: {e}"))?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Foundry-only world-scoped reconciliation. For saved rows with
+/// `source = 'foundry' AND foundry_world = foundry_world`:
+///   - clear `deleted_in_vtt_at` if `source_id` is in `present_source_ids`
+///   - set `deleted_in_vtt_at = datetime('now')` otherwise
+/// One transaction. Rows with NULL `foundry_world` are skipped (SQL `=`
+/// excludes NULL — legacy / world-less saves are exempt).
+///
+/// SQLite's `WHERE col NOT IN ()` is a syntax error; the function
+/// branches on `present_source_ids.is_empty()` to skip the clear-step
+/// and run only the stamp-step in that case.
+pub async fn db_reconcile_vtt_presence(
+    pool: &SqlitePool,
+    foundry_world: &str,
+    present_source_ids: &[String],
+) -> Result<ReconcileStats, String> {
+    let mut tx = pool.begin().await
+        .map_err(|e| format!("db/saved_character.reconcile_vtt_presence: begin: {e}"))?;
+
+    let mut stats = ReconcileStats::default();
+
+    if present_source_ids.is_empty() {
+        let result = sqlx::query(
+            "UPDATE saved_characters
+                SET deleted_in_vtt_at = datetime('now')
+              WHERE source = 'foundry'
+                AND foundry_world = ?
+                AND deleted_in_vtt_at IS NULL"
+        )
+        .bind(foundry_world)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("db/saved_character.reconcile_vtt_presence: stamp-all: {e}"))?;
+        stats.stamped = result.rows_affected();
+    } else {
+        let placeholders = vec!["?"; present_source_ids.len()].join(",");
+
+        let clear_sql = format!(
+            "UPDATE saved_characters
+                SET deleted_in_vtt_at = NULL
+              WHERE source = 'foundry'
+                AND foundry_world = ?
+                AND source_id IN ({placeholders})
+                AND deleted_in_vtt_at IS NOT NULL"
+        );
+        let mut clear_q = sqlx::query(&clear_sql).bind(foundry_world);
+        for id in present_source_ids {
+            clear_q = clear_q.bind(id);
+        }
+        let cleared = clear_q.execute(&mut *tx).await
+            .map_err(|e| format!("db/saved_character.reconcile_vtt_presence: clear: {e}"))?;
+        stats.cleared = cleared.rows_affected();
+
+        let stamp_sql = format!(
+            "UPDATE saved_characters
+                SET deleted_in_vtt_at = datetime('now')
+              WHERE source = 'foundry'
+                AND foundry_world = ?
+                AND source_id NOT IN ({placeholders})
+                AND deleted_in_vtt_at IS NULL"
+        );
+        let mut stamp_q = sqlx::query(&stamp_sql).bind(foundry_world);
+        for id in present_source_ids {
+            stamp_q = stamp_q.bind(id);
+        }
+        let stamped = stamp_q.execute(&mut *tx).await
+            .map_err(|e| format!("db/saved_character.reconcile_vtt_presence: stamp: {e}"))?;
+        stats.stamped = stamped.rows_affected();
+    }
+
+    tx.commit().await
+        .map_err(|e| format!("db/saved_character.reconcile_vtt_presence: commit: {e}"))?;
+    Ok(stats)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -699,5 +829,160 @@ mod tests {
         let id = db_save(&pool, &sample_canonical(), None).await.unwrap();
         let err = db_remove_advantage(&pool, id, "merit", "item-1").await.unwrap_err();
         assert!(err.contains("no item with id 'item-1'"), "got: {err}");
+    }
+
+    // --- deleted_in_vtt_at helpers ---
+
+    async fn make_foundry_saved(
+        pool: &SqlitePool,
+        world: Option<&str>,
+        source_id: &str,
+        name: &str,
+    ) -> i64 {
+        let canonical = CanonicalCharacter {
+            source: SourceKind::Foundry,
+            source_id: source_id.into(),
+            name: name.into(),
+            controlled_by: None,
+            hunger: None,
+            health: None,
+            willpower: None,
+            humanity: None,
+            humanity_stains: None,
+            blood_potency: None,
+            raw: serde_json::Value::Null,
+        };
+        db_save(pool, &canonical, world.map(|s| s.to_string()))
+            .await
+            .expect("save")
+    }
+
+    async fn read_deleted_in_vtt_at(pool: &SqlitePool, id: i64) -> Option<String> {
+        let row = sqlx::query("SELECT deleted_in_vtt_at FROM saved_characters WHERE id = ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .expect("fetch");
+        row.get("deleted_in_vtt_at")
+    }
+
+    #[tokio::test]
+    async fn mark_deleted_in_vtt_sets_timestamp() {
+        let pool = fresh_pool().await;
+        let id = make_foundry_saved(&pool, Some("World A"), "actor-1", "Alice").await;
+        assert!(read_deleted_in_vtt_at(&pool, id).await.is_none(), "starts null");
+
+        let updated = db_mark_deleted_in_vtt(&pool, SourceKind::Foundry, "actor-1")
+            .await
+            .expect("mark");
+        assert!(updated, "row was matched");
+        assert!(read_deleted_in_vtt_at(&pool, id).await.is_some(), "now set");
+    }
+
+    #[tokio::test]
+    async fn mark_deleted_in_vtt_is_idempotent() {
+        let pool = fresh_pool().await;
+        let id = make_foundry_saved(&pool, Some("World A"), "actor-1", "Alice").await;
+        db_mark_deleted_in_vtt(&pool, SourceKind::Foundry, "actor-1").await.unwrap();
+        let first = read_deleted_in_vtt_at(&pool, id).await;
+        db_mark_deleted_in_vtt(&pool, SourceKind::Foundry, "actor-1").await.unwrap();
+        let second = read_deleted_in_vtt_at(&pool, id).await;
+        assert!(first.is_some() && second.is_some(), "set both times");
+    }
+
+    #[tokio::test]
+    async fn mark_deleted_in_vtt_no_match_returns_false() {
+        let pool = fresh_pool().await;
+        let updated = db_mark_deleted_in_vtt(&pool, SourceKind::Foundry, "no-such-actor")
+            .await
+            .expect("mark");
+        assert!(!updated);
+    }
+
+    #[tokio::test]
+    async fn clear_deleted_in_vtt_unsets_timestamp() {
+        let pool = fresh_pool().await;
+        let id = make_foundry_saved(&pool, Some("World A"), "actor-1", "Alice").await;
+        db_mark_deleted_in_vtt(&pool, SourceKind::Foundry, "actor-1").await.unwrap();
+        assert!(read_deleted_in_vtt_at(&pool, id).await.is_some());
+
+        let cleared = db_clear_deleted_in_vtt(&pool, SourceKind::Foundry, "actor-1")
+            .await
+            .expect("clear");
+        assert!(cleared, "row was matched");
+        assert!(read_deleted_in_vtt_at(&pool, id).await.is_none(), "now null");
+    }
+
+    #[tokio::test]
+    async fn reconcile_stamps_absent_rows_in_matching_world() {
+        let pool = fresh_pool().await;
+        let id_a = make_foundry_saved(&pool, Some("World A"), "actor-a", "Alice").await;
+        let id_b = make_foundry_saved(&pool, Some("World A"), "actor-b", "Bob").await;
+
+        let stats = db_reconcile_vtt_presence(&pool, "World A", &["actor-a".into()])
+            .await
+            .expect("reconcile");
+        assert_eq!(stats.stamped, 1);
+
+        assert!(read_deleted_in_vtt_at(&pool, id_a).await.is_none(), "present row untouched");
+        assert!(read_deleted_in_vtt_at(&pool, id_b).await.is_some(), "absent row stamped");
+    }
+
+    #[tokio::test]
+    async fn reconcile_clears_returning_rows() {
+        let pool = fresh_pool().await;
+        let id = make_foundry_saved(&pool, Some("World A"), "actor-a", "Alice").await;
+        db_mark_deleted_in_vtt(&pool, SourceKind::Foundry, "actor-a").await.unwrap();
+        assert!(read_deleted_in_vtt_at(&pool, id).await.is_some());
+
+        let stats = db_reconcile_vtt_presence(&pool, "World A", &["actor-a".into()])
+            .await
+            .expect("reconcile");
+        assert_eq!(stats.cleared, 1);
+        assert!(read_deleted_in_vtt_at(&pool, id).await.is_none(), "present row cleared");
+    }
+
+    #[tokio::test]
+    async fn reconcile_is_world_scoped() {
+        // Regression guard for the cross-world false-positive bug the spec
+        // was written to prevent.
+        let pool = fresh_pool().await;
+        let id_a = make_foundry_saved(&pool, Some("World A"), "actor-1", "Alice").await;
+        let id_b = make_foundry_saved(&pool, Some("World B"), "actor-2", "Bob").await;
+
+        let stats = db_reconcile_vtt_presence(&pool, "World B", &["actor-2".into()])
+            .await
+            .expect("reconcile");
+        assert_eq!(stats.stamped, 0, "World A rows untouched by World B snapshot");
+        assert_eq!(stats.cleared, 0);
+
+        assert!(read_deleted_in_vtt_at(&pool, id_a).await.is_none(), "World A actor-1 untouched");
+        assert!(read_deleted_in_vtt_at(&pool, id_b).await.is_none(), "World B actor-2 present in snapshot");
+    }
+
+    #[tokio::test]
+    async fn reconcile_handles_empty_snapshot() {
+        // Empty present_source_ids must work — SQLite's WHERE col NOT IN () is invalid.
+        let pool = fresh_pool().await;
+        let id = make_foundry_saved(&pool, Some("World A"), "actor-1", "Alice").await;
+
+        let stats = db_reconcile_vtt_presence(&pool, "World A", &[])
+            .await
+            .expect("reconcile");
+        assert_eq!(stats.stamped, 1, "all rows in world stamped on empty snapshot");
+        assert!(read_deleted_in_vtt_at(&pool, id).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn reconcile_skips_rows_with_null_foundry_world() {
+        // Legacy rows with NULL foundry_world are exempt — SQL = excludes NULL.
+        let pool = fresh_pool().await;
+        let id = make_foundry_saved(&pool, None, "actor-1", "Alice").await;
+
+        let stats = db_reconcile_vtt_presence(&pool, "World A", &[])
+            .await
+            .expect("reconcile");
+        assert_eq!(stats.stamped, 0);
+        assert!(read_deleted_in_vtt_at(&pool, id).await.is_none(), "NULL-world row untouched");
     }
 }
