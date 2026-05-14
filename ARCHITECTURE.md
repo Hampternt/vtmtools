@@ -732,6 +732,17 @@ Properties that must hold across all features.
   multi-column — incompatible with `animate:flip`.
 - Any element combining `width: 100%` with `padding` must set
   `box-sizing: border-box` (there is no global reset).
+- **Card pattern.** Card-shaped UI surfaces (modifier cards, status
+  palette templates, character cards, dyscrasia cards) follow a shared
+  anatomy: *drag handle (top, persistent grab affordance) → name →
+  body content → optional overflow pill (bottom-right)*. Overflow
+  content opens a native `<dialog>` overlay. Context menus and
+  overlays must render outside the card's stacking context (portal
+  pattern in `DropMenu.svelte`, or native `<dialog>`/Popover API) to
+  escape `overflow: hidden` and `transform` parents. CSS container
+  queries (`container-type: inline-size`) drive fluid card sizing
+  via `clamp(min, Ncqi, max)` on the row. See
+  [`docs/superpowers/specs/2026-05-14-gm-screen-card-redesign-design.md`](docs/superpowers/specs/2026-05-14-gm-screen-card-redesign-design.md).
 - In Svelte 5 runes mode, `in:` / `out:` transitions are placed on
   elements whose lifecycle is controlled by the enclosing `{#each}`
   or `{#if}`, not on runes-mode component roots. Use a plain wrapper
@@ -868,6 +879,13 @@ inventing a new hook.
   beyond the new `SourceKind` variant — the bridge store and tools
   already iterate per-source. See
   [ADR 0006](docs/adr/0006-bridge-source-generalization.md).
+- **Add a card-shaped surface.** Follow the card pattern in §6:
+  handle + name + body + optional overflow pill, with menus and
+  overlays portal-rendered. Reuse `CardContextMenu` for right-click
+  actions and `CardOverlay` for the "open full" view; both are
+  zero-dep wrappers (Svelte 5 runes, `<dialog>` native, position-
+  fixed portal). Per-domain content goes inside the overlay body
+  snippet.
 
 ## §10 Testing & verification
 
