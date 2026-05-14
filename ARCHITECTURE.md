@@ -561,18 +561,42 @@ Rust signature + the types it references in §2) is the stable contract.
 - **`src-tauri/src/db/dyscrasia.rs`** (5):
   `list_dyscrasias`, `add_dyscrasia`, `update_dyscrasia`,
   `delete_dyscrasia`, `roll_random_dyscrasia`.
+- **`src-tauri/src/db/modifier.rs`** (9):
+  `list_character_modifiers`, `list_all_character_modifiers`,
+  `add_character_modifier`, `update_character_modifier`,
+  `delete_character_modifier`, `set_modifier_active`,
+  `set_modifier_hidden`, `set_modifier_zone`,
+  `materialize_advantage_modifier`.
+- **`src-tauri/src/db/advantage.rs`** (5):
+  `list_advantages`, `add_advantage`, `update_advantage`,
+  `delete_advantage`, `roll_random_advantage`.
+- **`src-tauri/src/db/status_template.rs`** (4):
+  `list_status_templates`, `add_status_template`,
+  `update_status_template`, `delete_status_template`.
+- **`src-tauri/src/db/saved_character.rs`** (5):
+  `save_character`, `list_saved_characters`,
+  `update_saved_character`, `delete_saved_character`,
+  `patch_saved_field`.
 - **`src-tauri/src/tools/resonance.rs`** (1): `roll_resonance`.
+- **`src-tauri/src/tools/skill_check.rs`** (1): `roll_skill_check`.
 - **`src-tauri/src/tools/export.rs`** (1): `export_result_to_md`.
-- **`src-tauri/src/bridge/commands.rs`** (5):
+- **`src-tauri/src/tools/character.rs`** (3):
+  `character_set_field`, `character_add_advantage`,
+  `character_remove_advantage`.
+- **`src-tauri/src/tools/foundry_chat.rs`** (2):
+  `trigger_foundry_roll`, `post_foundry_chat`.
+- **`src-tauri/src/tools/gm_screen.rs`** (1):
+  `gm_screen_push_to_foundry`.
+- **`src-tauri/src/bridge/commands.rs`** (6):
   `bridge_get_characters`, `bridge_get_rolls`, `bridge_get_status`,
-  `bridge_refresh`, `bridge_set_attribute`. Generic across Roll20
-  and Foundry — `set_attribute`'s `name` is opaque to the frontend
-  and translated per-source by the source's `BridgeSource` impl.
-  `bridge_get_rolls` snapshots the in-memory roll-history ring
-  (capacity 200, dedup by `source_id`); see the events table for the
-  paired live event.
+  `bridge_refresh`, `bridge_set_attribute`, `bridge_get_source_info`.
+  Generic across Roll20 and Foundry — `set_attribute`'s `name` is
+  opaque to the frontend and translated per-source by the source's
+  `BridgeSource` impl. `bridge_get_rolls` snapshots the in-memory
+  roll-history ring (capacity 200, dedup by `source_id`); see the
+  events table for the paired live event.
 
-Total: 32 commands. New commands are registered in
+Total: 63 commands. New commands are registered in
 `src-tauri/src/lib.rs` (`invoke_handler(tauri::generate_handler![...])`).
 See §8 for the Tauri capability / ACL surface.
 
