@@ -9,7 +9,7 @@ node_modules
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .superpowers/
-.claude/
-docs/superpowers/
+.claude/*.local.*
+.claude/state/
 .worktrees/
 .obsidian/

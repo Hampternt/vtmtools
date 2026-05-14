@@ -29,10 +29,7 @@ read-scope guide below says to.
   - `docs/reference/data-sources.md` and
     `docs/reference/data-sources.kumu.json` — named data sources and
     the Kumu map.
-- **On-demand only** (do NOT load by default; **`docs/superpowers/`
-  is gitignored** — files exist locally but are never committed; do
-  not investigate why they're missing from git history, and never
-  `git add -f` to override the ignore):
+- **On-demand only** (do NOT load by default):
   - `docs/superpowers/specs/*.md` — per-feature design archive.
     Load only when the current task names a specific feature.
   - `docs/superpowers/plans/*.md` — per-feature implementation
