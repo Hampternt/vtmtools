@@ -362,6 +362,15 @@ pub async fn set_modifier_hidden(
     db_set_hidden(&pool.0, id, is_hidden).await
 }
 
+#[tauri::command]
+pub async fn set_modifier_zone(
+    pool: tauri::State<'_, crate::DbState>,
+    id: i64,
+    zone: ModifierZone,
+) -> Result<CharacterModifier, String> {
+    db_set_zone(&pool.0, id, zone).await
+}
+
 /// Idempotent upsert. If a row exists for (source, source_id, binding=Advantage{item_id}),
 /// returns it unchanged. Otherwise inserts with empty effects, is_active=false,
 /// is_hidden=false. Spec §8.2.

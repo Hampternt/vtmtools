@@ -115,6 +115,7 @@ pub fn run() {
             db::modifier::delete_character_modifier,
             db::modifier::set_modifier_active,
             db::modifier::set_modifier_hidden,
+            db::modifier::set_modifier_zone,
             db::modifier::materialize_advantage_modifier,
             db::status_template::list_status_templates,
             db::status_template::add_status_template,
