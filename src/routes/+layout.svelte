@@ -101,6 +101,15 @@
     --accent-bright: #ff4444;
     --accent-amber:  #cc9922;
 
+    /* Situational modifier zone — green family. Distinct from the red/amber
+       accent palette so situational cards read as semantically different
+       at a glance. New tokens introduced for the GM-screen modifier-zone
+       split (spec 2026-05-14). */
+    --accent-situational:        #4a8a4a;
+    --accent-situational-bright: #6ab26a;
+    --bg-situational-card:       #182218;
+    --border-situational:        #3d6a3d;
+
     /* ── Temperament outcome tints ──────────────────── */
     --temp-negligible:     #909090;  /* result value text */
     --temp-negligible-dim: #686868;  /* zone labels, prob bars */
