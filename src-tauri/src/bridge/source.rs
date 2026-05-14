@@ -2,20 +2,32 @@ use crate::bridge::types::{CanonicalCharacter, CanonicalRoll};
 use async_trait::async_trait;
 use serde_json::Value;
 
-/// One event emitted from a single inbound frame. A frame may yield zero,
-/// one, or many events — e.g. `actors` snapshot is one CharactersUpdated;
-/// a `hello` frame yields nothing.
+/// One event emitted from a single inbound frame. A frame may yield
+/// zero, one, or many events.
 #[derive(Debug, Clone)]
 pub enum InboundEvent {
-    /// Source pushed an updated set of characters. Frontend re-renders
-    /// from the merged cache; an empty Vec is a legal "no characters
-    /// attached to this message" — not a clear signal.
-    CharactersUpdated(Vec<CanonicalCharacter>),
+    /// Source pushed a full bulk snapshot. The bridge cache replaces
+    /// this source's slice — every entry whose `source` matches is
+    /// dropped, then `characters` are inserted. Empty `characters` is
+    /// legal and means "this source now has zero characters".
+    CharactersSnapshot {
+        source: crate::bridge::types::SourceKind,
+        characters: Vec<CanonicalCharacter>,
+    },
+    /// One character was added or changed. The bridge cache inserts or
+    /// overwrites a single entry keyed by `(source, source_id)`.
+    CharacterUpdated(CanonicalCharacter),
+    /// One character was removed from its source. The bridge cache
+    /// evicts the entry keyed by `(source, source_id)`.
+    CharacterRemoved {
+        source: crate::bridge::types::SourceKind,
+        source_id: String,
+    },
     /// Source pushed a roll result.
     RollReceived(CanonicalRoll),
-    /// Foundry-side item deletion — frontend modifier rows tied to this
-    /// item must be reaped. Caller in `bridge::mod` runs the DB delete and
-    /// emits `modifiers://rows-reaped`. Spec §5.2.
+    /// Foundry-side item deletion — frontend modifier rows tied to
+    /// this item must be reaped. Caller in `bridge::mod` runs the DB
+    /// delete and emits `modifiers://rows-reaped`.
     ItemDeleted {
         source: crate::bridge::types::SourceKind,
         source_id: String,

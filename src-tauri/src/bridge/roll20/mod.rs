@@ -16,12 +16,19 @@ pub struct Roll20Source;
 impl BridgeSource for Roll20Source {
     async fn handle_inbound(&self, msg: Value) -> Result<Vec<InboundEvent>, String> {
         let parsed: InboundMsg = serde_json::from_value(msg).map_err(|e| e.to_string())?;
-        let chars = match parsed {
-            InboundMsg::Characters { characters } => characters,
-            InboundMsg::CharacterUpdate { character } => vec![character],
-        };
-        let canonical = chars.iter().map(translate::to_canonical).collect();
-        Ok(vec![InboundEvent::CharactersUpdated(canonical)])
+        match parsed {
+            InboundMsg::Characters { characters } => {
+                let canonical: Vec<_> = characters.iter().map(translate::to_canonical).collect();
+                Ok(vec![InboundEvent::CharactersSnapshot {
+                    source: crate::bridge::types::SourceKind::Roll20,
+                    characters: canonical,
+                }])
+            }
+            InboundMsg::CharacterUpdate { character } => {
+                let canonical = translate::to_canonical(&character);
+                Ok(vec![InboundEvent::CharacterUpdated(canonical)])
+            }
+        }
     }
 
     fn build_set_attribute(

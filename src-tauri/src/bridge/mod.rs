@@ -270,17 +270,87 @@ async fn handle_connection<S>(
             Ok(events) => {
                 for event in events {
                     match event {
-                        InboundEvent::CharactersUpdated(updated) if !updated.is_empty() => {
-                            let mut chars = state.characters.lock().await;
-                            for c in updated {
-                                chars.insert(c.key(), c);
+                        InboundEvent::CharactersSnapshot { source, characters } => {
+                            {
+                                let mut chars = state.characters.lock().await;
+                                chars.retain(|_, c| c.source != source);
+                                for c in &characters {
+                                    chars.insert(c.key(), c.clone());
+                                }
                             }
                             let snapshot: Vec<CanonicalCharacter> =
-                                chars.values().cloned().collect();
-                            drop(chars);
+                                state.characters.lock().await.values().cloned().collect();
                             let _ = handle.emit("bridge://characters-updated", snapshot);
+
+                            // Foundry-only: world-scoped saved-character reconciliation.
+                            // world_title matches what CharacterCardShell writes on save.
+                            if source == SourceKind::Foundry {
+                                let world = state.source_info.lock().await
+                                    .get(&SourceKind::Foundry)
+                                    .and_then(|i| i.world_title.clone());
+                                if let (Some(world), Some(db_state)) =
+                                    (world, handle.try_state::<crate::DbState>())
+                                {
+                                    let pool = std::sync::Arc::clone(&db_state.0);
+                                    let ids: Vec<String> = characters.iter()
+                                        .map(|c| c.source_id.clone())
+                                        .collect();
+                                    if let Err(e) = crate::db::saved_character::db_reconcile_vtt_presence(
+                                        &pool, &world, &ids,
+                                    ).await {
+                                        eprintln!(
+                                            "[bridge:foundry] reconcile_vtt_presence failed: {e}"
+                                        );
+                                    }
+                                }
+                            }
                         }
-                        InboundEvent::CharactersUpdated(_) => {}
+                        InboundEvent::CharacterUpdated(c) => {
+                            {
+                                let mut chars = state.characters.lock().await;
+                                chars.insert(c.key(), c.clone());
+                            }
+                            let snapshot: Vec<CanonicalCharacter> =
+                                state.characters.lock().await.values().cloned().collect();
+                            let _ = handle.emit("bridge://characters-updated", snapshot);
+
+                            // Side-effect: clear deleted_in_vtt_at if a saved row matches.
+                            // Mostly cosmetic — Foundry undo regenerates actor _id in most
+                            // cases. Snapshot reconciliation is the primary clear path.
+                            if let Some(db_state) = handle.try_state::<crate::DbState>() {
+                                let pool = std::sync::Arc::clone(&db_state.0);
+                                if let Err(e) = crate::db::saved_character::db_clear_deleted_in_vtt(
+                                    &pool, c.source, &c.source_id,
+                                ).await {
+                                    eprintln!(
+                                        "[bridge:{}] clear_deleted_in_vtt failed: {e}",
+                                        c.source.as_str()
+                                    );
+                                }
+                            }
+                        }
+                        InboundEvent::CharacterRemoved { source, source_id } => {
+                            let key = format!("{}:{}", source.as_str(), source_id);
+                            {
+                                let mut chars = state.characters.lock().await;
+                                chars.remove(&key);
+                            }
+                            let snapshot: Vec<CanonicalCharacter> =
+                                state.characters.lock().await.values().cloned().collect();
+                            let _ = handle.emit("bridge://characters-updated", snapshot);
+
+                            if let Some(db_state) = handle.try_state::<crate::DbState>() {
+                                let pool = std::sync::Arc::clone(&db_state.0);
+                                if let Err(e) = crate::db::saved_character::db_mark_deleted_in_vtt(
+                                    &pool, source, &source_id,
+                                ).await {
+                                    eprintln!(
+                                        "[bridge:{}] mark_deleted_in_vtt failed: {e}",
+                                        source.as_str()
+                                    );
+                                }
+                            }
+                        }
                         InboundEvent::RollReceived(roll) => {
                             state.push_roll(roll.clone()).await;
                             let _ = handle.emit("bridge://roll-received", &roll);

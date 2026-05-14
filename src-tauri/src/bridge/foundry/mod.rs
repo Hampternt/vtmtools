@@ -19,33 +19,38 @@ pub struct FoundrySource;
 impl BridgeSource for FoundrySource {
     async fn handle_inbound(&self, msg: Value) -> Result<Vec<InboundEvent>, String> {
         let parsed: FoundryInbound = serde_json::from_value(msg).map_err(|e| e.to_string())?;
-        let actors = match parsed {
-            FoundryInbound::Actors { actors } => actors,
-            FoundryInbound::ActorUpdate { actor } => vec![actor],
-            // Hello metadata is captured pre-trait in bridge::handle_connection;
-            // the trait method just returns no characters. Same for Error: the
-            // pre-trait layer routes errors as Tauri events; this arm is
-            // exhaustiveness completeness only.
-            FoundryInbound::Hello { .. } => return Ok(vec![]),
-            FoundryInbound::Error { .. } => return Ok(vec![]),
+        match parsed {
+            FoundryInbound::Actors { actors } => {
+                let canonical: Vec<_> = actors.iter().map(translate::to_canonical).collect();
+                Ok(vec![InboundEvent::CharactersSnapshot {
+                    source: crate::bridge::types::SourceKind::Foundry,
+                    characters: canonical,
+                }])
+            }
+            FoundryInbound::ActorUpdate { actor } => {
+                let canonical = translate::to_canonical(&actor);
+                Ok(vec![InboundEvent::CharacterUpdated(canonical)])
+            }
+            FoundryInbound::ActorDeleted { actor_id } => {
+                Ok(vec![InboundEvent::CharacterRemoved {
+                    source: crate::bridge::types::SourceKind::Foundry,
+                    source_id: actor_id,
+                }])
+            }
+            FoundryInbound::Hello { .. } => Ok(vec![]),
+            FoundryInbound::Error { .. } => Ok(vec![]),
             FoundryInbound::RollResult { message } => {
                 let canonical = translate_roll::to_canonical_roll(&message);
-                return Ok(vec![InboundEvent::RollReceived(canonical)]);
+                Ok(vec![InboundEvent::RollReceived(canonical)])
             }
-            // ActorDeleted is handled by Task 3 (bridge cache + DB stamp).
-            // Stub here for exhaustiveness; Task 3 will replace with the
-            // real CharacterRemoved event once that InboundEvent variant exists.
-            FoundryInbound::ActorDeleted { .. } => return Ok(vec![]),
             FoundryInbound::ItemDeleted { actor_id, item_id } => {
-                return Ok(vec![InboundEvent::ItemDeleted {
+                Ok(vec![InboundEvent::ItemDeleted {
                     source: crate::bridge::types::SourceKind::Foundry,
                     source_id: actor_id,
                     item_id,
-                }]);
+                }])
             }
-        };
-        let canonical: Vec<_> = actors.iter().map(translate::to_canonical).collect();
-        Ok(vec![InboundEvent::CharactersUpdated(canonical)])
+        }
     }
 
     fn build_set_attribute(
@@ -99,6 +104,24 @@ mod tests {
     use crate::bridge::source::InboundEvent;
     use crate::bridge::types::SourceKind;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn actor_deleted_inbound_produces_character_removed_event() {
+        let source = FoundrySource;
+        let msg = json!({
+            "type": "actor_deleted",
+            "actor_id": "actor-99",
+        });
+        let events = source.handle_inbound(msg).await.expect("handles");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            InboundEvent::CharacterRemoved { source: src, source_id } => {
+                assert_eq!(*src, SourceKind::Foundry);
+                assert_eq!(source_id, "actor-99");
+            }
+            other => panic!("expected CharacterRemoved event, got {other:?}"),
+        }
+    }
 
     #[tokio::test]
     async fn item_deleted_inbound_produces_modifier_reap_event() {
