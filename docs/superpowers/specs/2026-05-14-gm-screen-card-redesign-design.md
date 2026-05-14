@@ -127,10 +127,25 @@ The mask fades the actual content (any color, any theme), not an overlay element
 
 When does it render? **When body content would clip.** Two viable detection approaches:
 
-- **Static heuristic** (simple): render the pill iff `bonuses.length + effects.length + (tags.length > 0 ? 1 : 0) > 4`. Pre-compute in `cardEntries`.
+- **Static heuristic** (simple): pre-compute a line count covering every element that consumes a body row, and render the pill when that count exceeds the threshold. Pre-compute in `cardEntries`.
 - **Dynamic measurement** (precise): use `ResizeObserver` on the body, compare `scrollHeight > clientHeight`, set a `data-overflow` flag.
 
-**Decision: static heuristic for v1.** It avoids per-frame measurement, plays well with the carousel z-stack, and is easy to tune. The `> 4` threshold is a starting value reflecting a 9.5rem card at the `clamp()` minimum width (roughly four short single-line entries fit before the mask fades the last); tune the constant if cards routinely under- or over-pill in practice. Move to dynamic `ResizeObserver`-based measurement only if the heuristic proves insufficient — overflow accuracy is a polish concern, not a correctness one (worst case: a card with hidden content has no pill, but the right-click → Open path still works).
+**Decision: static heuristic for v1.** The formula must count **every** body element that renders a line, not just `bonuses + effects + tags` — a card with origin subtitle + 2 bonuses + conditionals badge + 2 effects + tags occupies 8 lines and a too-narrow formula will silently miss real overflows:
+
+```ts
+function bodyLineCount(m: CharacterModifier, bonuses: FoundryItemBonus[], conditionalsSkipped: FoundryItemBonus[]): number {
+  let n = 1; // name (always)
+  if (m.originTemplateId != null) n += 1;       // origin subtitle
+  n += bonuses.length;                          // bonus rows
+  if (conditionalsSkipped.length > 0) n += 1;   // conditionals badge
+  n += Math.max(m.effects.length, 1);           // effects (or "(no effect)" placeholder)
+  if (m.tags.length > 0) n += 1;                // tag row
+  return n;
+}
+// Render pill when bodyLineCount > 5 at the clamp() minimum 9rem width.
+```
+
+The `> 5` threshold reflects a 9.5rem card at the `clamp()` minimum — roughly five short single-line entries fit before the mask fades the last. Tune the constant if cards routinely under- or over-pill in practice. Move to dynamic `ResizeObserver`-based measurement only if the heuristic proves insufficient — overflow accuracy is a polish concern, not a correctness one (worst case: a card with hidden content has no pill, but the right-click → Open path still works).
 
 The pill is a small `<button>` styled as a rounded chip:
 
@@ -286,7 +301,7 @@ let cardActions = $derived<CardAction[]>(([
 - `Space` / `Enter` on a focused card toggles active (matches click).
 - `Shift+F10` and the dedicated `ContextMenu` key on a focused card open the context menu (ARIA APG menubar pattern).
 - Within the menu: arrow keys cycle, Enter activates, Escape closes and returns focus to the card. Tab also closes.
-- Within the overlay: native `<dialog>.showModal()` provides focus trap. Escape closes (browser default). On close, focus returns to the opener — the dialog API restores this when the same element opens it; if needed, manually call `.focus()` on the card on close.
+- Within the overlay: native `<dialog>.showModal()` provides focus trap. Escape closes (browser default). **Manually save `document.activeElement` at open and call `.focus()` on it at close** — WebKitGTK's built-in focus restoration on `<dialog>.close()` has been historically inconsistent across versions, so do not rely on it. Save into a local variable in the component, restore on the `close` event listener and on backdrop-click close. This is a one-liner and removes a class of "focus disappears after closing the overlay" bugs.
 
 ### §9.2 Drag-and-drop keyboard equivalent (deferred)
 
@@ -352,7 +367,7 @@ These flow directly from the research phase and must be documented in the plan s
    - `CardContextMenu` must portal to a root-level container OR use the Popover API / `<dialog>`.
    - `CardOverlay` uses native `<dialog>.showModal()` which renders in the top layer outside all stacking contexts.
 
-3. **`<dialog>.showModal()` returns focus automatically.** Browsers save the activeElement when `showModal()` opens and restore it when the dialog closes. No manual focus-return code needed for the overlay.
+3. **Do NOT rely on `<dialog>` for automatic focus restoration.** The spec says the browser saves activeElement at `showModal()` and restores at `close()`; WebKitGTK has shipped inconsistent behavior here across versions, and we cannot control the user's GTK build. Always save manually at open and `.focus()` manually at close. See §9.1 — this is a one-liner per component, but skipping it produces "focus disappears" bugs that are fiddly to diagnose later.
 
 4. **`<dialog>` backdrop click is detected by event-target check.** `e.target === dialogEl` when the click landed on the backdrop rather than on dialog content. Standard pattern: `onclick={e => e.target === overlayEl && overlayEl.close()}`.
 
@@ -378,16 +393,19 @@ For the writing-plans phase, the natural task split is:
 
 1. **Extract `CardDragHandle.svelte`** — pure markup move + active-dot styling. No behavior change yet.
 2. **Add `CardOverlay.svelte`** as a `<dialog>` wrapper. Initially: wrap the existing `ModifierEffectEditor` and open via the existing cog button (validates the overlay works before removing the popover).
-3. **Switch the cog-opens-popover flow to open the overlay.** Delete the inline popover wrap from `CharacterRow.svelte`. Cog button still triggers — for one task only — so we can verify the overlay UX before the cog goes away.
-4. **Add `CardContextMenu.svelte`** mirroring `DropMenu.svelte`. Initially unused.
-5. **Wire right-click on `.modifier-card`** → open `CardContextMenu`. Build the `cardActions` list. Ensure `dndStore.held === null` is the discriminator.
-6. **Move all foot-row actions into the context menu.** Delete the foot row entirely from `ModifierCard.svelte`. Delete the cog button. Tests/smoke: every action still works via right-click.
-7. **Add left-click body → toggle active.** Use existing `handleToggleActive`. Wire `Space`/`Enter` keyboard equivalent on the focusable card root.
-8. **Add the overflow pill + mask-image fade.** Compute `hasOverflow` via the static heuristic. Pill button stops propagation.
-9. **Switch `--card-width` to `clamp(9rem, 14cqi, 14rem)` + add `container-type: inline-size`** to `.modifier-row`. Bump card height `8rem → 9.5rem`.
-10. **Add the `@container` rule** to hide `.bonus-source` at narrow widths.
-11. **ARCHITECTURE.md** edits per §11.
-12. **Verify and commit.** `./scripts/verify.sh` after each task before commit (per project CLAUDE.md rule).
+3. **Carousel smoke test (no commit).** Before going further, run `npm run tauri dev` against a real Foundry character with 3-5 advantage items. Verify the new handle + overlay coexist with the carousel z-stack, hover lift (`translateY(-0.75rem) translateZ(20px)`), neighbor-shift cascade, and the mask gradient under a `:hover` box-shadow. The brainstorm preview used `display: flex` not absolute positioning — what looked good on the flat grid may interact unexpectedly with the lifted/shifted cards. Adjust the styling before locking in subsequent tasks if the smoke test surfaces issues. No commit produced from this step.
+4. **Switch the cog-opens-popover flow to open the overlay.** Delete the inline popover wrap from `CharacterRow.svelte`. Cog button still triggers — for one task only — so we can verify the overlay UX before the cog goes away.
+5. **Add `CardContextMenu.svelte`** mirroring `DropMenu.svelte`. Initially unused.
+6. **Wire right-click on `.modifier-card`** → open `CardContextMenu`. Build the `cardActions` list. Ensure `dndStore.held === null` is the discriminator.
+7. **Move all foot-row actions into the context menu.** Delete the foot row entirely from `ModifierCard.svelte`. Delete the cog button. Tests/smoke: every action still works via right-click.
+8. **Add left-click body → toggle active.** Use existing `handleToggleActive`. Wire `Space`/`Enter` keyboard equivalent on the focusable card root.
+9. **Add the overflow pill + mask-image fade.** Compute `hasOverflow` via the full-formula static heuristic (§6.2). Pill button stops propagation.
+10. **Switch `--card-width` to `clamp(9rem, 14cqi, 14rem)` + add `container-type: inline-size`** to `.modifier-row`. Bump card height `8rem → 9.5rem`.
+11. **Add the `@container` rule** to hide `.bonus-source` at narrow widths.
+12. **ARCHITECTURE.md** edits per §11.
+13. **Verify and commit.** `./scripts/verify.sh` after each task before commit (per project CLAUDE.md rule).
+
+**Clustering note.** Per project memory `feedback_atomic_cluster_commits`, tasks 1-2 (and possibly 1-4) leave the runtime in a visually hybrid state — new handle + old foot row + new overlay + still-active cog. None of this breaks the runtime (the hybrid is functional), so verify.sh stays green. If reviewing intermediate commits in isolation looks confusing, cluster tasks 1-4 into a single "scaffold new components + bridge cog→overlay" commit and tasks 7-9 into a single "remove foot row + wire new interactions" commit. The plan-writing phase makes the final call based on independent-vs-coupled judgment.
 
 Plan tasks 1–10 are mostly mechanical UI refactors. No new tests required (per project CLAUDE.md "TDD on demand" override — `verify.sh` is the gate for refactor work). The single exception is task 5's context-menu wiring, which may warrant a Svelte-level smoke test if any disambiguation logic creeps in; default is no test.
 
