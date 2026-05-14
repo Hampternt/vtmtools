@@ -12,6 +12,7 @@ import {
   deleteCharacterModifier,
   setModifierActive,
   setModifierHidden,
+  setModifierZone,
   materializeAdvantageModifier,
   pushToFoundry as apiPushToFoundry,
 } from '$lib/modifiers/api';
@@ -21,6 +22,7 @@ import type {
   ModifierPatchInput,
   PushReport,
   SourceKind,
+  ModifierZone,
 } from '../types';
 import { listen } from '@tauri-apps/api/event';
 
@@ -114,6 +116,10 @@ export const modifiers = {
     await setModifierHidden(id, isHidden);
     const i = _list.findIndex(m => m.id === id);
     if (i >= 0) _list[i] = { ..._list[i], isHidden };
+  },
+  async setZone(id: number, zone: ModifierZone): Promise<void> {
+    const row = await setModifierZone(id, zone);
+    mergeRow(row);
   },
   async materializeAdvantage(args: {
     source: SourceKind;

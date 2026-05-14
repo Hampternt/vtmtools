@@ -224,6 +224,8 @@ export interface FoundryRaw {
 // discriminator is `kind` and uses snake_case variants ('free' / 'advantage').
 // ---------------------------------------------------------------------------
 
+export type ModifierZone = 'character' | 'situational';
+
 export type ModifierKind = 'pool' | 'difficulty' | 'note' | 'stat';
 
 export interface ModifierEffect {
@@ -262,6 +264,7 @@ export interface CharacterModifier {
    * modifier with additive push.
    */
   foundryCapturedLabels: string[];
+  zone: ModifierZone;
   createdAt: string;
   updatedAt: string;
 }
@@ -276,6 +279,7 @@ export interface NewCharacterModifierInput {
   tags: string[];
   originTemplateId: number | null;
   foundryCapturedLabels: string[];   // NEW — empty array = hand-rolled
+  zone: ModifierZone;
 }
 
 export interface ModifierPatchInput {

@@ -8,6 +8,7 @@ import type {
   StatusTemplate,
   NewStatusTemplateInput,
   StatusTemplatePatchInput,
+  ModifierZone,
 } from '../../types';
 
 export function listCharacterModifiers(
@@ -42,6 +43,10 @@ export function setModifierActive(id: number, isActive: boolean): Promise<void> 
 
 export function setModifierHidden(id: number, isHidden: boolean): Promise<void> {
   return invoke<void>('set_modifier_hidden', { id, isHidden });
+}
+
+export function setModifierZone(id: number, zone: ModifierZone): Promise<CharacterModifier> {
+  return invoke<CharacterModifier>('set_modifier_zone', { id, zone });
 }
 
 export function materializeAdvantageModifier(args: {

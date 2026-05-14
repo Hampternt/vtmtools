@@ -45,6 +45,7 @@
         tags: [...t.tags],
         originTemplateId: t.id,
         foundryCapturedLabels: [],
+        zone: 'character',
       });
       applyHint = { text: `Applied "${t.name}" to ${focusedCharacter.name}.`, tone: 'success' };
       setTimeout(() => { applyHint = null; }, 2500);

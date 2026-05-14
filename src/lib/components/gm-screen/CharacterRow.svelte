@@ -233,6 +233,7 @@
       tags: [],
       originTemplateId: null,
       foundryCapturedLabels: capturedLabels,
+      zone: 'character',
     });
     // Flip is_active=true so the override is immediately applied in renders
     // that consume active modifiers (active-effects summary, deltas, etc.).
@@ -351,6 +352,7 @@
       tags: [],
       originTemplateId: null,
       foundryCapturedLabels: [],
+      zone: 'character',
     });
   }
 
@@ -418,6 +420,7 @@
               isHidden: false,
               originTemplateId: null,
               foundryCapturedLabels: [],
+              zone: 'character',
               createdAt: '',
               updatedAt: '',
             }
