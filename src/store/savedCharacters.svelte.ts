@@ -2,6 +2,7 @@
 // behind a stable surface so components can call .save / .update / .delete
 // without re-fetching the list themselves.
 
+import { listen } from '@tauri-apps/api/event';
 import {
   listSavedCharacters,
   saveCharacter,
@@ -37,6 +38,13 @@ export const savedCharacters = {
     if (_initialized) return;
     _initialized = true;
     await refresh();
+    // Re-fetch the saved list whenever the bridge updates — that's how
+    // the new deletedInVttAt flag (stamped server-side by the bridge
+    // reconciliation paths) propagates to the UI. One local SQL query
+    // per event; cheap.
+    await listen('bridge://characters-updated', () => {
+      void refresh();
+    });
   },
   async refresh(): Promise<void> { await refresh(); },
   async save(canonical: BridgeCharacter, foundryWorld: string | null): Promise<void> {

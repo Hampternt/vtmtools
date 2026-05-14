@@ -13,6 +13,10 @@ export interface SavedCharacter {
   canonical: BridgeCharacter;
   savedAt: string;
   lastUpdatedAt: string;
+  /** ISO-8601 timestamp set by the bridge when the live actor was
+   *  observed deleted from its source VTT. null = not known to be deleted.
+   *  Owned by the bridge; saving / updating does not touch this. */
+  deletedInVttAt: string | null;
 }
 
 export const saveCharacter = (
