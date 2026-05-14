@@ -3,6 +3,7 @@
   import { statusTemplates } from '../../../store/statusTemplates.svelte';
   import type {
     BridgeCharacter, CharacterModifier, ModifierEffect, FoundryItem, FoundryItemBonus,
+    ModifierZone,
   } from '../../../types';
   import ModifierCard from './ModifierCard.svelte';
   import ModifierEffectEditor from './ModifierEffectEditor.svelte';
@@ -181,16 +182,26 @@
     return [e.mod.isActive ? 0 : 1, e.mod.createdAt];
   }
 
-  let visibleCards = $derived(
-    cardEntries
+  // Shared filter/sort logic for both zones. visibleCards becomes two derivations.
+  function filterAndSort(entries: CardEntry[]): CardEntry[] {
+    return entries
       .filter(e => passesTagFilter(e) && passesHiddenFilter(e))
       .sort((a, b) => {
         const [ak, an] = sortKey(a);
         const [bk, bn] = sortKey(b);
         if (ak !== bk) return ak - bk;
         return an < bn ? -1 : an > bn ? 1 : 0;
-      })
-  );
+      });
+  }
+
+  // Zone of a CardEntry: virtual cards are always character-zone (they derive
+  // from a Foundry advantage item which is zone-locked to 'character').
+  function entryZone(e: CardEntry): ModifierZone {
+    return e.kind === 'virtual' ? 'character' : e.mod.zone;
+  }
+
+  let characterCards = $derived(filterAndSort(cardEntries.filter(e => entryZone(e) === 'character')));
+  let situationalCards = $derived(filterAndSort(cardEntries.filter(e => entryZone(e) === 'situational')));
 
   /** Materialize a virtual card before applying any change. */
   async function materialize(virt: VirtualCard): Promise<CharacterModifier> {
@@ -341,7 +352,7 @@
     closeEditor();
   }
 
-  async function addFreeModifier(): Promise<void> {
+  async function addFreeModifier(zone: ModifierZone): Promise<void> {
     await modifiers.add({
       source: character.source,
       sourceId: character.source_id,
@@ -352,8 +363,14 @@
       tags: [],
       originTemplateId: null,
       foundryCapturedLabels: [],
-      zone: 'character',
+      zone,
     });
+  }
+
+  async function handleHardDelete(mod: CharacterModifier): Promise<void> {
+    const ok = confirm(`Delete "${mod.name}" permanently? This cannot be undone.`);
+    if (!ok) return;
+    await modifiers.delete(mod.id);
   }
 
   function damageSummary(): string {
@@ -363,6 +380,58 @@
     return `Dmg ${superficial}s/${aggravated}a`;
   }
 </script>
+
+{#snippet renderCard(entry: CardEntry)}
+  <ModifierCard
+    modifier={entry.kind === 'virtual'
+      ? {
+          id: 0,
+          source: character.source,
+          sourceId: character.source_id,
+          name: entry.virt.name,
+          description: entry.virt.description,
+          effects: [],
+          binding: { kind: 'advantage', item_id: entry.virt.item._id },
+          tags: [],
+          isActive: false,
+          isHidden: false,
+          originTemplateId: null,
+          foundryCapturedLabels: [],
+          zone: 'character',
+          createdAt: '',
+          updatedAt: '',
+        }
+      : entry.mod}
+    isVirtual={entry.kind === 'virtual'}
+    bonuses={entry.kind === 'virtual'
+      ? bonusesFor(entry.virt.item._id)
+      : entry.mod.binding.kind === 'advantage'
+        ? bonusesFor(entry.mod.binding.item_id)
+        : []}
+    conditionalsSkipped={entry.kind === 'virtual'
+      ? conditionalsFor(entry.virt.item._id)
+      : entry.mod.binding.kind === 'advantage'
+        ? conditionalsFor(entry.mod.binding.item_id)
+        : []}
+    onToggleActive={() => handleToggleActive(entry)}
+    onHide={() => handleHide(entry)}
+    onOpenEditor={(anchor) => openEditor(entry, anchor)}
+    canPush={canPushFor(entry)}
+    onPush={() => handlePush(entry)}
+    canReset={canResetFor(entry)}
+    onReset={() => handleReset(entry)}
+    originTemplateName={entry.kind === 'materialized' && entry.mod.originTemplateId != null
+      ? (statusTemplates.byId(entry.mod.originTemplateId)?.name ?? null)
+      : null}
+    showOverride={entry.kind === 'materialized' ? isSavedOverride(entry.mod) : false}
+    onSaveAsOverride={entry.kind === 'virtual'
+      ? () => saveAsOverride(entry.virt).catch(err => console.error('[gm-screen] save-as-override failed:', err))
+      : undefined}
+    onDelete={entry.kind === 'materialized' && entry.mod.binding.kind === 'free'
+      ? () => handleHardDelete(entry.mod)
+      : undefined}
+  />
+{/snippet}
 
 <section
   class="row"
@@ -400,59 +469,31 @@
 
   <div class="row-body">
   <ActiveEffectsSummary {character} modifiers={charMods} />
-  <div
-    class="modifier-row"
-    style="--cards: {visibleCards.length};"
-  >
-    {#each visibleCards as entry, i (entry.kind === 'virtual' ? `v-${entry.virt.item._id}` : `m-${entry.mod.id}`)}
-      <ModifierCard
-        modifier={entry.kind === 'virtual'
-          ? {
-              id: 0,
-              source: character.source,
-              sourceId: character.source_id,
-              name: entry.virt.name,
-              description: entry.virt.description,
-              effects: [],
-              binding: { kind: 'advantage', item_id: entry.virt.item._id },
-              tags: [],
-              isActive: false,
-              isHidden: false,
-              originTemplateId: null,
-              foundryCapturedLabels: [],
-              zone: 'character',
-              createdAt: '',
-              updatedAt: '',
-            }
-          : entry.mod}
-        isVirtual={entry.kind === 'virtual'}
-        bonuses={entry.kind === 'virtual'
-          ? bonusesFor(entry.virt.item._id)
-          : entry.mod.binding.kind === 'advantage'
-            ? bonusesFor(entry.mod.binding.item_id)
-            : []}
-        conditionalsSkipped={entry.kind === 'virtual'
-          ? conditionalsFor(entry.virt.item._id)
-          : entry.mod.binding.kind === 'advantage'
-            ? conditionalsFor(entry.mod.binding.item_id)
-            : []}
-        onToggleActive={() => handleToggleActive(entry)}
-        onHide={() => handleHide(entry)}
-        onOpenEditor={(anchor) => openEditor(entry, anchor)}
-        canPush={canPushFor(entry)}
-        onPush={() => handlePush(entry)}
-        canReset={canResetFor(entry)}
-        onReset={() => handleReset(entry)}
-        originTemplateName={entry.kind === 'materialized' && entry.mod.originTemplateId != null
-          ? (statusTemplates.byId(entry.mod.originTemplateId)?.name ?? null)
-          : null}
-        showOverride={entry.kind === 'materialized' ? isSavedOverride(entry.mod) : false}
-        onSaveAsOverride={entry.kind === 'virtual'
-          ? () => saveAsOverride(entry.virt).catch(err => console.error('[gm-screen] save-as-override failed:', err))
-          : undefined}
-      />
-    {/each}
-    <button class="add-modifier" onclick={addFreeModifier}>+ Add modifier</button>
+  <div class="zone-stack">
+    <div class="zone-column" data-zone="character">
+      <div class="zone-label">Character</div>
+      <div
+        class="modifier-row"
+        style="--cards: {characterCards.length};"
+      >
+        {#each characterCards as entry, i (entry.kind === 'virtual' ? `v-${entry.virt.item._id}` : `m-${entry.mod.id}`)}
+          {@render renderCard(entry)}
+        {/each}
+        <button class="add-modifier" onclick={() => addFreeModifier('character')}>+ Add modifier</button>
+      </div>
+    </div>
+    <div class="zone-column" data-zone="situational">
+      <div class="zone-label">Situational</div>
+      <div
+        class="modifier-row"
+        style="--cards: {situationalCards.length};"
+      >
+        {#each situationalCards as entry, i (entry.kind === 'virtual' ? `v-${entry.virt.item._id}` : `m-${entry.mod.id}`)}
+          {@render renderCard(entry)}
+        {/each}
+        <button class="add-modifier" onclick={() => addFreeModifier('situational')}>+ Add modifier</button>
+      </div>
+    </div>
   </div>
   </div>
 
@@ -522,7 +563,31 @@
     align-items: flex-start;
     gap: 0.6rem;
   }
-  .row-body > .modifier-row { flex: 1; min-width: 0; }
+  .row-body > .zone-stack { flex: 1; min-width: 0; }
+
+  .zone-stack {
+    display: flex;
+    flex: 1;
+    gap: 0.6rem;
+    min-width: 0;
+  }
+  .zone-column {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .zone-label {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding-left: 0.25rem;
+  }
+  .zone-column[data-zone="situational"] .zone-label {
+    color: var(--accent-situational-bright);
+  }
 
   .modifier-row {
     --card-trans-duration: 600ms;
