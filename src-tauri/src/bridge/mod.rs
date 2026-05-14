@@ -314,18 +314,27 @@ async fn handle_connection<S>(
                                 state.characters.lock().await.values().cloned().collect();
                             let _ = handle.emit("bridge://characters-updated", snapshot);
 
-                            // Side-effect: clear deleted_in_vtt_at if a saved row matches.
-                            // Mostly cosmetic — Foundry undo regenerates actor _id in most
-                            // cases. Snapshot reconciliation is the primary clear path.
-                            if let Some(db_state) = handle.try_state::<crate::DbState>() {
-                                let pool = std::sync::Arc::clone(&db_state.0);
-                                if let Err(e) = crate::db::saved_character::db_clear_deleted_in_vtt(
-                                    &pool, c.source, &c.source_id,
-                                ).await {
-                                    eprintln!(
-                                        "[bridge:{}] clear_deleted_in_vtt failed: {e}",
-                                        c.source.as_str()
-                                    );
+                            // Foundry-only side-effect: clear deleted_in_vtt_at if a
+                            // saved row matches. World-scoped to match the mark/reconcile
+                            // helpers. Mostly cosmetic — Foundry undo regenerates actor
+                            // _id in most cases; snapshot reconciliation is the primary
+                            // clear path. Skipped for Roll20 (no per-campaign disambiguator
+                            // on saved schema).
+                            if c.source == SourceKind::Foundry {
+                                let world = state.source_info.lock().await
+                                    .get(&SourceKind::Foundry)
+                                    .and_then(|i| i.world_title.clone());
+                                if let (Some(world), Some(db_state)) =
+                                    (world, handle.try_state::<crate::DbState>())
+                                {
+                                    let pool = std::sync::Arc::clone(&db_state.0);
+                                    if let Err(e) = crate::db::saved_character::db_clear_deleted_in_vtt(
+                                        &pool, &world, &c.source_id,
+                                    ).await {
+                                        eprintln!(
+                                            "[bridge:foundry] clear_deleted_in_vtt failed: {e}"
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -339,15 +348,24 @@ async fn handle_connection<S>(
                                 state.characters.lock().await.values().cloned().collect();
                             let _ = handle.emit("bridge://characters-updated", snapshot);
 
-                            if let Some(db_state) = handle.try_state::<crate::DbState>() {
-                                let pool = std::sync::Arc::clone(&db_state.0);
-                                if let Err(e) = crate::db::saved_character::db_mark_deleted_in_vtt(
-                                    &pool, source, &source_id,
-                                ).await {
-                                    eprintln!(
-                                        "[bridge:{}] mark_deleted_in_vtt failed: {e}",
-                                        source.as_str()
-                                    );
+                            // Foundry-only side-effect: mark the saved record as
+                            // deleted-in-VTT. World-scoped per the same rationale as the
+                            // snapshot reconciliation arm. Skipped for Roll20.
+                            if source == SourceKind::Foundry {
+                                let world = state.source_info.lock().await
+                                    .get(&SourceKind::Foundry)
+                                    .and_then(|i| i.world_title.clone());
+                                if let (Some(world), Some(db_state)) =
+                                    (world, handle.try_state::<crate::DbState>())
+                                {
+                                    let pool = std::sync::Arc::clone(&db_state.0);
+                                    if let Err(e) = crate::db::saved_character::db_mark_deleted_in_vtt(
+                                        &pool, &world, &source_id,
+                                    ).await {
+                                        eprintln!(
+                                            "[bridge:foundry] mark_deleted_in_vtt failed: {e}"
+                                        );
+                                    }
                                 }
                             }
                         }

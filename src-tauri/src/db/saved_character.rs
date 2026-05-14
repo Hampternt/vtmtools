@@ -356,29 +356,37 @@ pub async fn patch_saved_field(
 /// Result counters returned by `db_reconcile_vtt_presence`.
 #[derive(Debug, Default)]
 pub struct ReconcileStats {
-    /// Rows where `deleted_in_vtt_at` was newly set (was NULL → now non-NULL,
-    /// or refreshed from a prior timestamp — both count).
+    /// Rows where `deleted_in_vtt_at` transitioned NULL → non-NULL on
+    /// this reconcile call. Re-stamps (a row that was already stamped
+    /// before this call) are NOT counted — the stamp UPDATE is guarded
+    /// by `deleted_in_vtt_at IS NULL`.
     pub stamped: u64,
     /// Rows where `deleted_in_vtt_at` was cleared (was non-NULL → now NULL).
     pub cleared: u64,
 }
 
-/// Set `deleted_in_vtt_at = datetime('now')` for the saved record matching
-/// `(source, source_id)`. Idempotent — re-stamps to the latest timestamp
-/// if already set. Returns `Ok(true)` if a row was updated, `Ok(false)`
-/// if no row matched. Called from `bridge::accept_loop` on
-/// `CharacterRemoved` events.
+/// Set `deleted_in_vtt_at = datetime('now')` for the FOUNDRY saved record
+/// matching `(source_id, foundry_world)`. Idempotent — re-stamps to the
+/// latest timestamp if already set. Returns `Ok(true)` if a row was
+/// updated, `Ok(false)` if no row matched. Called from `bridge::accept_loop`
+/// on `CharacterRemoved` events for Foundry only.
+///
+/// World-scoped because Foundry actor IDs are world-local — a deletion
+/// in world B must not stamp a same-id saved record from world A. Rows
+/// with NULL `foundry_world` are exempt (SQL `=` excludes NULL).
 pub async fn db_mark_deleted_in_vtt(
     pool: &SqlitePool,
-    source: SourceKind,
+    foundry_world: &str,
     source_id: &str,
 ) -> Result<bool, String> {
     let result = sqlx::query(
         "UPDATE saved_characters
             SET deleted_in_vtt_at = datetime('now')
-          WHERE source = ? AND source_id = ?"
+          WHERE source = 'foundry'
+            AND foundry_world = ?
+            AND source_id = ?"
     )
-    .bind(source_to_str(&source))
+    .bind(foundry_world)
     .bind(source_id)
     .execute(pool)
     .await
@@ -386,22 +394,26 @@ pub async fn db_mark_deleted_in_vtt(
     Ok(result.rows_affected() > 0)
 }
 
-/// Set `deleted_in_vtt_at = NULL` for the saved record matching
-/// `(source, source_id)`. No-op if already NULL or row absent. Returns
-/// `Ok(true)` if a row was updated. Called from `bridge::accept_loop`
-/// on `CharacterUpdated` events.
+/// Set `deleted_in_vtt_at = NULL` for the FOUNDRY saved record matching
+/// `(source_id, foundry_world)`. No-op if already NULL or row absent.
+/// Returns `Ok(true)` if a row was updated. Called from
+/// `bridge::accept_loop` on `CharacterUpdated` events for Foundry only.
+///
+/// World-scoped for the same reason as `db_mark_deleted_in_vtt`.
 pub async fn db_clear_deleted_in_vtt(
     pool: &SqlitePool,
-    source: SourceKind,
+    foundry_world: &str,
     source_id: &str,
 ) -> Result<bool, String> {
     let result = sqlx::query(
         "UPDATE saved_characters
             SET deleted_in_vtt_at = NULL
-          WHERE source = ? AND source_id = ?
+          WHERE source = 'foundry'
+            AND foundry_world = ?
+            AND source_id = ?
             AND deleted_in_vtt_at IS NOT NULL"
     )
-    .bind(source_to_str(&source))
+    .bind(foundry_world)
     .bind(source_id)
     .execute(pool)
     .await
@@ -872,7 +884,7 @@ mod tests {
         let id = make_foundry_saved(&pool, Some("World A"), "actor-1", "Alice").await;
         assert!(read_deleted_in_vtt_at(&pool, id).await.is_none(), "starts null");
 
-        let updated = db_mark_deleted_in_vtt(&pool, SourceKind::Foundry, "actor-1")
+        let updated = db_mark_deleted_in_vtt(&pool, "World A", "actor-1")
             .await
             .expect("mark");
         assert!(updated, "row was matched");
@@ -883,9 +895,9 @@ mod tests {
     async fn mark_deleted_in_vtt_is_idempotent() {
         let pool = fresh_pool().await;
         let id = make_foundry_saved(&pool, Some("World A"), "actor-1", "Alice").await;
-        db_mark_deleted_in_vtt(&pool, SourceKind::Foundry, "actor-1").await.unwrap();
+        db_mark_deleted_in_vtt(&pool, "World A", "actor-1").await.unwrap();
         let first = read_deleted_in_vtt_at(&pool, id).await;
-        db_mark_deleted_in_vtt(&pool, SourceKind::Foundry, "actor-1").await.unwrap();
+        db_mark_deleted_in_vtt(&pool, "World A", "actor-1").await.unwrap();
         let second = read_deleted_in_vtt_at(&pool, id).await;
         assert!(first.is_some() && second.is_some(), "set both times");
     }
@@ -893,7 +905,7 @@ mod tests {
     #[tokio::test]
     async fn mark_deleted_in_vtt_no_match_returns_false() {
         let pool = fresh_pool().await;
-        let updated = db_mark_deleted_in_vtt(&pool, SourceKind::Foundry, "no-such-actor")
+        let updated = db_mark_deleted_in_vtt(&pool, "World A", "no-such-actor")
             .await
             .expect("mark");
         assert!(!updated);
@@ -903,10 +915,10 @@ mod tests {
     async fn clear_deleted_in_vtt_unsets_timestamp() {
         let pool = fresh_pool().await;
         let id = make_foundry_saved(&pool, Some("World A"), "actor-1", "Alice").await;
-        db_mark_deleted_in_vtt(&pool, SourceKind::Foundry, "actor-1").await.unwrap();
+        db_mark_deleted_in_vtt(&pool, "World A", "actor-1").await.unwrap();
         assert!(read_deleted_in_vtt_at(&pool, id).await.is_some());
 
-        let cleared = db_clear_deleted_in_vtt(&pool, SourceKind::Foundry, "actor-1")
+        let cleared = db_clear_deleted_in_vtt(&pool, "World A", "actor-1")
             .await
             .expect("clear");
         assert!(cleared, "row was matched");
@@ -932,7 +944,7 @@ mod tests {
     async fn reconcile_clears_returning_rows() {
         let pool = fresh_pool().await;
         let id = make_foundry_saved(&pool, Some("World A"), "actor-a", "Alice").await;
-        db_mark_deleted_in_vtt(&pool, SourceKind::Foundry, "actor-a").await.unwrap();
+        db_mark_deleted_in_vtt(&pool, "World A", "actor-a").await.unwrap();
         assert!(read_deleted_in_vtt_at(&pool, id).await.is_some());
 
         let stats = db_reconcile_vtt_presence(&pool, "World A", &["actor-a".into()])
@@ -984,5 +996,51 @@ mod tests {
             .expect("reconcile");
         assert_eq!(stats.stamped, 0);
         assert!(read_deleted_in_vtt_at(&pool, id).await.is_none(), "NULL-world row untouched");
+    }
+
+    #[tokio::test]
+    async fn mark_deleted_in_vtt_is_world_scoped() {
+        // A row exists in World A. A CharacterRemoved event for the same
+        // source_id arrives from World B's bridge — must NOT touch World A.
+        // (Schema UNIQUE(source, source_id) prevents two live rows with the
+        // same source_id, so world-scoping is verified by asserting the
+        // wrong-world call returns false / leaves the real row untouched.)
+        let pool = fresh_pool().await;
+        let id_a = make_foundry_saved(&pool, Some("World A"), "actor-1", "Alice").await;
+
+        let updated = db_mark_deleted_in_vtt(&pool, "World B", "actor-1")
+            .await
+            .expect("mark");
+        assert!(!updated, "no World B row matched");
+        assert!(read_deleted_in_vtt_at(&pool, id_a).await.is_none(), "World A untouched");
+    }
+
+    #[tokio::test]
+    async fn clear_deleted_in_vtt_is_world_scoped() {
+        // Row in World A is stamped. A CharacterUpdated event for the same
+        // source_id arrives from World B — must NOT clear World A's stamp.
+        let pool = fresh_pool().await;
+        let id_a = make_foundry_saved(&pool, Some("World A"), "actor-1", "Alice").await;
+        db_mark_deleted_in_vtt(&pool, "World A", "actor-1").await.unwrap();
+        assert!(read_deleted_in_vtt_at(&pool, id_a).await.is_some());
+
+        let cleared = db_clear_deleted_in_vtt(&pool, "World B", "actor-1")
+            .await
+            .expect("clear");
+        assert!(!cleared, "no World B row matched");
+        assert!(read_deleted_in_vtt_at(&pool, id_a).await.is_some(), "World A still stamped");
+    }
+
+    #[tokio::test]
+    async fn mark_deleted_in_vtt_skips_rows_with_null_foundry_world() {
+        // Legacy rows with NULL foundry_world are exempt (SQL = excludes NULL).
+        let pool = fresh_pool().await;
+        let id = make_foundry_saved(&pool, None, "actor-1", "Alice").await;
+
+        let updated = db_mark_deleted_in_vtt(&pool, "World A", "actor-1")
+            .await
+            .expect("mark");
+        assert!(!updated, "NULL-world row not matched");
+        assert!(read_deleted_in_vtt_at(&pool, id).await.is_none());
     }
 }
