@@ -15,6 +15,10 @@ pub struct SavedCharacter {
     pub canonical: CanonicalCharacter,
     pub saved_at: String,
     pub last_updated_at: String,
+    /// ISO-8601 timestamp set by the bridge layer when the live actor was
+    /// observed to have been deleted from its source VTT. NULL = not
+    /// known to be deleted. Owned by the bridge reconciliation paths.
+    pub deleted_in_vtt_at: Option<String>,
 }
 
 fn source_to_str(s: &SourceKind) -> &'static str {
@@ -74,7 +78,7 @@ pub async fn save_character(
 async fn db_list(pool: &SqlitePool) -> Result<Vec<SavedCharacter>, String> {
     let rows = sqlx::query(
         "SELECT id, source, source_id, foundry_world, name, canonical_json,
-                saved_at, last_updated_at
+                saved_at, last_updated_at, deleted_in_vtt_at
          FROM saved_characters
          ORDER BY id ASC"
     )
@@ -99,6 +103,7 @@ async fn db_list(pool: &SqlitePool) -> Result<Vec<SavedCharacter>, String> {
             canonical,
             saved_at: r.get("saved_at"),
             last_updated_at: r.get("last_updated_at"),
+            deleted_in_vtt_at: r.get("deleted_in_vtt_at"),
         });
     }
     Ok(out)

@@ -32,6 +32,10 @@ impl BridgeSource for FoundrySource {
                 let canonical = translate_roll::to_canonical_roll(&message);
                 return Ok(vec![InboundEvent::RollReceived(canonical)]);
             }
+            // ActorDeleted is handled by Task 3 (bridge cache + DB stamp).
+            // Stub here for exhaustiveness; Task 3 will replace with the
+            // real CharacterRemoved event once that InboundEvent variant exists.
+            FoundryInbound::ActorDeleted { .. } => return Ok(vec![]),
             FoundryInbound::ItemDeleted { actor_id, item_id } => {
                 return Ok(vec![InboundEvent::ItemDeleted {
                     source: crate::bridge::types::SourceKind::Foundry,
