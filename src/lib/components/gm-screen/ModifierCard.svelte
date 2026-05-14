@@ -98,6 +98,20 @@
 
   function closeCtx() { ctxOpen = false; }
 
+  function handleBodyClick(_e: MouseEvent) {
+    // Cog click stop-propagation guards against bubble in Task 7; the
+    // overflow pill (Task 9) does the same. This handler runs only for
+    // bare body clicks, which always toggle active.
+    onToggleActive();
+  }
+
+  function handleBodyKey(e: KeyboardEvent) {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      onToggleActive();
+    }
+  }
+
   let cardActions = $derived<CardAction[]>([
     {
       kind: 'item',
@@ -155,8 +169,15 @@
 >
   <DragSource source={dragSource} disabled={dragDisabled}>
     <CardDragHandle isActive={modifier.isActive} zone={modifier.zone} />
-    <div class="card-body">
-      {#if modifier.zone === 'situational'}
+  </DragSource>
+  <div
+    class="card-body"
+    role="button"
+    tabindex="0"
+    onclick={handleBodyClick}
+    onkeydown={handleBodyKey}
+  >
+    {#if modifier.zone === 'situational'}
         <span class="zone-chip" aria-label="Situational modifier">Situational</span>
       {/if}
       <div class="head">
@@ -168,7 +189,7 @@
           class="cog"
           title="Edit effects"
           onpointerdown={(e) => e.stopPropagation()}
-          onclick={() => cogEl && onOpenEditor(cogEl)}
+          onclick={(e) => { e.stopPropagation(); cogEl && onOpenEditor(cogEl); }}
         >⚙</button>
       </div>
       {#if originTemplateName}
@@ -209,7 +230,6 @@
         </div>
       {/if}
     </div>
-  </DragSource>
   <div class="foot">
     <button
       class="toggle"
