@@ -573,6 +573,7 @@ mod tests {
             tags: vec![],
             origin_template_id: None,
             foundry_captured_labels: vec![],
+            zone: crate::shared::modifier::ModifierZone::Character,
         };
         let added = crate::db::modifier::db_add(&pool, new).await.unwrap();
 

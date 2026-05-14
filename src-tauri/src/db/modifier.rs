@@ -1,7 +1,7 @@
 use sqlx::{Row, SqlitePool};
 use crate::bridge::types::SourceKind;
 use crate::shared::modifier::{
-    CharacterModifier, ModifierBinding, ModifierEffect, ModifierKind,
+    CharacterModifier, ModifierBinding, ModifierEffect, ModifierKind, ModifierZone,
 };
 
 fn source_to_str(s: &SourceKind) -> &'static str {
@@ -16,6 +16,20 @@ fn str_to_source(s: &str) -> Option<SourceKind> {
         "roll20" => Some(SourceKind::Roll20),
         "foundry" => Some(SourceKind::Foundry),
         _ => None,
+    }
+}
+
+fn zone_to_str(z: &ModifierZone) -> &'static str {
+    match z {
+        ModifierZone::Character => "character",
+        ModifierZone::Situational => "situational",
+    }
+}
+
+fn str_to_zone(s: &str) -> ModifierZone {
+    match s {
+        "situational" => ModifierZone::Situational,
+        _ => ModifierZone::Character,   // 'character' or unknown → default
     }
 }
 
@@ -35,6 +49,8 @@ fn row_to_modifier(r: &sqlx::sqlite::SqliteRow) -> Result<CharacterModifier, Str
     let captured_json: String = r.try_get("foundry_captured_labels_json").unwrap_or_else(|_| "[]".to_string());
     let foundry_captured_labels: Vec<String> = serde_json::from_str(&captured_json)
         .map_err(|e| format!("db/modifier.list: captured labels deserialize: {e}"))?;
+    let zone_str: String = r.try_get("zone").unwrap_or_else(|_| "character".to_string());
+    let zone = str_to_zone(&zone_str);
     Ok(CharacterModifier {
         id: r.get("id"),
         source,
@@ -48,6 +64,7 @@ fn row_to_modifier(r: &sqlx::sqlite::SqliteRow) -> Result<CharacterModifier, Str
         is_hidden: r.get::<bool, _>("is_hidden"),
         origin_template_id: r.get("origin_template_id"),
         foundry_captured_labels,
+        zone,
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),
     })
@@ -61,7 +78,8 @@ pub(crate) async fn db_list(
     let rows = sqlx::query(
         "SELECT id, source, source_id, name, description, effects_json,
                 binding_json, tags_json, is_active, is_hidden,
-                origin_template_id, foundry_captured_labels_json, created_at, updated_at
+                origin_template_id, foundry_captured_labels_json, zone,
+                created_at, updated_at
          FROM character_modifiers
          WHERE source = ? AND source_id = ?
          ORDER BY id ASC"
@@ -78,7 +96,8 @@ pub(crate) async fn db_list_all(pool: &SqlitePool) -> Result<Vec<CharacterModifi
     let rows = sqlx::query(
         "SELECT id, source, source_id, name, description, effects_json,
                 binding_json, tags_json, is_active, is_hidden,
-                origin_template_id, foundry_captured_labels_json, created_at, updated_at
+                origin_template_id, foundry_captured_labels_json, zone,
+                created_at, updated_at
          FROM character_modifiers
          ORDER BY id ASC"
     )
@@ -125,8 +144,8 @@ pub(crate) async fn db_add(
     let result = sqlx::query(
         "INSERT INTO character_modifiers
          (source, source_id, name, description, effects_json, binding_json, tags_json,
-          origin_template_id, foundry_captured_labels_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          origin_template_id, foundry_captured_labels_json, zone)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(source_to_str(&input.source))
     .bind(&input.source_id)
@@ -137,6 +156,7 @@ pub(crate) async fn db_add(
     .bind(&tags_json)
     .bind(input.origin_template_id)
     .bind(&captured_labels_json)
+    .bind(zone_to_str(&input.zone))
     .execute(pool)
     .await
     .map_err(|e| format!("db/modifier.add: {e}"))?;
@@ -158,7 +178,8 @@ pub(crate) async fn db_get(pool: &SqlitePool, id: i64) -> Result<CharacterModifi
     let row = sqlx::query(
         "SELECT id, source, source_id, name, description, effects_json,
                 binding_json, tags_json, is_active, is_hidden,
-                origin_template_id, foundry_captured_labels_json, created_at, updated_at
+                origin_template_id, foundry_captured_labels_json, zone,
+                created_at, updated_at
          FROM character_modifiers WHERE id = ?"
     )
     .bind(id)
@@ -282,6 +303,47 @@ pub(crate) async fn db_set_hidden(pool: &SqlitePool, id: i64, value: bool) -> Re
     Ok(())
 }
 
+/// Update the zone classification for a modifier row. Returns the updated row.
+///
+/// Defensive: rejects with a stable-prefix error if the target row's binding
+/// is Advantage — advantage-bound modifiers are zone-locked to Character
+/// because the box they live in is tied to live Foundry merit/flaw state.
+/// The UI matrix (src/lib/dnd/actions.ts) also prevents the call from being
+/// issued, but two layers of enforcement is the project's pattern for
+/// binding-rule invariants (cf. db_delete_by_advantage_binding).
+pub(crate) async fn db_set_zone(
+    pool: &SqlitePool,
+    id: i64,
+    zone: ModifierZone,
+) -> Result<CharacterModifier, String> {
+    let current = db_get(pool, id).await
+        .map_err(|e| if e.contains("not found") {
+            "db/modifier.set_zone: not found".to_string()
+        } else {
+            format!("db/modifier.set_zone: {e}")
+        })?;
+
+    if matches!(current.binding, ModifierBinding::Advantage { .. }) {
+        return Err("db/modifier.set_zone: cannot reclassify advantage-bound modifier".to_string());
+    }
+
+    let result = sqlx::query(
+        "UPDATE character_modifiers
+            SET zone = ?, updated_at = datetime('now')
+          WHERE id = ?"
+    )
+    .bind(zone_to_str(&zone))
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/modifier.set_zone: {e}"))?;
+
+    if result.rows_affected() == 0 {
+        return Err("db/modifier.set_zone: not found".to_string());
+    }
+    db_get(pool, id).await
+}
+
 #[tauri::command]
 pub async fn set_modifier_active(
     pool: tauri::State<'_, crate::DbState>,
@@ -342,8 +404,8 @@ pub(crate) async fn db_materialize_advantage(
     let result = sqlx::query(
         "INSERT INTO character_modifiers
          (source, source_id, name, description, effects_json, binding_json, tags_json,
-          foundry_captured_labels_json)
-         VALUES (?, ?, ?, ?, '[]', ?, '[]', '[]')"
+          foundry_captured_labels_json, zone)
+         VALUES (?, ?, ?, ?, '[]', ?, '[]', '[]', 'character')"
     )
     .bind(source_to_str(source))
     .bind(source_id)
@@ -495,6 +557,7 @@ mod tests {
             tags: vec!["Social".to_string()],
             origin_template_id: None,
             foundry_captured_labels: vec![],
+            zone: ModifierZone::Character,
         }
     }
 
@@ -705,6 +768,7 @@ mod tests {
             tags: vec!["combat".into()],
             origin_template_id: None,
             foundry_captured_labels: vec![],
+            zone: ModifierZone::Character,
         };
         let added = db_add(&pool, new).await.unwrap();
         let loaded = get_modifier_by_id(&pool, added.id).await.unwrap();
@@ -825,5 +889,49 @@ mod tests {
             "SELECT COUNT(*) FROM character_modifiers"
         ).fetch_one(&pool).await.unwrap();
         assert_eq!(remaining, 2, "actor-b and roll20 rows untouched");
+    }
+
+    #[tokio::test]
+    async fn db_set_zone_updates_and_returns_row() {
+        let pool = fresh_pool().await;
+        let m = db_add(&pool, NewCharacterModifier {
+            source: SourceKind::Foundry,
+            source_id: "actor-1".into(),
+            name: "Slippery".into(),
+            description: "".into(),
+            effects: vec![],
+            binding: ModifierBinding::Free,
+            tags: vec![],
+            origin_template_id: None,
+            foundry_captured_labels: vec![],
+            zone: ModifierZone::Character,
+        }).await.unwrap();
+        assert_eq!(m.zone, ModifierZone::Character);
+
+        let updated = db_set_zone(&pool, m.id, ModifierZone::Situational).await.unwrap();
+        assert_eq!(updated.zone, ModifierZone::Situational);
+        assert_eq!(updated.id, m.id);
+    }
+
+    #[tokio::test]
+    async fn db_set_zone_rejects_advantage_binding() {
+        let pool = fresh_pool().await;
+        let m = db_materialize_advantage(
+            &pool, &SourceKind::Foundry, "actor-1", "merit-xyz", "Beautiful", "",
+        ).await.unwrap();
+        assert_eq!(m.zone, ModifierZone::Character);
+
+        let err = db_set_zone(&pool, m.id, ModifierZone::Situational).await.unwrap_err();
+        assert!(err.contains("cannot reclassify advantage-bound"),
+            "expected advantage rejection, got: {err}");
+    }
+
+    #[tokio::test]
+    async fn db_materialize_advantage_locks_zone_to_character() {
+        let pool = fresh_pool().await;
+        let m = db_materialize_advantage(
+            &pool, &SourceKind::Foundry, "actor-1", "merit-xyz", "Resilience", "",
+        ).await.unwrap();
+        assert_eq!(m.zone, ModifierZone::Character);
     }
 }

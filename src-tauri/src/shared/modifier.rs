@@ -1,6 +1,18 @@
 use serde::{Deserialize, Serialize};
 use crate::bridge::types::SourceKind;
 
+/// Per-modifier zone. Drives box placement in the GM screen three-box layout
+/// and the green visual treatment for situational cards. Advantage-bound
+/// modifiers are zone-locked to `Character` (enforced by `db_set_zone` +
+/// `db_materialize_advantage`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModifierZone {
+    #[default]
+    Character,
+    Situational,
+}
+
 /// One row in the `character_modifiers` table, hydrated from JSON columns.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +35,8 @@ pub struct CharacterModifier {
     /// Empty = hand-rolled modifier with additive push semantics.
     #[serde(default)]
     pub foundry_captured_labels: Vec<String>,
+    #[serde(default)]
+    pub zone: ModifierZone,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -78,6 +92,8 @@ pub struct NewCharacterModifier {
     pub origin_template_id: Option<i64>,
     #[serde(default)]
     pub foundry_captured_labels: Vec<String>,
+    #[serde(default)]
+    pub zone: ModifierZone,
 }
 
 /// Patch shape for `update_character_modifier`. Active/hidden have dedicated
@@ -235,5 +251,53 @@ mod tests {
         });
         let n: NewCharacterModifier = serde_json::from_value(json).expect("deserialize");
         assert_eq!(n.foundry_captured_labels, vec!["Buff Modifier"]);
+    }
+
+    #[test]
+    fn character_modifier_zone_round_trips_json() {
+        let json = serde_json::json!({
+            "id": 9,
+            "source": "foundry",
+            "sourceId": "actor-x",
+            "name": "Slippery Floor",
+            "description": "",
+            "effects": [],
+            "binding": { "kind": "free" },
+            "tags": [],
+            "isActive": true,
+            "isHidden": false,
+            "originTemplateId": null,
+            "foundryCapturedLabels": [],
+            "zone": "situational",
+            "createdAt": "2026-05-14 00:00:00",
+            "updatedAt": "2026-05-14 00:00:00",
+        });
+        let m: CharacterModifier = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(m.zone, ModifierZone::Situational);
+        let round_trip = serde_json::to_value(&m).expect("serialize");
+        assert_eq!(round_trip["zone"], serde_json::json!("situational"));
+    }
+
+    #[test]
+    fn character_modifier_missing_zone_defaults_to_character() {
+        // Legacy rows from before the 0007 migration / IPC payloads omitting the field.
+        let json = serde_json::json!({
+            "id": 1,
+            "source": "foundry",
+            "sourceId": "actor-x",
+            "name": "Legacy",
+            "description": "",
+            "effects": [],
+            "binding": { "kind": "free" },
+            "tags": [],
+            "isActive": false,
+            "isHidden": false,
+            "originTemplateId": null,
+            "foundryCapturedLabels": [],
+            "createdAt": "2026-05-14 00:00:00",
+            "updatedAt": "2026-05-14 00:00:00",
+        });
+        let m: CharacterModifier = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(m.zone, ModifierZone::Character);
     }
 }
