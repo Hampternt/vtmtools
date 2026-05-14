@@ -410,12 +410,22 @@ pub trait BridgeSource: Send + Sync {
 }
 
 /// One event emitted from a single inbound frame. A frame may yield zero,
-/// one, or many events — e.g. an `actors` snapshot is one
-/// `CharactersUpdated`; a `hello` frame yields nothing; a roll frame
-/// yields one `RollReceived`.
+/// one, or many events.
 pub enum InboundEvent {
-    CharactersUpdated(Vec<CanonicalCharacter>),
+    /// Bulk truth from one source. The cache replaces this source's
+    /// slice (drops every prior entry whose `source` matches, then
+    /// inserts the new set). Empty `characters` is legal — "this source
+    /// now has zero characters". Fires from Roll20 `characters` /
+    /// Foundry `actors`.
+    CharactersSnapshot { source: SourceKind, characters: Vec<CanonicalCharacter> },
+    /// One character added or updated. Cache inserts/overwrites one entry.
+    CharacterUpdated(CanonicalCharacter),
+    /// One character removed from its source. Cache evicts one entry.
+    /// Foundry emits this from `deleteActor`; Roll20's wire protocol has
+    /// no per-event deletion yet (relies on snapshot reconciliation).
+    CharacterRemoved { source: SourceKind, source_id: String },
     RollReceived(CanonicalRoll),
+    ItemDeleted { source: SourceKind, source_id: String, item_id: String },
 }
 ```
 
@@ -730,6 +740,12 @@ Properties that must hold across all features.
   one Foundry GM browser session). State is held in
   `Arc<BridgeState>` shared between every accept loop and the Tauri
   command handlers; per-source `ConnectionInfo` lives inside it.
+- The merged characters cache is source-slice-authoritative on
+  `CharactersSnapshot`: when one source sends a fresh snapshot, every
+  prior cache entry from that source is dropped before the new set is
+  inserted. The cache never carries entries from a source whose latest
+  snapshot omitted them. Replaces the earlier merge-only semantic that
+  produced ghost-character bugs.
 - Dark-only. No theme toggle exists or will be added
   ([ADR 0004](docs/adr/0004-dark-only-theming.md)).
 
@@ -858,7 +874,9 @@ inventing a new hook.
 - Rust unit tests live as `#[cfg(test)] mod tests` inside each
   source file. Current test modules: `shared/dice.rs`,
   `shared/resonance.rs`, `db/dyscrasia.rs`, `db/chronicle.rs`,
-  `db/node.rs`, `db/edge.rs`, `tools/export.rs`. (Run
+  `db/node.rs`, `db/edge.rs`, `db/saved_character.rs`,
+  `tools/export.rs`, `bridge/foundry/mod.rs`,
+  `bridge/foundry/types.rs`. (Run
   `grep -rn "#\[cfg(test)\]" src-tauri/src` to confirm current
   state before editing; `db/chronicle.rs` currently carries two
   `#[cfg(test)]` annotations.)
