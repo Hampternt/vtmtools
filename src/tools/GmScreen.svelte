@@ -11,6 +11,7 @@
   import DropMenu from '$lib/components/dnd/DropMenu.svelte';
   import { dndStore } from '$lib/dnd/store.svelte';
   import type { BridgeCharacter, SourceKind } from '../types';
+  import type { SavedCharacter } from '$lib/saved-characters/api';
 
   onMount(() => {
     void initBridge();
@@ -54,6 +55,13 @@
   // Synthesize a BridgeCharacter shell for a saved-only character so CharacterRow renders it.
   function savedAsBridge(s: { source: SourceKind; sourceId: string; canonical: BridgeCharacter }): BridgeCharacter {
     return s.canonical;
+  }
+
+  // Per-row saved match: drives the vtt-deleted badge in CharacterRow.
+  function findSaved(c: BridgeCharacter): SavedCharacter | null {
+    return savedCharacters.list.find(
+      s => s.source === c.source && s.sourceId === c.source_id,
+    ) ?? null;
   }
 
   // Combined character list: live first, then saved-only (no live match).
@@ -171,6 +179,7 @@
               character={char}
               activeFilterTags={modifiers.activeFilterTags}
               showHidden={modifiers.showHidden}
+              saved={findSaved(char)}
             />
           </div>
         {/each}

@@ -5,6 +5,7 @@
     BridgeCharacter, CharacterModifier, ModifierEffect, FoundryItem, FoundryItemBonus,
     ModifierZone,
   } from '../../../types';
+  import type { SavedCharacter } from '$lib/saved-characters/api';
   import ModifierCard from './ModifierCard.svelte';
   import ModifierEffectEditor from './ModifierEffectEditor.svelte';
   import RollDispatcherPopover from './RollDispatcherPopover.svelte';
@@ -16,8 +17,9 @@
     character: BridgeCharacter;
     activeFilterTags: Set<string>;
     showHidden: boolean;
+    saved?: SavedCharacter | null;
   }
-  let { character, activeFilterTags, showHidden }: Props = $props();
+  let { character, activeFilterTags, showHidden, saved = null }: Props = $props();
 
   // DnD drop targets — one per zone, carrying the character so cross-row
   // moves (v2) can compare source.character to target.character. v1 only
@@ -450,6 +452,10 @@
 >
   <header>
     <h2>{character.name}</h2>
+    {#if saved?.deletedInVttAt}
+      <span class="vtt-deleted-badge"
+        title="Deleted in {character.source === 'foundry' ? 'Foundry' : 'Roll20'}">deleted</span>
+    {/if}
     <span class="source">{character.source}</span>
     {#if character.hunger != null}<span class="stat">Hunger {character.hunger}</span>{/if}
     {#if character.willpower}
@@ -673,5 +679,16 @@
       50%  { box-shadow: 0 0 0 6px rgba(210, 69, 69, 0); }
       100% { box-shadow: 0 0 0 0   rgba(210, 69, 69, 0); }
     }
+  }
+
+  .vtt-deleted-badge {
+    background: color-mix(in srgb, var(--text-muted) 40%, transparent);
+    color: var(--text-primary);
+    font-size: 0.6rem;
+    padding: 0 0.4em;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
   }
 </style>
