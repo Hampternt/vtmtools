@@ -39,7 +39,8 @@ function pickPlayerOwner(actor) {
 }
 
 export function hookActorChanges(socket) {
-  for (const ev of ["updateActor", "createActor", "deleteActor"]) {
+  // updateActor / createActor: send the full actor payload as actor_update.
+  for (const ev of ["updateActor", "createActor"]) {
     Hooks.on(ev, (actor) => {
       if (!socket || socket.readyState !== WebSocket.OPEN) return;
       try {
@@ -52,6 +53,21 @@ export function hookActorChanges(socket) {
       }
     });
   }
+  // deleteActor: send actor_deleted with just the id. The actor object
+  // passed to the hook is the just-deleted record; shipping its body
+  // would mislead the desktop into re-caching a corpse. The deletion IS
+  // the message. Matches the deleteItem path's item_deleted shape.
+  Hooks.on("deleteActor", (actor) => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    try {
+      socket.send(JSON.stringify({
+        type: "actor_deleted",
+        actor_id: actor.id,
+      }));
+    } catch (e) {
+      console.warn(`[${MODULE_ID}] failed to push deleteActor:`, e);
+    }
+  });
 }
 
 export function hookItemChanges(socket) {
