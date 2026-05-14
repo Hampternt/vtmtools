@@ -3,6 +3,8 @@
   import DragSource from '../dnd/DragSource.svelte';
   import type { DragSource as DragSourceType } from '../../dnd/types';
   import CardDragHandle from './CardDragHandle.svelte';
+  import CardContextMenu, { type CardAction } from './CardContextMenu.svelte';
+  import { dndStore } from '../../dnd/store.svelte';
 
   interface Props {
     /**
@@ -80,6 +82,36 @@
 
   let cogEl: HTMLButtonElement | undefined = $state();
 
+  let cardEl: HTMLDivElement | undefined = $state();
+
+  let ctxOpen = $state(false);
+  let ctxAnchor = $state<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  function handleContextMenu(e: MouseEvent) {
+    // Right-click during a held DnD pickup is reserved for cancellation by
+    // GmScreen.svelte's global listener. Do nothing here in that case.
+    if (dndStore.held !== null) return;
+    e.preventDefault();
+    ctxAnchor = { x: e.clientX, y: e.clientY };
+    ctxOpen = true;
+  }
+
+  function closeCtx() { ctxOpen = false; }
+
+  let cardActions = $derived<CardAction[]>([
+    {
+      kind: 'item',
+      label: 'Open',
+      shortcut: 'Enter',
+      onActivate: () => {
+        // Reuse the existing onOpenEditor — caller passes the card element
+        // as anchor (the overlay ignores it post-Task-3, but the signature
+        // stays for compatibility).
+        if (cardEl) onOpenEditor(cardEl);
+      },
+    },
+  ]);
+
   function summarize(e: ModifierEffect): string {
     if (e.kind === 'note') return e.note ?? 'note';
     const sign = (e.delta ?? 0) >= 0 ? '+' : '';
@@ -114,10 +146,12 @@
 </script>
 
 <div
+  bind:this={cardEl}
   class="modifier-card"
   data-active={modifier.isActive ? 'true' : 'false'}
   data-hidden={modifier.isHidden ? 'true' : 'false'}
   data-zone={modifier.zone}
+  oncontextmenu={handleContextMenu}
 >
   <DragSource source={dragSource} disabled={dragDisabled}>
     <CardDragHandle isActive={modifier.isActive} zone={modifier.zone} />
@@ -221,6 +255,7 @@
       onclick={onHide}
     >{modifier.isHidden ? '+' : '×'}</button>
   </div>
+  <CardContextMenu open={ctxOpen} anchor={ctxAnchor} actions={cardActions} onClose={closeCtx} />
 </div>
 
 <style>
