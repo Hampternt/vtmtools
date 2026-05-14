@@ -29,6 +29,10 @@
     {#if drift}
       <span class="drift-badge" title="Live differs from saved snapshot">drift</span>
     {/if}
+    {#if saved?.deletedInVttAt}
+      <span class="vtt-deleted-badge"
+        title="Deleted in {character.source === 'foundry' ? 'Foundry' : 'Roll20'} on {saved.deletedInVttAt}">deleted</span>
+    {/if}
     <span class="rail-spacer"></span>
     <div class="actions">
       {#if saved}
@@ -37,6 +41,9 @@
         <button type="button" class="btn-save"
           onclick={() => savedCharacters.update(saved.id, character)}
           disabled={savedCharacters.loading}>Update saved</button>
+        <button type="button" class="btn-save btn-forget"
+          onclick={() => savedCharacters.delete(saved.id)}
+          disabled={savedCharacters.loading}>Forget saved</button>
       {:else}
         <button type="button" class="btn-save"
           onclick={saveCharacter}
@@ -89,5 +96,22 @@
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-weight: 600;
+  }
+  .vtt-deleted-badge {
+    background: color-mix(in srgb, var(--text-muted) 40%, transparent);
+    color: var(--text-primary);
+    font-size: calc(0.6rem * var(--card-scale, 1));
+    padding: 0 0.4em;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+  }
+  .btn-forget {
+    color: var(--text-muted);
+  }
+  .btn-forget:hover:not(:disabled) {
+    color: var(--accent-amber);
+    border-color: var(--accent-amber);
   }
 </style>
