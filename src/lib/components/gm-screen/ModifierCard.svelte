@@ -34,6 +34,14 @@
     onOpenEditor: (anchor: HTMLElement) => void;
     onHide: () => void;
     /**
+     * Hard-delete handler for free-bound cards. Distinct from onHide — when
+     * present, the card renders a 🗑 trash button next to ×. Caller is
+     * responsible for the confirm() dialog before invoking. Undefined for
+     * advantage-bound cards (their lifecycle is owned by the live Foundry
+     * data, not the GM).
+     */
+    onDelete?: () => void;
+    /**
      * Live-looked-up name of the originating status template, when the card
      * has `originTemplateId` set and the template still exists. Null clears
      * the provenance subtitle. Looked up by parent (CharacterRow) — we don't
@@ -61,7 +69,7 @@
     conditionalsSkipped = [],
     canPush = false, onPush,
     canReset = false, onReset,
-    onToggleActive, onOpenEditor, onHide,
+    onToggleActive, onOpenEditor, onHide, onDelete,
     originTemplateName = null,
     showOverride = false,
     onSaveAsOverride,
@@ -96,55 +104,61 @@
   class="modifier-card"
   data-active={modifier.isActive ? 'true' : 'false'}
   data-hidden={modifier.isHidden ? 'true' : 'false'}
+  data-zone={modifier.zone}
 >
-  <div class="head">
-    <span class="name" title={modifier.name}>
-      {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}{#if showOverride}<span class="override-mark" title="Saved local override — this card's data comes from your saved copy, which supersedes the live Foundry read-through">*</span>{/if}
-    </span>
-    <button
-      bind:this={cogEl}
-      class="cog"
-      title="Edit effects"
-      onclick={() => cogEl && onOpenEditor(cogEl)}
-    >⚙</button>
-  </div>
-  {#if originTemplateName}
-    <p class="origin">from "{originTemplateName}"</p>
-  {/if}
-  {#if bonuses.length > 0}
-    <div class="bonuses">
-      {#each bonuses as b}
-        <p class="bonus" title={`${summarizeBonus(b)}${b.source ? ' — ' + b.source : ''}`}>
-          <span class="bonus-value">{summarizeBonus(b)}</span>
-          {#if b.source}<span class="bonus-source">{b.source}</span>{/if}
-        </p>
-      {/each}
+  <div class="card-body">
+    {#if modifier.zone === 'situational'}
+      <span class="zone-chip" aria-label="Situational modifier">Situational</span>
+    {/if}
+    <div class="head">
+      <span class="name" title={modifier.name}>
+        {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}{#if showOverride}<span class="override-mark" title="Saved local override — this card's data comes from your saved copy, which supersedes the live Foundry read-through">*</span>{/if}
+      </span>
+      <button
+        bind:this={cogEl}
+        class="cog"
+        title="Edit effects"
+        onclick={() => cogEl && onOpenEditor(cogEl)}
+      >⚙</button>
     </div>
-  {/if}
-  {#if conditionalsSkipped.length > 0}
-    <p
-      class="conditionals-badge"
-      title={conditionalsSkipped
-        .map(b => `${b.source ?? '(unnamed)'} — ${b.activeWhen?.check ?? '?'}`)
-        .join('\n')}
-    >
-      ({conditionalsSkipped.length} conditional{conditionalsSkipped.length === 1 ? '' : 's'})
-    </p>
-  {/if}
-  <div class="effects">
-    {#if modifier.effects.length === 0}
-      <p class="no-effect">(no effect)</p>
-    {:else}
-      {#each modifier.effects as e}
-        <p class="effect" title={summarize(e)}>{summarize(e)}</p>
-      {/each}
+    {#if originTemplateName}
+      <p class="origin">from "{originTemplateName}"</p>
+    {/if}
+    {#if bonuses.length > 0}
+      <div class="bonuses">
+        {#each bonuses as b}
+          <p class="bonus" title={`${summarizeBonus(b)}${b.source ? ' — ' + b.source : ''}`}>
+            <span class="bonus-value">{summarizeBonus(b)}</span>
+            {#if b.source}<span class="bonus-source">{b.source}</span>{/if}
+          </p>
+        {/each}
+      </div>
+    {/if}
+    {#if conditionalsSkipped.length > 0}
+      <p
+        class="conditionals-badge"
+        title={conditionalsSkipped
+          .map(b => `${b.source ?? '(unnamed)'} — ${b.activeWhen?.check ?? '?'}`)
+          .join('\n')}
+      >
+        ({conditionalsSkipped.length} conditional{conditionalsSkipped.length === 1 ? '' : 's'})
+      </p>
+    {/if}
+    <div class="effects">
+      {#if modifier.effects.length === 0}
+        <p class="no-effect">(no effect)</p>
+      {:else}
+        {#each modifier.effects as e}
+          <p class="effect" title={summarize(e)}>{summarize(e)}</p>
+        {/each}
+      {/if}
+    </div>
+    {#if modifier.tags.length > 0}
+      <div class="tags">
+        {#each modifier.tags as t}<span class="tag">#{t}</span>{/each}
+      </div>
     {/if}
   </div>
-  {#if modifier.tags.length > 0}
-    <div class="tags">
-      {#each modifier.tags as t}<span class="tag">#{t}</span>{/each}
-    </div>
-  {/if}
   <div class="foot">
     <button
       class="toggle"
@@ -174,6 +188,14 @@
         aria-label="Reset card"
         onclick={onReset}
       >↺</button>
+    {/if}
+    {#if onDelete}
+      <button
+        class="delete"
+        title="Delete card permanently"
+        aria-label="Delete card permanently"
+        onclick={onDelete}
+      >🗑</button>
     {/if}
     <button
       class="hide"
@@ -415,6 +437,48 @@
   /* Hidden cards are dimmed to ~0.45 opacity, but the unhide affordance
      must stay discoverable without forcing the GM to hover-hunt for it. */
   .modifier-card[data-hidden="true"] .hide { opacity: 1; }
+
+  .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .modifier-card[data-zone="situational"] {
+    background: var(--bg-situational-card);
+    border-color: var(--border-situational);
+  }
+  .modifier-card[data-zone="situational"][data-active="true"] {
+    border-color: var(--accent-situational-bright);
+    background: var(--bg-situational-card);
+  }
+
+  .zone-chip {
+    align-self: flex-start;
+    font-size: 0.55rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 3px;
+    background: var(--accent-situational);
+    color: #d8f0d8;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.3;
+  }
+
+  .delete {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 120ms ease, color 120ms ease;
+  }
+  .modifier-card:hover .delete,
+  .delete:focus { opacity: 1; }
+  .delete:hover { color: var(--accent-amber); }
 
   @media (prefers-reduced-motion: reduce) {
     .modifier-card {
