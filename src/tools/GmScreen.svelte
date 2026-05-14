@@ -89,9 +89,12 @@
     const onGlobalDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
       // DropZone's pointerdown stops propagation, so this only fires for
-      // clicks outside any drop zone — cancel the pickup.
+      // clicks outside any drop zone — cancel the pickup. EXCEPT when the
+      // click is inside the open DropMenu (which is position:fixed outside
+      // any drop zone but is itself part of the DnD lifecycle — its action
+      // buttons handle their own clicks via dndStore.executeAction).
       const target = e.target as HTMLElement | null;
-      if (target && target.closest('.dnd-drop-zone')) return;
+      if (target && (target.closest('.dnd-drop-zone') || target.closest('.drop-menu'))) return;
       dndStore.cancel();
     };
 

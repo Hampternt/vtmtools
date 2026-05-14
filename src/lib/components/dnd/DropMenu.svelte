@@ -65,6 +65,7 @@
   .action {
     display: block;
     width: 100%;
+    box-sizing: border-box;
     text-align: left;
     background: transparent;
     color: var(--text-primary);

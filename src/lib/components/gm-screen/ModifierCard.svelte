@@ -131,6 +131,7 @@
           bind:this={cogEl}
           class="cog"
           title="Edit effects"
+          onpointerdown={(e) => e.stopPropagation()}
           onclick={() => cogEl && onOpenEditor(cogEl)}
         >⚙</button>
       </div>
