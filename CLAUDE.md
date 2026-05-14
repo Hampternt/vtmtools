@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+vtmtools is a single-GM offline desktop tool for running Vampire: The
+Masquerade 5e — Tauri 2 + SvelteKit + Rust/SQLite, dark-only, with two
+localhost bridges to Roll20 and Foundry. Single-machine, single-user;
+no cloud, no auth, no network beyond loopback.
+
 Guidance for Claude Code when working in this repository. Load this file
 plus `ARCHITECTURE.md` for every task. Load anything else only when the
 read-scope guide below says to.
@@ -54,6 +59,9 @@ npm run tauri build
 # Compile-check Rust only
 cargo check --manifest-path src-tauri/Cargo.toml
 
+# Run Rust tests only (faster than verify.sh for backend iteration)
+cargo test --manifest-path src-tauri/Cargo.toml
+
 # Run all correctness gates (type-check, cargo tests, frontend build)
 ./scripts/verify.sh
 ```
@@ -76,6 +84,10 @@ in `ARCHITECTURE.md` §10 — do not "fix" them.
 - Never commit without running `./scripts/verify.sh` first.
 - Never call `invoke(...)` directly from a Svelte component — use the
   typed wrapper in `src/lib/**/api.ts` (`ARCHITECTURE.md` §4).
+- Never add a `#[tauri::command]` without updating `ARCHITECTURE.md` §4
+  IPC inventory in the same commit — both the module's per-file list
+  AND the running total. Drift here is silent and accumulates fast
+  (a recent audit caught 31 unregistered commands across 8 modules).
 - Roadmap tracking lives in GitHub Issues + the "vtmtools roadmap"
   Project board (https://github.com/users/Hampternt/projects/3).
   Create / modify issues only when the user explicitly asks ("add a
