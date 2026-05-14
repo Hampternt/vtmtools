@@ -609,6 +609,8 @@
   }
 
   .modifier-row {
+    container-type: inline-size;
+    container-name: modrow;
     --card-trans-duration: 600ms;
     --card-trans-easing: linear(
       0, 0.01 0.8%, 0.038 1.6%, 0.154 3.4%, 0.781 9.7%, 1.01 12.5%,
@@ -616,12 +618,12 @@
       1.208 21.6%, 1.172 23.6%, 1.057 28.6%, 1.007 31.2%, 0.969 34.1%,
       0.951 37.1%, 0.953 40.9%, 0.998 50.4%, 1.011 56%, 0.998 74.7%, 1
     );
-    --card-width: 9rem;
+    --card-width: clamp(9rem, 14cqi, 14rem);
     --card-overlap: 0.55;
     --card-shift-delta: 0.5rem;
     /* --cards is set inline via the style prop above to drive the z-stack centering math. */
     position: relative;
-    height: 8rem;
+    height: 9.5rem;
     perspective: 800px;
   }
 
