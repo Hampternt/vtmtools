@@ -2,6 +2,7 @@
   import type { CharacterModifier, ModifierEffect, FoundryItemBonus } from '../../../types';
   import DragSource from '../dnd/DragSource.svelte';
   import type { DragSource as DragSourceType } from '../../dnd/types';
+  import CardDragHandle from './CardDragHandle.svelte';
 
   interface Props {
     /**
@@ -119,6 +120,7 @@
   data-zone={modifier.zone}
 >
   <DragSource source={dragSource} disabled={dragDisabled}>
+    <CardDragHandle isActive={modifier.isActive} zone={modifier.zone} />
     <div class="card-body">
       {#if modifier.zone === 'situational'}
         <span class="zone-chip" aria-label="Situational modifier">Situational</span>
@@ -168,8 +170,8 @@
         {/if}
       </div>
       {#if modifier.tags.length > 0}
-        <div class="tags">
-          {#each modifier.tags as t}<span class="tag">#{t}</span>{/each}
+        <div class="tags" title={modifier.tags.map(t => `#${t}`).join(' ')}>
+          {#each modifier.tags as t, i}{#if i > 0}{' '}{/if}<span class="tag">#{t}</span>{/each}
         </div>
       {/if}
     </div>
@@ -245,7 +247,7 @@
     flex-direction: column;
     gap: 0.4rem;
     /* Safety net: even with single-line bonuses/effects, a card with many
-       rows could still exceed the fixed 8rem height. Clip rather than spill
+       rows could still exceed the fixed card height. Clip rather than spill
        the .foot (toggle / hide) outside the card boundary. The card's own
        :hover box-shadow renders outside the box and is unaffected. */
     overflow: hidden;
@@ -351,8 +353,8 @@
     display: flex;
     gap: 0.4rem;
     align-items: baseline;
-    /* Stay on one line — wrapping pushed total content past 8rem and
-       spilled the foot below the card. Full text remains in the title. */
+    /* Stay on one line — wrapping pushed total content past the card height
+       and spilled the foot below the card. Full text remains in the title. */
     flex-wrap: nowrap;
     min-width: 0;
     overflow: hidden;
@@ -395,8 +397,20 @@
   }
   .no-effect { color: var(--text-muted); font-style: italic; }
 
-  .tags { display: flex; flex-wrap: wrap; gap: 0.2rem; }
-  .tag { font-size: 0.65rem; color: var(--text-muted); }
+  /* Single-line truncation: when tags overflow the card width, they ellipse
+     mid-string ("#social #physi…") rather than wrapping onto a second row
+     and pushing .foot past the card's `overflow: hidden` boundary. Hover
+     title surfaces the full tag list. */
+  .tags {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    font-size: 0.65rem;
+    line-height: 1.2;
+  }
+  .tag { color: var(--text-muted); }
 
   .foot { display: flex; justify-content: space-between; align-items: center; margin-top: auto; }
   .toggle {
@@ -477,6 +491,14 @@
     gap: 0.4rem;
     flex: 1;
     min-width: 0;
+    /* min-height: 0 overrides the default `min-height: auto` on flex children,
+       which would otherwise let content (tags, many bonuses) grow past the
+       card-body's flex allocation and shove .foot below the card's
+       `overflow: hidden` boundary, hiding the ON/OFF toggle. Combined with
+       overflow: hidden here so any excess clips inside card-body rather than
+       displacing the foot. */
+    min-height: 0;
+    overflow: hidden;
   }
 
   .modifier-card[data-zone="situational"] {
