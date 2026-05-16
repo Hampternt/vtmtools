@@ -563,10 +563,13 @@ Expected: cargo green; TS still failing (Task 6 resolves).
 
 - [ ] **Step 5: Commit IF changes were made**
 
-If Step 1 required edits to test fixtures:
+If Step 1 required edits to test fixtures, stage only the files Step 1 actually modified (do NOT use `git add -A` — the working tree may contain unrelated state and blanket staging risks committing secrets, build artifacts, or other in-flight work). The likely modified files are some subset of:
 
 ```
-git add -A
+git add src-tauri/src/db/modifier.rs \
+        src-tauri/src/tools/character.rs \
+        src-tauri/src/db/saved_character.rs
+# (only the file(s) Step 1 actually touched — verify via `git status` first)
 git commit -m "$(cat <<'EOF'
 Update Advantage test fixtures for kind/source_attribution
 

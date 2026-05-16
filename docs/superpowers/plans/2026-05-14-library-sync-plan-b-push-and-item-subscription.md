@@ -8,9 +8,9 @@
 
 **Goal:** Two independent pieces of Foundry-bridge work that ship together because they share the same module version bump:
 - **#27 — Item subscription enablement.** Extend the `bridge.subscribe` protocol to accept `collection: "item"`. The Foundry module hooks `createItem`/`updateItem`/`deleteItem` for **world-level** Item docs only (embedded actor items already arrive via the existing actor enrichment path). Desktop adds `FoundryInbound::Items` snapshot variant + per-item upsert/delete variants + `bridge://foundry/items-updated` event.
-- **#13 — Push library entry → Foundry world.** New `world.*` umbrella (one helper: `world.create_item`) and a Tauri command `push_advantage_to_world(id: i64)` that loads the local advantage row by id, maps `kind → featuretype`, and pushes a new world-level Item doc to the active Foundry world. Composes Plan A's `kind` column directly. Push button on each AdvantagesManager row gated on Foundry connectivity.
+- **#13 — Push library entry → Foundry world.** New `storyteller.*` umbrella (one helper: `storyteller.create_world_item`) and a Tauri command `push_advantage_to_world(id: i64)` that loads the local advantage row by id, maps `kind → featuretype`, and pushes a new world-level Item doc to the active Foundry world. Composes Plan A's `kind` column directly. Push button on each AdvantagesManager row gated on Foundry connectivity.
 
-**Architecture:** Two umbrellas added at once because they share a single module version bump (0.6.0 — additive). The `item.*` subscription is purely **inbound**: the desktop sends `bridge.subscribe { collection: "item" }`, the module attaches Foundry hooks and pushes initial snapshot + future deltas. The `world.*` umbrella is purely **outbound**: the desktop sends `world.create_item`, the module calls `Item.create(...)` at world level. No interaction between the two — they're in the same plan only because they ship together to keep the bridge protocol consistent.
+**Architecture:** Two umbrellas added at once because they share a single module version bump (0.6.0 — additive). The `item.*` subscription is purely **inbound**: the desktop sends `bridge.subscribe { collection: "item" }`, the module attaches Foundry hooks and pushes initial snapshot + future deltas. The `storyteller.*` umbrella is purely **outbound**: the desktop sends `storyteller.create_world_item`, the module calls `Item.create(...)` at world level. No interaction between the two — they're in the same plan only because they ship together to keep the bridge protocol consistent.
 
 **World-level vs. embedded distinction:** Foundry items have a `parent` property — `null` for world-level Item docs, set to an Actor for embedded items. The new subscriber filters `Hooks.on("createItem", item => { if (item.parent === null) push(...) })` so world-level items are reported once via the new path, never double-counted with the existing actor-enrichment path.
 
@@ -31,13 +31,13 @@
 ## File structure
 
 ### New files
-- `src-tauri/src/bridge/foundry/actions/world.rs` — `build_create_world_item(name, featuretype, description, points) -> Result<Value, String>` builder; module-prefixed errors per ARCH §7. The `world.*` umbrella is reserved here even though only one helper ships in this milestone — future world-level helpers will register here without churning the umbrella convention.
-- `src-tauri/src/tools/library_push.rs` — `push_advantage_to_world(id: i64)` Tauri command. Loads the advantage by id; maps `kind` → featuretype string; composes `actions::world::build_create_world_item(...)`; routes via `bridge::commands::send_to_source_inner(state, SourceKind::Foundry, text)`. No-op (returns Ok) if Foundry not connected — same semantics as `bridge_set_attribute` per `send_to_source_inner` impl.
-- `vtmtools-bridge/scripts/foundry-actions/world.js` — handler `createWorldItem(msg)` that calls `Item.create({ type: "feature", name, system: { featuretype, description, points } })` at world level. No `wireExecutor` wrapper (no `actor_id` resolution needed — world-level).
+- `src-tauri/src/tools/library_push.rs` — `push_advantage_to_world(id: i64)` Tauri command. Loads the advantage by id; maps `kind` → featuretype string; composes `actions::storyteller::build_create_world_item(...)`; routes via `bridge::commands::send_to_source_inner(state, SourceKind::Foundry, text)`. No-op (returns Ok) if Foundry not connected — same semantics as `bridge_set_attribute` per `send_to_source_inner` impl.
 - `vtmtools-bridge/scripts/foundry-actions/item.js` — `itemsSubscriber.attach(socket) / .detach()` following the `actorsSubscriber` template. Pushes initial snapshot from `game.items.contents` (world-level only). Hooks `createItem`/`updateItem`/`deleteItem`; each hook filters `if (item.parent !== null) return;` to keep embedded-on-actor items out.
 - `src/lib/library/api.ts` — typed wrapper `pushAdvantageToWorld(id: number): Promise<void>` for the new Tauri command. (Library namespace established here so Plan C extends it with `importAdvantagesFromWorld`.)
 
 ### Modified files
+- `src-tauri/src/bridge/foundry/actions/storyteller.rs` — replace the reserved-umbrella stub (1-line comment) with `build_create_world_item(name, featuretype, description, points) -> Result<Value, String>` builder; module-prefixed errors per ARCH §7. The `storyteller.*` umbrella is activated by Plan B's first helper — future helpers register here without churning the umbrella convention.
+- `vtmtools-bridge/scripts/foundry-actions/storyteller.js` — replace the reserved-umbrella stub (`export const handlers = {}`) with `createWorldItem(msg)` handler that calls `Item.create({ type: "feature", name, system: { featuretype, description, points } })` at world level. No `wireExecutor` wrapper (no `actor_id` resolution needed — world-level).
 - `src-tauri/src/bridge/foundry/types.rs` — add `FoundryInbound::Items { items: Vec<FoundryWorldItem> }`, `FoundryInbound::WorldItemUpsert { item: FoundryWorldItem }`, `FoundryInbound::WorldItemDeleted { item_id: String }`; add `FoundryWorldItem` struct (id, name, type, featuretype: Option, system: Value).
 - `src-tauri/src/bridge/types.rs` — add `CanonicalWorldItem { source: SourceKind, id, name, kind: String, featuretype: Option<String>, system: Value }` (canonical source-agnostic shape; `system` stays Value to keep the bridge a dumb pipe).
 - `src-tauri/src/bridge/source.rs` — extend `InboundEvent` enum with `WorldItemsSnapshot { source, items }`, `WorldItemUpsert { source, item }`, `WorldItemDeleted { source, item_id }` variants.
@@ -46,16 +46,14 @@
 - `src-tauri/src/bridge/mod.rs::accept_loop` — three new arms in the event-routing match (snapshot / upsert / delete). All three emit `bridge://foundry/items-updated` with the full snapshot from a new `BridgeState.world_items: HashMap<SourceKind, HashMap<String, CanonicalWorldItem>>` cache. Pattern mirrors `bridge://characters-updated` (snapshot replaces, upsert inserts, delete evicts; emit full snapshot each time).
 - `src-tauri/src/bridge/mod.rs::BridgeState` — add `world_items: tokio::sync::Mutex<HashMap<SourceKind, HashMap<String, CanonicalWorldItem>>>`.
 - `src-tauri/src/bridge/commands.rs` — add `bridge_get_world_items(source: SourceKind) -> Vec<CanonicalWorldItem>` for frontend initial-load (mirrors `bridge_get_characters`).
-- `src-tauri/src/bridge/foundry/actions/mod.rs` — add `pub mod world;`.
 - `src-tauri/src/lib.rs` — register `push_advantage_to_world` and `bridge_get_world_items` in `invoke_handler!`.
 - `src-tauri/src/tools/mod.rs` — `pub mod library_push;`.
-- `vtmtools-bridge/scripts/foundry-actions/index.js` — import + spread `worldHandlers` from `./world.js`.
 - `vtmtools-bridge/scripts/foundry-actions/bridge.js` — register `item: itemsSubscriber` in the `subscribers` map.
 - `vtmtools-bridge/module.json` — version 0.5.0 → 0.6.0 (additive).
 - `src/store/bridge.svelte.ts` — add `worldItems: Record<SourceKind, CanonicalWorldItem[]>` reactive state; subscribe to `bridge://foundry/items-updated` and hydrate from `bridge_get_world_items` on mount. (Plan C consumes this.)
 - `src/types.ts` — mirror `CanonicalWorldItem`.
 - `src/tools/AdvantagesManager.svelte` — add a "Push to world" button per row, visible only when Foundry connection is active (consume `bridgeStatus.foundry` from `src/store/bridge.svelte.ts`). On click, call `pushAdvantageToWorld(id)`; toast on error.
-- `ARCHITECTURE.md` §4 — append `push_advantage_to_world` to `tools/library_push.rs` IPC entry; append `bridge_get_world_items` to `bridge/commands.rs` entry; bump command total 63 → 65; add `bridge://foundry/items-updated` to the events table; add `world.*` umbrella + `item` subscription collection mentions to the Bridge WebSocket protocol section.
+- `ARCHITECTURE.md` §4 — append `push_advantage_to_world` to `tools/library_push.rs` IPC entry; append `bridge_get_world_items` to `bridge/commands.rs` entry; bump command total 63 → 65; add `bridge://foundry/items-updated` to the events table; add `storyteller.*` umbrella + `item` subscription collection mentions to the Bridge WebSocket protocol section.
 
 ### Files explicitly NOT touched
 - `src-tauri/src/db/advantage.rs` — Plan A territory (frozen post-Plan-A).
@@ -73,17 +71,17 @@
 | 2 | Add `CanonicalWorldItem` in `bridge/types.rs` + mirror in `src/types.ts` | 1 | NO (struct definition) |
 | 3 | Add `InboundEvent` variants in `bridge/source.rs` + `translate.rs::to_canonical_world_item` | 1, 2 | YES (1 test for translate) |
 | 4 | Wire `FoundryInbound` → `InboundEvent` arms in `bridge/foundry/mod.rs::handle_inbound` | 3 | YES (3 tests, one per variant) |
-| 5 | Extend `BridgeState` with `world_items` cache + route `InboundEvent` arms in `bridge/mod.rs` | 4 | NO (covered by manual smoke + cargo build) |
+| 5 | Extend `BridgeState` with `world_items` cache + route `InboundEvent` arms in `bridge/mod.rs` + add `bridge_get_world_items` Tauri command (bumps ARCH §4 total 63 → 64 + adds events table row in-commit) | 4 | NO (covered by manual smoke + cargo build) |
 | 6 | New JS `vtmtools-bridge/scripts/foundry-actions/item.js` with `itemsSubscriber` (world-level filter) + register `item` in `bridge.js` subscribers | none (JS-only) | NO (manual smoke against live Foundry world) |
-| 7 | New JS `vtmtools-bridge/scripts/foundry-actions/world.js` with `createWorldItem` handler + register in `index.js` | none (JS-only) | NO (manual smoke against live Foundry world) |
+| 7 | New JS `vtmtools-bridge/scripts/foundry-actions/storyteller.js` with `createWorldItem` handler + register in `index.js` | none (JS-only) | NO (manual smoke against live Foundry world) |
 | 8 | Bump `module.json` 0.5.0 → 0.6.0 | 6, 7 | NO |
-| 9 | New Rust `bridge/foundry/actions/world.rs` with `build_create_world_item` builder | none (Rust-only, parallel with 6/7/8) | YES (envelope shape + invalid featuretype rejection) |
-| 10 | New Rust `tools/library_push.rs` with `push_advantage_to_world` Tauri command | 9 + Plan A | YES (1 happy-path test against in-memory pool + faked outbound channel) |
-| 11 | Register `push_advantage_to_world` + `bridge_get_world_items` in `lib.rs` | 10 + (new `bridge_get_world_items` from Task 5) | NO |
+| 9 | New Rust `bridge/foundry/actions/storyteller.rs` with `build_create_world_item` builder | none (Rust-only, parallel with 6/7/8) | YES (envelope shape + invalid featuretype rejection) |
+| 10 | New Rust `tools/library_push.rs` with `push_advantage_to_world` Tauri command (bumps ARCH §4 total 64 → 65 in-commit) | 9 + Plan A | YES (1 happy-path test against in-memory pool + faked outbound channel) |
+| 11 | Register `push_advantage_to_world` + `bridge_get_world_items` in `lib.rs` (no ARCH change — declarations already documented) | 10 + (new `bridge_get_world_items` from Task 5) | NO |
 | 12 | Frontend typed wrapper `src/lib/library/api.ts::pushAdvantageToWorld` | 11 | NO |
 | 13 | `src/store/bridge.svelte.ts` reactive `worldItems` state + event subscription | 5 | NO |
 | 14 | AdvantagesManager "Push to world" button | 12, 13 | NO (manual smoke) |
-| 15 | ARCHITECTURE.md §4 updates | 14 | NO |
+| 15 | ARCHITECTURE.md §4 — Bridge WebSocket protocol prose only (IPC inventory and events-table parts already landed in Tasks 5 + 10) | 14 | NO |
 | 16 | Final verification gate (incl. live-Foundry E2E smoke) | all | runs `./scripts/verify.sh` + manual E2E |
 
 Tasks 1, 6, 7, 9 are independent (Rust types / JS subscriber / JS handler / Rust builder) and can dispatch in parallel after this plan begins. Tasks 2–5 thread the Rust inbound side sequentially. Tasks 10–14 thread the push outbound side sequentially.
@@ -659,16 +657,24 @@ pub async fn bridge_get_world_items(
 
 In `src-tauri/src/lib.rs::invoke_handler!`, append `bridge::commands::bridge_get_world_items` to the command list (next to `bridge_get_rolls`).
 
-- [ ] **Step 5: Run `./scripts/verify.sh`**
+- [ ] **Step 5: Update `ARCHITECTURE.md` §4 (same-commit rule)**
+
+CLAUDE.md mandates that any new `#[tauri::command]` lands in the same commit as its ARCH §4 entry. Edit `ARCHITECTURE.md` §4:
+- Append `bridge_get_world_items` to the per-file IPC entry for `bridge/commands.rs`.
+- Bump the running command total: **63 → 64**.
+- Add `bridge://foundry/items-updated` to the events table (this task is where it starts being emitted).
+
+- [ ] **Step 6: Run `./scripts/verify.sh`**
 
 Expected: green.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```
 git add src-tauri/src/bridge/mod.rs \
         src-tauri/src/bridge/commands.rs \
-        src-tauri/src/lib.rs
+        src-tauri/src/lib.rs \
+        ARCHITECTURE.md
 git commit -m "$(cat <<'EOF'
 Route world-item events through BridgeState + emit
 bridge://foundry/items-updated
@@ -676,10 +682,9 @@ bridge://foundry/items-updated
 Adds BridgeState.world_items cache and three accept_loop arms
 (snapshot / upsert / delete) that emit a full snapshot to the
 frontend on every change. New Tauri command bridge_get_world_items
-for initial-load hydration.
-
-Command surface 63 → 64 (push_advantage_to_world arrives in next
-plan-B commit).
+for initial-load hydration. ARCH §4 IPC inventory bumped
+(63 → 64) and events table updated in the same commit, per
+CLAUDE.md same-commit rule.
 
 Refs #27.
 
@@ -800,7 +805,11 @@ const subscribers = {
 
 Smoke verification is part of Task 16's E2E gate. For this task's verification: confirm `npm run check` (frontend type-check has no opinion on the bridge module — JS module is loaded by Foundry runtime, not by SvelteKit).
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Run `./scripts/verify.sh`**
+
+Required by CLAUDE.md before every commit, even for JS-only changes. The Rust/TS toolchain pieces of `verify.sh` will no-op on the JS file changes, but a green run confirms nothing else regressed.
+
+- [ ] **Step 5: Commit**
 
 ```
 git add vtmtools-bridge/scripts/foundry-actions/item.js \
@@ -823,32 +832,34 @@ EOF
 
 ---
 
-## Task 7: New JS `foundry-actions/world.js` with `createWorldItem` handler
+## Task 7: Extend existing `foundry-actions/storyteller.js` with `createWorldItem` handler
 
-**Goal:** Outbound side of #13. New ES module that handles `world.create_item` envelopes by calling `Item.create({...})` at world level.
+**Goal:** Outbound side of #13. Add `createWorldItem` (handling `storyteller.create_world_item` envelopes by calling `Item.create({...})` at world level) into the **already-existing** `storyteller.js` placeholder.
+
+**Reality check:** `vtmtools-bridge/scripts/foundry-actions/storyteller.js` already exists in the repo as a `// Reserved umbrella; no helpers in v1` stub with `export const handlers = {};`. It is already imported in `index.js` (`import { handlers as storytellerHandlers } from "./storyteller.js";`) and spread into the flattened handler map. Plan B's job is to **modify** the stub (add the handler), not create a new file or touch `index.js`.
 
 **Files:**
-- Create: `vtmtools-bridge/scripts/foundry-actions/world.js`
-- Modify: `vtmtools-bridge/scripts/foundry-actions/index.js` (register `worldHandlers`)
+- Modify: `vtmtools-bridge/scripts/foundry-actions/storyteller.js` (replace the stub with the `createWorldItem` handler)
+- (NOT touched: `vtmtools-bridge/scripts/foundry-actions/index.js` — `storytellerHandlers` is already imported and spread.)
 
-**Anti-scope:** Do NOT add other `world.*` helpers in this milestone — the umbrella is reserved but only one handler ships. Do NOT touch embedded actor items here (those are actor.*).
+**Anti-scope:** Do NOT add other `storyteller.*` helpers in this milestone — the umbrella was reserved but Plan B activates it with exactly one handler. Do NOT touch embedded actor items here (those are actor.*). Do NOT edit `index.js` — the import line already exists.
 
 **Depends on:** none (JS-only, parallel)
 
-**Invariants cited:** Helper-library roadmap §4 (umbrella-per-file), §6 (naming conventions: wire `type` = `world.create_item`; JS executor name = camelCase verb-noun `createWorldItem`).
+**Invariants cited:** Helper-library roadmap §4 (umbrella-per-file), §6 (naming conventions: wire `type` = `storyteller.create_world_item`; JS executor name = camelCase verb-noun `createWorldItem`).
 
 **Tests required:** NO (manual smoke covers it in Task 16).
 
-- [ ] **Step 1: Create `world.js`**
+- [ ] **Step 1: Replace the storyteller.js stub**
 
-Create `vtmtools-bridge/scripts/foundry-actions/world.js`:
+Replace the entire contents of `vtmtools-bridge/scripts/foundry-actions/storyteller.js` (currently a 2-line stub) with:
 
 ```js
-// Foundry world.* helper executors.
+// Foundry storyteller.* helper executors.
 //
-// World-level operations not tied to a single actor. The world.* umbrella
+// World-level operations not tied to a single actor. The storyteller.* umbrella
 // is reserved by name in foundry helper roadmap §5; v1 milestone-4
-// ships exactly one helper: world.create_item (used by Library Sync
+// ships exactly one helper: storyteller.create_world_item (used by Library Sync
 // push button to create a Foundry-world-level Item doc that lives in
 // the world's Items sidebar / compendium, not embedded on an actor).
 
@@ -857,7 +868,7 @@ const MODULE_ID = "vtmtools-bridge";
 /**
  * Create a world-level Item document.
  * Wire shape (validated Rust-side; see build_create_world_item):
- *   { type: "world.create_item", name, featuretype, description, points }
+ *   { type: "storyteller.create_world_item", name, featuretype, description, points }
  * Effect: Item.create({ type: "feature", name,
  *                       system: { featuretype, description, points } })
  *         at world level (no parent actor).
@@ -879,49 +890,40 @@ async function createWorldItem(msg) {
       },
     });
   } catch (err) {
-    console.error(`[${MODULE_ID}] world.create_item failed:`, err);
+    console.error(`[${MODULE_ID}] storyteller.create_world_item failed:`, err);
     ui.notifications?.error(`vtmtools: could not create world item: ${err?.message ?? err}`);
     throw err;
   }
 }
 
 export const handlers = {
-  "world.create_item": createWorldItem,
+  "storyteller.create_world_item": createWorldItem,
 };
 ```
 
-- [ ] **Step 2: Register in `index.js`**
+- [ ] **Step 2: Verify `index.js` does not need editing**
 
-In `vtmtools-bridge/scripts/foundry-actions/index.js`, add:
+Confirm via `grep storytellerHandlers vtmtools-bridge/scripts/foundry-actions/index.js` that the import + spread already exist (they should — `storyteller.js` was previously a reserved-umbrella stub already wired in). If a fresh checkout somehow lacks the wiring, restore it; otherwise do nothing.
 
-```js
-import { handlers as actorHandlers }       from "./actor.js";
-import { handlers as bridgeHandlers }      from "./bridge.js";
-import { handlers as gameHandlers }        from "./game.js";
-import { handlers as storytellerHandlers } from "./storyteller.js";
-import { handlers as worldHandlers }       from "./world.js";
+- [ ] **Step 3: Run `./scripts/verify.sh`**
 
-export const handlers = {
-  ...actorHandlers,
-  ...bridgeHandlers,
-  ...gameHandlers,
-  ...storytellerHandlers,
-  ...worldHandlers,
-};
-```
+Required by CLAUDE.md before every commit, even for JS-only changes.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```
-git add vtmtools-bridge/scripts/foundry-actions/world.js \
-        vtmtools-bridge/scripts/foundry-actions/index.js
+git add vtmtools-bridge/scripts/foundry-actions/storyteller.js
 git commit -m "$(cat <<'EOF'
-Add Foundry world.* umbrella + world.create_item handler
+Activate storyteller.* umbrella: add storyteller.create_world_item
 
-Reserves world.* on the wire (foundry helper roadmap §5) and ships
-exactly one v1 helper: world.create_item creates a world-level
-feature Item doc (merit / flaw / background / boon). Used by Plan B
-push to send a local advantage row into the active Foundry world.
+Replaces the reserved-umbrella stub (empty handlers map) in
+foundry-actions/storyteller.js with the first helper:
+storyteller.create_world_item creates a world-level feature Item doc
+(merit / flaw / background / boon). Used by Plan B push to send a
+local advantage row into the active Foundry world.
+
+index.js already imports storytellerHandlers from the prior reserved
+stub — no wiring change needed.
 
 Not idempotent — dedup is Plan C's concern.
 
@@ -936,7 +938,7 @@ EOF
 
 ## Task 8: Bump `module.json` 0.5.0 → 0.6.0
 
-**Goal:** Reflect the additive `item` subscription + `world.*` umbrella in the module version.
+**Goal:** Reflect the additive `item` subscription + `storyteller.*` umbrella in the module version.
 
 **Files:**
 - Modify: `vtmtools-bridge/module.json`
@@ -953,16 +955,20 @@ EOF
 
 Change `module.json`'s `"version": "0.5.0"` to `"version": "0.6.0"`.
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: Run `./scripts/verify.sh`**
+
+Required by CLAUDE.md before every commit.
+
+- [ ] **Step 3: Commit**
 
 ```
 git add vtmtools-bridge/module.json
 git commit -m "$(cat <<'EOF'
-vtmtools-bridge: 0.5.0 → 0.6.0 (item subscription + world.* umbrella)
+vtmtools-bridge: 0.5.0 → 0.6.0 (item subscription + storyteller.* umbrella)
 
 Additive features within protocol_version 1:
   • bridge.subscribe accepts collection: "item" (#27)
-  • world.create_item handler (#13)
+  • storyteller.create_world_item handler (#13)
 
 Backward compat: old desktop ↔ new module works identically (desktop
 never sends bridge.subscribe { item } unless on Plan B+).
@@ -976,37 +982,39 @@ EOF
 
 ---
 
-## Task 9: New Rust `bridge/foundry/actions/world.rs` with `build_create_world_item`
+## Task 9: New Rust `bridge/foundry/actions/storyteller.rs` with `build_create_world_item`
 
-**Goal:** Rust-side builder for the `world.create_item` wire envelope. Validates featuretype against the same merit/flaw/background/boon enum that `actor.create_feature` uses.
+**Goal:** Rust-side builder for the `storyteller.create_world_item` wire envelope. Validates featuretype against the same merit/flaw/background/boon enum that `actor.create_feature` uses.
+
+**Reality check:** `src-tauri/src/bridge/foundry/actions/storyteller.rs` already exists as a one-line `// Reserved umbrella; no helpers in v1.` stub, and `pub mod storyteller;` is already declared in `actions/mod.rs`. Plan B's job is to **modify** the stub (add the builder + tests), not create a new file or touch `mod.rs`.
 
 **Files:**
-- Create: `src-tauri/src/bridge/foundry/actions/world.rs`
-- Modify: `src-tauri/src/bridge/foundry/actions/mod.rs` — add `pub mod world;`
+- Modify: `src-tauri/src/bridge/foundry/actions/storyteller.rs` (replace the comment stub with the `build_create_world_item` builder + tests)
+- (NOT touched: `src-tauri/src/bridge/foundry/actions/mod.rs` — `pub mod storyteller;` already exists.)
 
-**Anti-scope:** Do NOT duplicate the validation logic — extract a shared helper if `actor.rs::build_create_feature`'s validation is already factored out, OR copy the 4-line `match` if not (no abstraction wanted per the YAGNI override).
+**Anti-scope:** Do NOT duplicate the validation logic — extract a shared helper if `actor.rs::build_create_feature`'s validation is already factored out, OR copy the 4-line `match` if not (no abstraction wanted per the YAGNI override). Do NOT touch `actions/mod.rs` — the module declaration is already there.
 
 **Depends on:** none (Rust-only, parallel with JS tasks)
 
-**Invariants cited:** ARCH §7 (error prefix `foundry/world.create_item:`). Helper-library roadmap §6 (builder naming convention).
+**Invariants cited:** ARCH §7 (error prefix `foundry/storyteller.create_world_item:`). Helper-library roadmap §6 (builder naming convention).
 
 **Tests required:** YES — 2 tests (happy path envelope shape + invalid featuretype rejection).
 
-- [ ] **Step 1: Create `world.rs`**
+- [ ] **Step 1: Replace the storyteller.rs stub**
 
-Create `src-tauri/src/bridge/foundry/actions/world.rs`:
+Replace the entire contents of `src-tauri/src/bridge/foundry/actions/storyteller.rs` (currently a 1-line stub) with:
 
 ```rust
-//! Foundry `world.*` helper builders. World-level operations not tied
+//! Foundry `storyteller.*` helper builders. World-level operations not tied
 //! to a single actor.
 //!
-//! v1 milestone-4 ships exactly one helper: `world.create_item` —
+//! v1 milestone-4 ships exactly one helper: `storyteller.create_world_item` —
 //! creates a Foundry-world-level Item doc (feature type) with the
 //! given featuretype (merit / flaw / background / boon).
 
 use serde_json::{json, Value};
 
-/// Build a `world.create_item { name, featuretype, description, points }`
+/// Build a `storyteller.create_world_item { name, featuretype, description, points }`
 /// envelope. Validates featuretype against the same enum
 /// `actor.create_feature` uses.
 pub fn build_create_world_item(
@@ -1019,12 +1027,12 @@ pub fn build_create_world_item(
         "merit" | "flaw" | "background" | "boon" => {}
         other => {
             return Err(format!(
-                "foundry/world.create_item: invalid featuretype: {other}"
+                "foundry/storyteller.create_world_item: invalid featuretype: {other}"
             ));
         }
     }
     Ok(json!({
-        "type": "world.create_item",
+        "type": "storyteller.create_world_item",
         "name": name,
         "featuretype": featuretype,
         "description": description,
@@ -1040,7 +1048,7 @@ mod tests {
     fn create_world_item_envelope_shape() {
         let out = build_create_world_item("Iron Gullet", "merit", "rancid blood ok", 3)
             .expect("merit is a valid featuretype");
-        assert_eq!(out["type"], "world.create_item");
+        assert_eq!(out["type"], "storyteller.create_world_item");
         assert_eq!(out["name"], "Iron Gullet");
         assert_eq!(out["featuretype"], "merit");
         assert_eq!(out["description"], "rancid blood ok");
@@ -1052,42 +1060,41 @@ mod tests {
         let err = build_create_world_item("X", "discipline", "", 0)
             .expect_err("discipline is not a valid featuretype");
         assert!(
-            err.starts_with("foundry/world.create_item: invalid featuretype:"),
+            err.starts_with("foundry/storyteller.create_world_item: invalid featuretype:"),
             "got: {err}"
         );
     }
 }
 ```
 
-- [ ] **Step 2: Register the module**
+- [ ] **Step 2: Verify `actions/mod.rs` does not need editing**
 
-In `src-tauri/src/bridge/foundry/actions/mod.rs`:
-
-```rust
-pub mod actor;
-pub mod bridge;
-pub mod game;
-pub mod storyteller;
-pub mod world;
-```
+Confirm via `grep 'pub mod storyteller' src-tauri/src/bridge/foundry/actions/mod.rs` that the module declaration already exists (it should — the reserved-umbrella stub was declared previously). If a fresh checkout somehow lacks it, restore it; otherwise do nothing.
 
 - [ ] **Step 3: Run `cargo test`**
 
-Run: `cargo test --manifest-path src-tauri/Cargo.toml bridge::foundry::actions::world`
+Run: `cargo test --manifest-path src-tauri/Cargo.toml bridge::foundry::actions::storyteller`
 
 Expected: 2 tests pass.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Run `./scripts/verify.sh`**
+
+Required by CLAUDE.md before every commit.
+
+- [ ] **Step 5: Commit**
 
 ```
-git add src-tauri/src/bridge/foundry/actions/world.rs \
-        src-tauri/src/bridge/foundry/actions/mod.rs
+git add src-tauri/src/bridge/foundry/actions/storyteller.rs
 git commit -m "$(cat <<'EOF'
-Add Rust builder for world.create_item envelope
+Activate storyteller.* Rust umbrella: add build_create_world_item
 
-Validates featuretype against merit/flaw/background/boon. Mirrors the
-Foundry-side world.js executor; pairing enforced by integration test
-in Task 16's E2E smoke.
+Replaces the reserved-umbrella stub in bridge/foundry/actions/storyteller.rs
+with the first builder. Validates featuretype against
+merit/flaw/background/boon. Mirrors the Foundry-side storyteller.js
+executor; pairing enforced by integration test in Task 16's E2E smoke.
+
+actions/mod.rs already declares `pub mod storyteller;` — no wiring
+change needed.
 
 Refs #13.
 
@@ -1100,7 +1107,7 @@ EOF
 
 ## Task 10: New Rust `tools/library_push.rs` with `push_advantage_to_world`
 
-**Goal:** Tauri command that loads an advantage row by id, maps `kind → featuretype` (lossless — they're 1:1), composes `world.create_item`, and routes via `send_to_source_inner(SourceKind::Foundry)`.
+**Goal:** Tauri command that loads an advantage row by id, maps `kind → featuretype` (lossless — they're 1:1), composes `storyteller.create_world_item`, and routes via `send_to_source_inner(SourceKind::Foundry)`.
 
 **Files:**
 - Create: `src-tauri/src/tools/library_push.rs`
@@ -1121,11 +1128,11 @@ Create `src-tauri/src/tools/library_push.rs`:
 ```rust
 //! Library push: send a local advantage row → active Foundry world as a
 //! world-level Item doc. Composes
-//! `bridge::foundry::actions::world::build_create_world_item`. No-op if
+//! `bridge::foundry::actions::storyteller::build_create_world_item`. No-op if
 //! Foundry isn't connected (silent success — matches bridge_set_attribute
 //! semantics; the UI gates the button on connectivity).
 
-use crate::bridge::foundry::actions::world::build_create_world_item;
+use crate::bridge::foundry::actions::storyteller::build_create_world_item;
 use crate::bridge::types::SourceKind;
 use crate::bridge::{commands::send_to_source_inner, BridgeConn};
 use crate::shared::types::AdvantageKind;
@@ -1263,22 +1270,35 @@ Run: `cargo test --manifest-path src-tauri/Cargo.toml tools::library_push`
 
 Expected: 4 tests pass.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Update `ARCHITECTURE.md` §4 (same-commit rule)**
+
+CLAUDE.md mandates that any new `#[tauri::command]` lands in the same commit as its ARCH §4 entry. Edit `ARCHITECTURE.md` §4:
+- Add a new per-file entry for `tools/library_push.rs` listing `push_advantage_to_world`.
+- Bump the running command total: **64 → 65**.
+
+- [ ] **Step 7: Run `./scripts/verify.sh`**
+
+Expected: green.
+
+- [ ] **Step 8: Commit**
 
 ```
 git add src-tauri/src/tools/library_push.rs \
         src-tauri/src/tools/mod.rs \
-        src-tauri/src/db/advantage.rs
+        src-tauri/src/db/advantage.rs \
+        ARCHITECTURE.md
 git commit -m "$(cat <<'EOF'
 Add push_advantage_to_world Tauri command
 
 Loads local advantage row by id; maps Plan-A's kind → featuretype 1:1;
-composes world.create_item via the Plan-B builder; routes through the
+composes storyteller.create_world_item via the Plan-B builder; routes through the
 existing send_to_source_inner outbound path. No-op when Foundry is
 disconnected (matches bridge_set_attribute semantics).
 
 Promotes db::advantage::db_list to pub(crate) so library_push can
-read without going through a fresh Tauri state lookup.
+read without going through a fresh Tauri state lookup. ARCH §4 IPC
+inventory bumped (64 → 65) in the same commit, per CLAUDE.md
+same-commit rule.
 
 Refs #13.
 
@@ -1325,8 +1345,10 @@ git add src-tauri/src/lib.rs
 git commit -m "$(cat <<'EOF'
 Register push_advantage_to_world in invoke_handler
 
-Command surface 64 → 65 (bridge_get_world_items + push_advantage_to_world
-both new in Plan B; ARCHITECTURE.md §4 update follows in Task 15).
+No new command surface in this commit — declaration + ARCH §4 entry
+already landed in Task 10 (and Task 5 for bridge_get_world_items).
+This commit only wires the existing declaration into the frontend
+via `generate_handler!`.
 
 Refs #13.
 
@@ -1375,7 +1397,11 @@ export function pushAdvantageToWorld(id: number): Promise<void> {
 
 Expected: green.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Run `./scripts/verify.sh`**
+
+Required by CLAUDE.md before every commit. `npm run check` alone is not the gate — `verify.sh` also runs `cargo check`, `cargo test`, and the frontend build.
+
+- [ ] **Step 4: Commit**
 
 ```
 git add src/lib/library/api.ts
@@ -1433,7 +1459,11 @@ export function bridgeGetWorldItems(): Promise<CanonicalWorldItem[]> {
 
 Expected: green.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run `./scripts/verify.sh`**
+
+Required by CLAUDE.md before every commit. The npm steps above are a tighter inner loop; `verify.sh` is the full gate.
+
+- [ ] **Step 6: Commit**
 
 ```
 git add src/store/bridge.svelte.ts src/lib/bridge/api.ts
@@ -1526,7 +1556,11 @@ Expected: green.
 - ✅ Disconnect Foundry → push buttons disappear (or grey out, depending on the reactive guard).
 - ✅ Push a custom Boon → world Item appears with featuretype = boon.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run `./scripts/verify.sh`**
+
+Required by CLAUDE.md before every commit.
+
+- [ ] **Step 6: Commit**
 
 ```
 git add src/tools/AdvantagesManager.svelte \
@@ -1547,68 +1581,47 @@ EOF
 
 ---
 
-## Task 15: ARCHITECTURE.md §4 updates
+## Task 15: ARCHITECTURE.md §4 — Bridge WebSocket protocol updates
 
-**Goal:** Document the new IPC command + new event + bridge protocol additions.
+**Goal:** Document the new `item` subscription collection + `storyteller.*` umbrella in §4 Bridge WebSocket protocol. The IPC inventory bumps and events-table entry were already landed in-commit by Tasks 5 and 10 (per CLAUDE.md same-commit rule); only the protocol-section prose remains.
 
 **Files:**
 - Modify: `ARCHITECTURE.md`
 
-**Anti-scope:** Do NOT add Plan C's commands here (Plan C territory). Do NOT introduce new sections — append to existing inventory entries.
+**Anti-scope:** Do NOT re-edit the IPC inventory (already updated). Do NOT re-add `bridge://foundry/items-updated` to the events table (already added in Task 5). Do NOT introduce new sections — append to the existing protocol section.
 
 **Depends on:** Task 14
 
-**Invariants cited:** CLAUDE.md: every new `#[tauri::command]` requires updating ARCHITECTURE.md §4 IPC inventory.
+**Invariants cited:** ARCH §4 (Bridge WebSocket protocol section). CLAUDE.md same-commit rule is satisfied for the IPC parts by Tasks 5 + 10; this task carries only the non-command-tied prose.
 
 **Tests required:** NO
 
-- [ ] **Step 1: Update IPC inventory**
+- [ ] **Step 1: Update Bridge WebSocket protocol section**
 
-In §4, update the `src-tauri/src/tools/library_push.rs` entry:
-
-```
-- **`src-tauri/src/tools/library_push.rs`** (1):
-  `push_advantage_to_world`.
-```
-
-(If the file doesn't yet have an entry, add it adjacent to `tools/foundry_chat.rs`.)
-
-Update `src-tauri/src/bridge/commands.rs` entry: append `bridge_get_world_items` and bump count from 6 to 7. Update the running total at the bottom of the IPC section from 63 to 65.
-
-- [ ] **Step 2: Update Tauri events table**
-
-In §4 Tauri events, add a row:
-
-| `bridge://foundry/items-updated` | `Vec<CanonicalWorldItem>` | Foundry pushed a world-level item snapshot or delta (subscribed via `bridge.subscribe { collection: "item" }`); carries the merged cache across all sources |
-
-- [ ] **Step 3: Update Bridge WebSocket protocol section**
-
-In §4 Bridge WebSocket protocol, after the existing message-framing paragraph, add a paragraph on the `item` subscription and `world.*` umbrella:
+In §4 Bridge WebSocket protocol, after the existing message-framing paragraph, add a paragraph on the `item` subscription and `storyteller.*` umbrella:
 
 > **Subscription collections (Foundry):** `actors` (auto-subscribed on Hello — always-on; preserves pre-Plan-0 behavior), `item` (opt-in via `bridge.subscribe { collection: "item" }` — Plan B+ Library Sync consumers). The subscription registry lives in `vtmtools-bridge/scripts/foundry-actions/bridge.js`; future collections (`journal`, `scene`, `chat`, `combat`) are reserved by name in the character-tooling roadmap §5 and activated when a consumer feature lands.
 >
-> **Outbound umbrellas (Foundry):** `actor.*` (per-actor edits), `game.*` (in-game/table rolls + chat), `world.*` (world-level operations; v1 ships `world.create_item` only — Library Sync push), `storyteller.*` (reserved, no helpers in v1). See `docs/superpowers/specs/2026-04-26-foundry-helper-library-roadmap.md` for the per-helper inventory.
+> **Outbound umbrellas (Foundry):** `actor.*` (per-actor edits), `game.*` (in-game/table rolls + chat), `storyteller.*` (GM-facing operations not tied to a single actor; v1 ships `storyteller.create_world_item` only — Library Sync push). See `docs/superpowers/specs/2026-04-26-foundry-helper-library-roadmap.md` §5 for the per-helper inventory.
 
-- [ ] **Step 4: Run `./scripts/verify.sh`**
+- [ ] **Step 2: Run `./scripts/verify.sh`**
 
 Expected: green.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Commit**
 
 ```
 git add ARCHITECTURE.md
 git commit -m "$(cat <<'EOF'
-ARCHITECTURE.md: document Plan-B IPC + bridge additions
+ARCHITECTURE.md §4: document `item` subscription + storyteller.* umbrella
 
-§4 IPC inventory:
-  + tools/library_push.rs (1): push_advantage_to_world
-  + bridge/commands.rs +1: bridge_get_world_items (was 6, now 7)
-  + total 63 → 65
-
-§4 Tauri events table: + bridge://foundry/items-updated
-
-§4 Bridge WebSocket protocol: documents `item` subscription
-collection and `world.*` outbound umbrella.
+Adds prose to the Bridge WebSocket protocol section describing the
+new `item` subscription collection (opt-in for Library Sync) and the
+new `storyteller.*` outbound umbrella (v1 ships create_world_item
+only). The IPC inventory entries + total bump (63 → 65) and the
+`bridge://foundry/items-updated` events-table row landed in their
+declaring commits (Tasks 5 and 10) per the CLAUDE.md same-commit
+rule, so this commit carries only the protocol-section prose.
 
 Refs #13 #27.
 

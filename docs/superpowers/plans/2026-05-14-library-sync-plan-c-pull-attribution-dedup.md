@@ -7,7 +7,7 @@
 > **TDD-on-demand override (CLAUDE.md):** subagents do NOT auto-invoke `superpowers:test-driven-development`. Each task below explicitly states whether tests are required.
 
 **Goal:** Close the import half of Library Sync:
-- **#14 — Pull library items ← Foundry world.** Add a "Pull from active world" action to the Advantages tool. On click, send `bridge.subscribe { collection: "item" }` (Plan B shipped the wire path), wait for the snapshot, filter to feature-type items (merit/flaw/background/boon), present a confirmation summary, then write rows to the local `advantages` table with `is_custom = 1` + populated `source_attribution`. Disciplines are out of scope for this milestone (deferred per architect recommendation; reservation paragraph added to ARCHITECTURE.md in Plan A).
+- **#14 — Pull library items ← Foundry storyteller.** Add a "Pull from active world" action to the Advantages tool. On click, send `bridge.subscribe { collection: "item" }` (Plan B shipped the wire path), wait for the snapshot, filter to feature-type items (merit/flaw/background/boon), present a confirmation summary, then write rows to the local `advantages` table with `is_custom = 1` + populated `source_attribution`. Disciplines are out of scope for this milestone (deferred per architect recommendation; reservation paragraph added to ARCHITECTURE.md in Plan A).
 - **#15 — Source-attribution surfacing.** Render a source chip on each AdvantagesManager row whose `source_attribution` is non-null. Reuses the `SourceAttributionChip` component already shipped in Phase 1.
 - **#16 — Dedup / conflict resolution.** Auto-version-suffix on local name collision: `<name> (FVTT — <world>)`. No interactive prompt, no review modal. Collision is detected against the SAME `(name, kind, source_attribution.world)` triple — two same-name merits from different worlds coexist by world-suffix; pulling the SAME merit twice from the SAME world is treated as an update (preserves row id, refreshes attribution timestamp).
 
@@ -54,8 +54,8 @@ The Tauri-side subscribe/unsubscribe wrappers are new — Plan 0 shipped the `br
 
 ### Files explicitly NOT touched
 - `src-tauri/src/bridge/foundry/types.rs` — Plan B frozen.
-- `src-tauri/src/bridge/foundry/actions/world.rs` — Plan B frozen (push side only; Plan C is pull).
-- `vtmtools-bridge/scripts/*` — Plan B frozen (the JS-side `item` subscriber + `world.*` umbrella are stable).
+- `src-tauri/src/bridge/foundry/actions/storyteller.rs` — Plan B frozen (push side only; Plan C is pull).
+- `vtmtools-bridge/scripts/*` — Plan B frozen (the JS-side `item` subscriber + `storyteller.*` umbrella are stable).
 - `src-tauri/src/db/dyscrasia.rs` — separate row shape; out of scope.
 - Disciplines schema — deferred per partitioning rule.
 
@@ -65,24 +65,24 @@ The Tauri-side subscribe/unsubscribe wrappers are new — Plan 0 shipped the `br
 
 | # | Task | Depends on | Tests |
 |---|---|---|---|
-| 1 | Add `db::advantage::db_find_by_dedup_key` + `db_upsert_imported` + tests | Plan A | YES (4-5 tests covering dedup branches) |
-| 2 | Add `import_advantages_from_world` Tauri command (reads bridge cache + DB) | 1 | YES (1 integration test against in-memory pool + fake `world_items` cache) |
-| 3 | Add `bridge_subscribe` + `bridge_unsubscribe` Tauri commands | none (independent of 1/2) | NO (compose existing builders; covered by manual smoke in Task 8) |
-| 4 | Register 3 new commands in `lib.rs` | 1, 2, 3 | NO |
+| 1 | Add `db::advantage::db_find_by_foundry_id` + `db_collides_locally` + `db_upsert_imported` + tests | Plan A | YES (6 tests; includes re-pull-of-secondary-world regression case) |
+| 2 | Add `import_advantages_from_world` Tauri command (reads bridge cache + DB; bumps ARCH §4 total 65 → 66 in-commit) | 1 | YES (1 integration test against in-memory pool + fake `world_items` cache) |
+| 3 | Add `bridge_subscribe` + `bridge_unsubscribe` Tauri commands (bumps ARCH §4 total 66 → 68 in-commit) | none (independent of 1/2) | NO (compose existing builders; covered by manual smoke in Task 8) |
+| 4 | Register 3 new commands in `lib.rs` (no ARCH change — declarations already documented) | 1, 2, 3 | NO |
 | 5 | Extend `src/lib/library/api.ts` + add `importer.ts` pure helpers + tests | 4 | YES (vitest if available; otherwise skip — verify the testing convention in the repo first) |
 | 6 | Update `AdvantagesManager.svelte` with Pull button + source chip + tri-state filter | 5 + Plan A's existing UI work | NO (manual smoke covers it) |
-| 7 | ARCHITECTURE.md §4 updates | 6 | NO |
+| 7 | ~~ARCHITECTURE.md §4 updates~~ — REMOVED; work distributed inline into Tasks 2 and 3 per CLAUDE.md same-commit rule | — | — |
 | 8 | Final verification gate (incl. live-Foundry pull smoke) | all | runs `./scripts/verify.sh` + manual E2E |
 
-Tasks 1 and 3 are independent and can dispatch in parallel. Task 2 depends on Task 1. Tasks 5–7 are sequential after Task 4.
+Tasks 1 and 3 are independent and can dispatch in parallel. Task 2 depends on Task 1. Tasks 5–6 are sequential after Task 4. Task 7 is a placeholder (skip).
 
 ---
 
-## Task 1: DB helpers — `db_find_by_dedup_key` + `db_upsert_imported`
+## Task 1: DB helpers — `db_find_by_foundry_id` + `db_collides_locally` + `db_upsert_imported`
 
 **Goal:** Two new internal helpers in `db/advantage.rs` that own the dedup-and-import logic at the DB layer. Tauri-callable wrapper sits on top in Task 2.
 
-**Dedup rule (architect lock-in):** Two advantages are "the same" iff they share `(name, kind, source_attribution->>worldTitle)`. World key comes from JSON path `$.worldTitle`. If both rows are local (`source_attribution IS NULL`), then `name + kind` is the dedup key — but that case is impossible at import time because every imported row has non-null attribution. The unique-suffix collision case for import is therefore: imported `<name>` collides with an existing LOCAL row of same name + kind (different attribution state) → suffix becomes `<name> (FVTT — <world>)`.
+**Dedup rule (architect lock-in):** Two imported advantages are "the same" iff they share `(source_attribution->>foundryId, source_attribution->>worldTitle)` — i.e. the same Foundry document `_id` in the same Foundry world. The Foundry document `_id` is stable across re-pulls and is already carried on `CanonicalWorldItem.id` (Plan B). Keying dedup on the **immutable** Foundry id (not the mutable display name) preserves re-pull idempotency even after a row's display name has been suffixed to resolve a local name collision. The display name remains the suffix-collision key (for surface uniqueness in the UI), but it is no longer the identity key. If both rows are local (`source_attribution IS NULL`), `name + kind` is the only available key — but that case is impossible at import time because every imported row has non-null attribution. The unique-suffix collision case for import is: imported `<name>` collides with an existing LOCAL or differently-attributed row of same `(name, kind)` → suffix the import's `name` to `<name> (FVTT — <world>)` before INSERT; the row is still identified by its `foundryId` going forward.
 
 **Files:**
 - Modify: `src-tauri/src/db/advantage.rs`
@@ -91,37 +91,35 @@ Tasks 1 and 3 are independent and can dispatch in parallel. Task 2 depends on Ta
 
 **Depends on:** Plan A (`AdvantageKind`, `source_attribution` column).
 
-**Invariants cited:** ARCH §5 (only `db/*` talks to SQLite), §7 (error prefix `db/advantage.import:` and `db/advantage.find_by_dedup_key:`).
+**Invariants cited:** ARCH §5 (only `db/*` talks to SQLite), §7 (error prefix `db/advantage.upsert_imported:` and `db/advantage.find_by_foundry_id:`).
 
-**Tests required:** YES — 4 tests minimum.
+**Tests required:** YES — 6 tests minimum (one per dedup branch + the re-pull-of-secondary-world regression case).
 
-- [ ] **Step 1: Add `db_find_by_dedup_key`**
+- [ ] **Step 1: Add `db_find_by_foundry_id`**
+
+Primary identity lookup, keyed on the immutable Foundry document id (carried via `source_attribution.foundryId`) scoped by world title. This is the lookup that makes re-pulls idempotent regardless of name suffixing.
 
 In `src-tauri/src/db/advantage.rs`, near the other internal helpers:
 
 ```rust
-pub(crate) async fn db_find_by_dedup_key(
+pub(crate) async fn db_find_by_foundry_id(
     pool: &SqlitePool,
-    name: &str,
-    kind: AdvantageKind,
+    foundry_id: &str,
     world_title: &str,
 ) -> Result<Option<Advantage>, String> {
-    let kind_str = kind_to_str(kind);
     let rows = sqlx::query(
         "SELECT id, name, description, tags_json, properties_json, is_custom,
                 kind, source_attribution
          FROM advantages
-         WHERE name = ?
-           AND kind = ?
+         WHERE json_extract(source_attribution, '$.foundryId')  = ?
            AND json_extract(source_attribution, '$.worldTitle') = ?
          LIMIT 1"
     )
-    .bind(name)
-    .bind(kind_str)
+    .bind(foundry_id)
     .bind(world_title)
     .fetch_optional(pool)
     .await
-    .map_err(|e| format!("db/advantage.find_by_dedup_key: {e}"))?;
+    .map_err(|e| format!("db/advantage.find_by_foundry_id: {e}"))?;
 
     match rows {
         Some(r) => {
@@ -195,14 +193,21 @@ use crate::shared::types::ImportOutcome;
 
 /// Insert-or-update an imported advantage row.
 ///
-/// Dedup logic:
-///   1. If a row exists with (name, kind, source_attribution.worldTitle)
-///      = (in_name, in_kind, in_world) → UPDATE description + bump
-///      source_attribution.importedAt; preserve row id; return Updated.
+/// Dedup logic (identity by immutable Foundry id, NOT by display name):
+///   1. If a row exists with (foundryId, worldTitle) =
+///      (source_attribution.foundryId, source_attribution.worldTitle)
+///      → UPDATE description + bump source_attribution.importedAt;
+///      preserve row id AND the stored (possibly-suffixed) name; return Updated.
 ///   2. Else if a local row exists with (name, kind) but DIFFERENT
 ///      attribution (or null attribution) → suffix the import name as
 ///      "<name> (FVTT — <world>)"; INSERT; return Inserted.
 ///   3. Else → INSERT as-is; return Inserted.
+///
+/// Why foundryId is the identity key (not name): once a row's name has been
+/// suffixed in Case 2, a name-keyed lookup on the next re-pull would miss
+/// (the stored name no longer matches the incoming `name` parameter) and
+/// fall through to Case 2 again, INSERTing a duplicate. The Foundry document
+/// `_id` is stable across re-pulls, so it's the only safe identity key.
 pub(crate) async fn db_upsert_imported(
     pool: &SqlitePool,
     name: &str,
@@ -214,9 +219,13 @@ pub(crate) async fn db_upsert_imported(
     let world_title = source_attribution.get("worldTitle")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "db/advantage.upsert_imported: source_attribution missing worldTitle".to_string())?;
+    let foundry_id = source_attribution.get("foundryId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "db/advantage.upsert_imported: source_attribution missing foundryId".to_string())?;
 
-    // Case 1: exact same (name, kind, world) — Update.
-    if let Some(existing) = db_find_by_dedup_key(pool, name, kind, world_title).await? {
+    // Case 1: same (foundryId, worldTitle) — Update in place. Preserves the
+    // stored name (which may be suffixed) so re-pulls are idempotent.
+    if let Some(existing) = db_find_by_foundry_id(pool, foundry_id, world_title).await? {
         let props_json = serialize_properties(properties)?;
         let attr_str = serde_json::to_string(source_attribution)
             .map_err(|e| format!("db/advantage.upsert_imported: serialize attribution: {e}"))?;
@@ -282,10 +291,13 @@ pub(crate) async fn db_upsert_imported(
 In the existing `#[cfg(test)] mod tests` block:
 
 ```rust
-fn world_attribution(world: &str) -> serde_json::Value {
+/// Build a source_attribution JSON blob with a stable foundryId. Tests
+/// must pass a deterministic id so re-pull cases produce hit/miss reliably.
+fn world_attribution(world: &str, foundry_id: &str) -> serde_json::Value {
     serde_json::json!({
         "source": "foundry",
         "worldTitle": world,
+        "foundryId": foundry_id,
         "importedAt": "2026-05-14T12:00:00Z",
     })
 }
@@ -294,7 +306,7 @@ fn world_attribution(world: &str) -> serde_json::Value {
 async fn upsert_imported_new_row_inserts() {
     let pool = test_pool().await;
     let out = db_upsert_imported(&pool, "Iron Gullet", AdvantageKind::Merit,
-        "desc", &[], &world_attribution("Chicago")).await.unwrap();
+        "desc", &[], &world_attribution("Chicago", "chi_iron")).await.unwrap();
     assert!(matches!(out, ImportOutcome::Inserted { name, .. } if name == "Iron Gullet"));
 }
 
@@ -302,11 +314,12 @@ async fn upsert_imported_new_row_inserts() {
 async fn upsert_imported_same_world_updates_in_place() {
     let pool = test_pool().await;
     let first = db_upsert_imported(&pool, "Iron Gullet", AdvantageKind::Merit,
-        "desc1", &[], &world_attribution("Chicago")).await.unwrap();
+        "desc1", &[], &world_attribution("Chicago", "chi_iron")).await.unwrap();
     let first_id = match first { ImportOutcome::Inserted { id, .. } => id, _ => panic!() };
 
+    // Same foundryId + worldTitle on second call → Updated.
     let second = db_upsert_imported(&pool, "Iron Gullet", AdvantageKind::Merit,
-        "desc2 (revised)", &[], &world_attribution("Chicago")).await.unwrap();
+        "desc2 (revised)", &[], &world_attribution("Chicago", "chi_iron")).await.unwrap();
 
     match second {
         ImportOutcome::Updated { id, .. } => assert_eq!(id, first_id),
@@ -320,11 +333,12 @@ async fn upsert_imported_same_world_updates_in_place() {
 #[tokio::test]
 async fn upsert_imported_different_world_suffixes_name() {
     let pool = test_pool().await;
+    // Different foundryIds across worlds — typical of two unrelated Foundry instances.
     db_upsert_imported(&pool, "Iron Gullet", AdvantageKind::Merit, "d", &[],
-        &world_attribution("Chicago")).await.unwrap();
+        &world_attribution("Chicago", "chi_iron")).await.unwrap();
 
     let second = db_upsert_imported(&pool, "Iron Gullet", AdvantageKind::Merit, "d", &[],
-        &world_attribution("Berlin")).await.unwrap();
+        &world_attribution("Berlin", "ber_iron")).await.unwrap();
 
     match second {
         ImportOutcome::Inserted { name, .. } => {
@@ -341,7 +355,7 @@ async fn upsert_imported_suffixes_against_local_row() {
     db_insert(&pool, "Iron Gullet", "local desc", AdvantageKind::Merit, None, &[], &[]).await.unwrap();
 
     let imported = db_upsert_imported(&pool, "Iron Gullet", AdvantageKind::Merit, "fvtt desc", &[],
-        &world_attribution("Chicago")).await.unwrap();
+        &world_attribution("Chicago", "chi_iron")).await.unwrap();
 
     match imported {
         ImportOutcome::Inserted { name, .. } => {
@@ -356,11 +370,49 @@ async fn upsert_imported_suffixes_against_local_row() {
 }
 
 #[tokio::test]
-async fn find_by_dedup_key_returns_none_for_local_row() {
+async fn upsert_imported_repull_of_secondary_world_updates_in_place() {
+    // Regression test: previously, a re-pull of a suffixed (secondary-world)
+    // row created a duplicate because the dedup key was name-based and the
+    // stored name had been mutated. With foundryId-keyed dedup it must Update.
+    let pool = test_pool().await;
+
+    // Pull 1, world Chicago: INSERTs "Iron Gullet" (no suffix).
+    let chi = db_upsert_imported(&pool, "Iron Gullet", AdvantageKind::Merit, "v1", &[],
+        &world_attribution("Chicago", "chi_iron")).await.unwrap();
+    assert!(matches!(chi, ImportOutcome::Inserted { ref name, .. } if name == "Iron Gullet"));
+
+    // Pull 1, world Berlin: collision → INSERTs suffixed "Iron Gullet (FVTT — Berlin)".
+    let ber1 = db_upsert_imported(&pool, "Iron Gullet", AdvantageKind::Merit, "v1", &[],
+        &world_attribution("Berlin", "ber_iron")).await.unwrap();
+    let ber_id = match ber1 {
+        ImportOutcome::Inserted { id, name, .. } => {
+            assert_eq!(name, "Iron Gullet (FVTT — Berlin)");
+            id
+        }
+        other => panic!("expected suffixed Inserted, got {other:?}"),
+    };
+
+    // Pull 2, world Berlin (re-pull of same Foundry item): MUST Update the
+    // existing suffixed row, NOT insert a duplicate.
+    let ber2 = db_upsert_imported(&pool, "Iron Gullet", AdvantageKind::Merit, "v2", &[],
+        &world_attribution("Berlin", "ber_iron")).await.unwrap();
+    match ber2 {
+        ImportOutcome::Updated { id, .. } => assert_eq!(id, ber_id),
+        other => panic!("expected Updated on re-pull of secondary world, got {other:?}"),
+    }
+    let rows = db_list(&pool).await.unwrap();
+    let berlin_rows = rows.iter().filter(|r| r.name == "Iron Gullet (FVTT — Berlin)").count();
+    assert_eq!(berlin_rows, 1, "re-pull of secondary-world item must update in place, not duplicate");
+    let chicago_rows = rows.iter().filter(|r| r.name == "Iron Gullet").count();
+    assert_eq!(chicago_rows, 1, "Chicago row must be untouched by Berlin re-pull");
+}
+
+#[tokio::test]
+async fn find_by_foundry_id_returns_none_for_local_row() {
     let pool = test_pool().await;
     db_insert(&pool, "Allies", "local", AdvantageKind::Background, None, &[], &[]).await.unwrap();
-    let found = db_find_by_dedup_key(&pool, "Allies", AdvantageKind::Background, "Chicago").await.unwrap();
-    assert!(found.is_none(), "local row (NULL attribution) must not match world-keyed dedup");
+    let found = db_find_by_foundry_id(&pool, "any_id", "Chicago").await.unwrap();
+    assert!(found.is_none(), "local row (NULL attribution) must never match a foundryId lookup");
 }
 ```
 
@@ -368,7 +420,7 @@ async fn find_by_dedup_key_returns_none_for_local_row() {
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml db::advantage`
 
-Expected: all existing tests + 5 new tests pass.
+Expected: all existing tests + 6 new tests pass.
 
 - [ ] **Step 6: Run `./scripts/verify.sh`**
 
@@ -381,15 +433,21 @@ git add src-tauri/src/db/advantage.rs src-tauri/src/shared/types.rs
 git commit -m "$(cat <<'EOF'
 db/advantage: add dedup-and-import helpers
 
-db_find_by_dedup_key looks up (name, kind, source_attribution.worldTitle).
-db_collides_locally detects any (name, kind) match regardless of
-attribution. db_upsert_imported is the import-flow workhorse:
-  • same world → UPDATE in place (idempotent re-imports)
-  • different world → auto-suffix "(FVTT — <world>)"
+db_find_by_foundry_id looks up (source_attribution.foundryId,
+source_attribution.worldTitle) — identity by the immutable Foundry
+document _id, not the mutable display name. db_collides_locally
+detects any (name, kind) match regardless of attribution (used for
+the suffix path). db_upsert_imported is the import-flow workhorse:
+  • same (foundryId, world) → UPDATE in place (idempotent re-pulls,
+    even after a previous suffix mutated the stored name)
+  • different (foundryId, world) but same (name, kind) → auto-suffix
+    "(FVTT — <world>)" and INSERT
   • no collision → straight INSERT
 
 ImportOutcome enum carries Inserted / Updated / Skipped variants
-across the IPC boundary. 5 new tests cover every branch.
+across the IPC boundary. 6 new tests cover every branch, including
+the re-pull-of-secondary-world regression case (foundryId-keyed dedup
+preserves idempotency even after a row's name was suffixed).
 
 Refs #14 #15 #16.
 
@@ -464,13 +522,6 @@ pub async fn import_advantages_from_world(
     };
 
     let now = chrono::Utc::now().to_rfc3339();
-    let attribution_base = serde_json::json!({
-        "source": "foundry",
-        "worldTitle": world_title,
-        "worldId": world_id,
-        "systemVersion": system_version,
-        "importedAt": now,
-    });
 
     let mut outcomes = Vec::with_capacity(items.len());
     for item in items {
@@ -514,13 +565,25 @@ pub async fn import_advantages_from_world(
             vec![]
         };
 
+        // Per-item attribution carries the immutable Foundry document _id
+        // (used by db_upsert_imported as the dedup identity key). Shared
+        // fields are cloned in from the per-call locals.
+        let attribution = serde_json::json!({
+            "source": "foundry",
+            "worldTitle": world_title,
+            "worldId": world_id,
+            "systemVersion": system_version,
+            "foundryId": item.id,
+            "importedAt": now,
+        });
+
         let outcome = db_upsert_imported(
             &db.0,
             &item.name,
             ft,
             &description,
             &properties,
-            &attribution_base,
+            &attribution,
         ).await?;
         outcomes.push(outcome);
     }
@@ -576,10 +639,20 @@ async fn import_from_world_filters_non_feature_and_unknown_featuretype() {
 
 Expected: existing tests still pass; new integration test passes OR is marked `#[ignore]` with rationale.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Update `ARCHITECTURE.md` §4 (same-commit rule)**
+
+CLAUDE.md mandates that any new `#[tauri::command]` lands in the same commit as its ARCH §4 entry. Edit `ARCHITECTURE.md` §4:
+- Append `import_advantages_from_world` to the per-file IPC entry for `db/advantage.rs`.
+- Bump the running command total: **65 → 66**.
+
+- [ ] **Step 5: Run `./scripts/verify.sh`**
+
+Expected: green.
+
+- [ ] **Step 6: Commit**
 
 ```
-git add src-tauri/src/db/advantage.rs
+git add src-tauri/src/db/advantage.rs ARCHITECTURE.md
 git commit -m "$(cat <<'EOF'
 Add import_advantages_from_world Tauri command
 
@@ -587,10 +660,13 @@ Reads BridgeState.world_items for the Foundry source, filters to
 feature-type items with merit/flaw/background/boon featuretype,
 composes db_upsert_imported per row. Returns Vec<ImportOutcome>
 for the frontend summary toast. Stamps source_attribution with
-world title + world id + system version + ISO-8601 importedAt.
+world title + world id + system version + foundryId + ISO-8601
+importedAt (foundryId is the dedup identity key — see Task 1).
 
 Subscription to `item` collection must be triggered by the frontend
-before calling (Task 6); this command is a snapshot reader.
+before calling (Task 6); this command is a snapshot reader. ARCH §4
+IPC inventory bumped (65 → 66) in the same commit, per CLAUDE.md
+same-commit rule.
 
 Refs #14 #15.
 
@@ -660,14 +736,20 @@ pub async fn bridge_unsubscribe(
 }
 ```
 
-- [ ] **Step 2: Run `cargo check`**
+- [ ] **Step 2: Update `ARCHITECTURE.md` §4 (same-commit rule)**
 
-Expected: clean.
+CLAUDE.md mandates that any new `#[tauri::command]` lands in the same commit as its ARCH §4 entry. Edit `ARCHITECTURE.md` §4:
+- Append `bridge_subscribe` and `bridge_unsubscribe` to the per-file IPC entry for `bridge/commands.rs`.
+- Bump the running command total: **66 → 68**.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Run `./scripts/verify.sh`**
+
+Expected: green.
+
+- [ ] **Step 4: Commit**
 
 ```
-git add src-tauri/src/bridge/commands.rs
+git add src-tauri/src/bridge/commands.rs ARCHITECTURE.md
 git commit -m "$(cat <<'EOF'
 Add bridge_subscribe / bridge_unsubscribe Tauri commands
 
@@ -675,6 +757,8 @@ First dynamic consumer of Plan 0's bridge.subscribe envelope. Plan C
 import flow drives these from the AdvantagesManager Pull button.
 v1 accepts only SourceKind::Foundry (Roll20 returns an error string
 rather than silently ignoring — gives the frontend a clearer signal).
+ARCH §4 IPC inventory bumped (66 → 68) in the same commit, per
+CLAUDE.md same-commit rule.
 
 Refs #14.
 
@@ -720,7 +804,10 @@ git commit -m "$(cat <<'EOF'
 Register Plan C commands in invoke_handler
 
 import_advantages_from_world, bridge_subscribe, bridge_unsubscribe.
-Command surface 65 → 68. ARCHITECTURE.md §4 update follows in Task 7.
+No new command surface in this commit — declarations + ARCH §4
+entries already landed in Tasks 2 and 3 (total bumped to 68 in
+those commits). This commit only wires existing declarations into
+the frontend via `generate_handler!`.
 
 Refs #14 #16.
 
@@ -834,7 +921,11 @@ export function summaryAsToast(summary: ImportSummary, worldTitle: string): stri
 
 Expected: green.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run `./scripts/verify.sh`**
+
+Required by CLAUDE.md before every commit. The npm check above is a fast inner-loop signal; `verify.sh` is the gate.
+
+- [ ] **Step 6: Commit**
 
 ```
 git add src/lib/library/api.ts src/lib/library/importer.ts src/types.ts
@@ -869,7 +960,7 @@ EOF
 **Files:**
 - Modify: `src/tools/AdvantagesManager.svelte`
 - Modify: `src/lib/components/AdvantageCard.svelte` (source chip slot)
-- Verify: `src/components/SourceAttributionChip.svelte` is reusable here — confirm prop shape (likely `world: string`, `source: 'foundry' | 'roll20'`).
+- Verify: `src/lib/components/SourceAttributionChip.svelte` is reusable here — actual prop shape is `{ source: SourceKind; worldTitle?: string | null }` (confirmed against current `$props()` destructure).
 
 **Anti-scope:** Do NOT show an interactive collision-resolution modal — auto-suffix is locked in (#16 decision). Do NOT add a "Re-pull" button on individual rows — pull-all-and-update is the v1 model. Do NOT add per-row Delete for imported items (the existing Delete button on custom rows works for them too — they're `is_custom = 1`).
 
@@ -881,7 +972,7 @@ EOF
 
 - [ ] **Step 1: Verify `SourceAttributionChip.svelte`**
 
-Read `src/components/SourceAttributionChip.svelte`. Note its props. Adapt the per-row chip to pass `{ source: 'foundry', world: adv.sourceAttribution?.worldTitle }`. If the prop shape doesn't fit, the import-version chip can be inline:
+Read `src/lib/components/SourceAttributionChip.svelte`. The actual prop names are `source: SourceKind` and `worldTitle?: string | null` — pass `<SourceAttributionChip source="foundry" worldTitle={adv.sourceAttribution?.worldTitle} />`. (The earlier sketch using `world=` was wrong — Svelte silently drops unknown props and `npm run check` will surface the TS error.) If the prop shape ever changes, the import-version chip can be inline:
 
 ```svelte
 {#if adv.sourceAttribution}
@@ -1013,8 +1104,13 @@ Expected: green.
 - ✅ Create an `Iron Gullet` merit locally (custom). Pull from a world containing `Iron Gullet`. Result: a new row `Iron Gullet (FVTT — <world>)` appears alongside the local one.
 - ✅ Tri-state filter: clicking "Imported" hides corebook + local rows; clicking "Local" hides corebook + imported; "Corebook" hides custom (both flavors).
 - ✅ The existing Edit button on an imported row works (GM can curate imports).
+- ✅ **Re-pull regression check** (Plan C Task 1's foundryId-keyed dedup): create the suffixed `Iron Gullet (FVTT — <world>)` row above, then click Pull again. The suffixed row count must stay at 1 (Updated, not Inserted-duplicate).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Run `./scripts/verify.sh`**
+
+Required by CLAUDE.md before every commit.
+
+- [ ] **Step 8: Commit**
 
 ```
 git add src/tools/AdvantagesManager.svelte \
@@ -1041,43 +1137,16 @@ EOF
 
 ---
 
-## Task 7: ARCHITECTURE.md §4 updates
+## Task 7: ~~ARCHITECTURE.md §4 updates~~ — REMOVED (work distributed into Tasks 2 and 3)
 
-**Goal:** Document the three new Tauri commands.
+The original "Task 7" consolidated all Plan C ARCH §4 IPC inventory edits into a single trailing commit. CLAUDE.md's same-commit rule ("Never add a `#[tauri::command]` without updating ARCHITECTURE.md §4 IPC inventory in the same commit") makes that consolidation pattern invalid. The IPC inventory bumps now travel inline with the declaring commits:
 
-**Files:**
-- Modify: `ARCHITECTURE.md`
+- `import_advantages_from_world` → ARCH §4 updated in **Task 2** (total 65 → 66).
+- `bridge_subscribe` + `bridge_unsubscribe` → ARCH §4 updated in **Task 3** (total 66 → 68).
 
-**Depends on:** Task 6
+There is no separate ARCH §4 prose work for Plan C (unlike Plan B, which has the storyteller.* umbrella + subscription-collection paragraph in its Task 15). Task 4's `invoke_handler!` registration commit therefore lands no ARCH change.
 
-**Tests required:** NO
-
-- [ ] **Step 1: Update IPC inventory**
-
-In `ARCHITECTURE.md` §4:
-
-- `src-tauri/src/db/advantage.rs`: append `import_advantages_from_world`; bump count from 5 to 6.
-- `src-tauri/src/bridge/commands.rs`: append `bridge_subscribe`, `bridge_unsubscribe`; bump count from 7 (post-Plan-B) to 9.
-- Running total: 65 → 68.
-
-- [ ] **Step 2: Commit**
-
-```
-git add ARCHITECTURE.md
-git commit -m "$(cat <<'EOF'
-ARCHITECTURE.md: document Plan-C IPC additions
-
-§4 IPC inventory:
-  + db/advantage.rs +1: import_advantages_from_world (5 → 6)
-  + bridge/commands.rs +2: bridge_subscribe, bridge_unsubscribe (7 → 9)
-  + total 65 → 68
-
-Closes #14 #15 #16.
-
-https://claude.ai/code/session_01MoVudfzVJh7PSkrS1zR5Px
-EOF
-)"
-```
+The task overview table's row for Task 7 stays as a numbered placeholder for readability; the implementer should skip it.
 
 ---
 
