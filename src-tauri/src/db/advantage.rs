@@ -1,6 +1,6 @@
 use rand::seq::SliceRandom;
 use sqlx::{Row, SqlitePool};
-use crate::shared::types::{Advantage, AdvantageKind, Field};
+use crate::shared::types::{Advantage, AdvantageKind, Field, ImportOutcome};
 
 // --------------------------------------------------------------------------
 // JSON serde helpers for tags_json and properties_json columns
@@ -230,6 +230,150 @@ async fn db_roll_random(
         return Ok(None);
     }
     Ok(pool_of_matches.choose(&mut rand::thread_rng()).cloned())
+}
+
+// --------------------------------------------------------------------------
+// FVTT import path (parallel to db_insert / db_update — preserves dedup
+// identity on the immutable Foundry document _id carried via
+// source_attribution.foundryId, NOT on the mutable display name).
+// --------------------------------------------------------------------------
+
+/// Identity lookup keyed on the immutable Foundry document id (carried via
+/// `source_attribution.foundryId`) scoped by `worldTitle`. Returns None for
+/// any row whose `source_attribution` is NULL (i.e. local rows never match).
+pub(crate) async fn db_find_by_foundry_id(
+    pool: &SqlitePool,
+    foundry_id: &str,
+    world_title: &str,
+) -> Result<Option<Advantage>, String> {
+    let row = sqlx::query(
+        "SELECT id, name, description, tags_json, properties_json, is_custom,
+                kind, source_attribution
+         FROM advantages
+         WHERE json_extract(source_attribution, '$.foundryId')  = ?
+           AND json_extract(source_attribution, '$.worldTitle') = ?
+         LIMIT 1"
+    )
+    .bind(foundry_id)
+    .bind(world_title)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("db/advantage.find_by_foundry_id: {}", e))?;
+
+    match row {
+        Some(r) => Ok(Some(row_to_advantage(&r)?)),
+        None => Ok(None),
+    }
+}
+
+/// True iff any row matches (name, kind) regardless of attribution. Used by
+/// the import path to decide when to auto-suffix imported names so a
+/// hand-authored "Iron Gullet" can coexist with the FVTT-imported one.
+pub(crate) async fn db_collides_locally(
+    pool: &SqlitePool,
+    name: &str,
+    kind: AdvantageKind,
+) -> Result<bool, String> {
+    let row = sqlx::query("SELECT COUNT(*) AS c FROM advantages WHERE name = ? AND kind = ?")
+        .bind(name)
+        .bind(kind_to_str(kind))
+        .fetch_one(pool)
+        .await
+        .map_err(|e| format!("db/advantage.collides_locally: {}", e))?;
+    let c: i64 = row.get("c");
+    Ok(c > 0)
+}
+
+/// Import-flow workhorse. Resolves the dedup decision tree:
+///   - Same (foundryId, worldTitle) already imported → UPDATE in place
+///     (description, properties, attribution), preserving the row id and
+///     the stored name (which may already carry a suffix).
+///   - Different attribution but (name, kind) collides with any local row
+///     → auto-suffix "(FVTT — <worldTitle>)" and INSERT.
+///   - No collision → straight INSERT.
+///
+/// Imported rows are always `is_custom = 1` (survives destructive reseed,
+/// per ARCHITECTURE.md §6 tri-state) and start with empty tags.
+pub(crate) async fn db_upsert_imported(
+    pool: &SqlitePool,
+    name: &str,
+    kind: AdvantageKind,
+    description: &str,
+    properties: &[Field],
+    source_attribution: &serde_json::Value,
+) -> Result<ImportOutcome, String> {
+    let world_title = source_attribution
+        .get("worldTitle")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            "db/advantage.upsert_imported: source_attribution missing worldTitle".to_string()
+        })?;
+    let foundry_id = source_attribution
+        .get("foundryId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            "db/advantage.upsert_imported: source_attribution missing foundryId".to_string()
+        })?;
+
+    // Case 1: same (foundryId, worldTitle) → UPDATE in place.
+    if let Some(existing) = db_find_by_foundry_id(pool, foundry_id, world_title).await? {
+        let properties_json = serialize_properties(properties)?;
+        let attribution_str = serde_json::to_string(source_attribution)
+            .map_err(|e| format!("db/advantage.upsert_imported: serialize attribution: {}", e))?;
+
+        sqlx::query(
+            "UPDATE advantages
+             SET description = ?, properties_json = ?, source_attribution = ?
+             WHERE id = ?"
+        )
+        .bind(description)
+        .bind(&properties_json)
+        .bind(&attribution_str)
+        .bind(existing.id)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("db/advantage.upsert_imported: update: {}", e))?;
+
+        return Ok(ImportOutcome::Updated {
+            id: existing.id,
+            name: existing.name,
+            kind: existing.kind,
+        });
+    }
+
+    // Case 2 / 3: INSERT. Suffix name iff (name, kind) collides with any
+    // existing row (local hand-authored OR a different-world import).
+    let final_name = if db_collides_locally(pool, name, kind).await? {
+        format!("{} (FVTT — {})", name, world_title)
+    } else {
+        name.to_string()
+    };
+
+    let tags_json = serialize_tags(&[])?;
+    let properties_json = serialize_properties(properties)?;
+    let attribution_str = serde_json::to_string(source_attribution)
+        .map_err(|e| format!("db/advantage.upsert_imported: serialize attribution: {}", e))?;
+
+    let result = sqlx::query(
+        "INSERT INTO advantages
+            (name, description, tags_json, properties_json, is_custom, kind, source_attribution)
+         VALUES (?, ?, ?, ?, 1, ?, ?)"
+    )
+    .bind(&final_name)
+    .bind(description)
+    .bind(&tags_json)
+    .bind(&properties_json)
+    .bind(kind_to_str(kind))
+    .bind(&attribution_str)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/advantage.upsert_imported: insert: {}", e))?;
+
+    Ok(ImportOutcome::Inserted {
+        id: result.last_insert_rowid(),
+        name: final_name,
+        kind,
+    })
 }
 
 // --------------------------------------------------------------------------
@@ -507,5 +651,213 @@ mod tests {
         let flaws = db_list_by_kind(&pool, AdvantageKind::Flaw).await.unwrap();
         assert_eq!(flaws.len(), 2);
         assert!(flaws.iter().all(|r| r.kind == AdvantageKind::Flaw));
+    }
+
+    // ─── New tests: FVTT import dedup helpers ───────────────────────────
+
+    fn world_attribution(world: &str, foundry_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "source": "foundry",
+            "worldTitle": world,
+            "foundryId": foundry_id,
+            "importedAt": "2026-05-14T12:00:00Z",
+        })
+    }
+
+    #[tokio::test]
+    async fn upsert_imported_new_row_inserts() {
+        let pool = test_pool().await;
+        let out = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "desc",
+            &[],
+            &world_attribution("Chicago", "chi_iron"),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(out, ImportOutcome::Inserted { ref name, .. } if name == "Iron Gullet"));
+    }
+
+    #[tokio::test]
+    async fn upsert_imported_same_world_updates_in_place() {
+        let pool = test_pool().await;
+        let first = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "desc1",
+            &[],
+            &world_attribution("Chicago", "chi_iron"),
+        )
+        .await
+        .unwrap();
+        let first_id = match first {
+            ImportOutcome::Inserted { id, .. } => id,
+            other => panic!("expected Inserted on first import, got {other:?}"),
+        };
+
+        let second = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "desc2 (revised)",
+            &[],
+            &world_attribution("Chicago", "chi_iron"),
+        )
+        .await
+        .unwrap();
+
+        match second {
+            ImportOutcome::Updated { id, .. } => assert_eq!(id, first_id),
+            other => panic!("expected Updated, got {other:?}"),
+        }
+        let rows = db_list(&pool).await.unwrap();
+        assert_eq!(rows.iter().filter(|r| r.name == "Iron Gullet").count(), 1);
+        assert_eq!(
+            rows.iter().find(|r| r.id == first_id).unwrap().description,
+            "desc2 (revised)"
+        );
+    }
+
+    #[tokio::test]
+    async fn upsert_imported_different_world_suffixes_name() {
+        let pool = test_pool().await;
+        db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "d",
+            &[],
+            &world_attribution("Chicago", "chi_iron"),
+        )
+        .await
+        .unwrap();
+
+        let second = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "d",
+            &[],
+            &world_attribution("Berlin", "ber_iron"),
+        )
+        .await
+        .unwrap();
+
+        match second {
+            ImportOutcome::Inserted { name, .. } => {
+                assert_eq!(name, "Iron Gullet (FVTT — Berlin)");
+            }
+            other => panic!("expected Inserted with suffix, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn upsert_imported_suffixes_against_local_row() {
+        let pool = test_pool().await;
+        db_insert(&pool, "Iron Gullet", "local desc", AdvantageKind::Merit, None, &[], &[])
+            .await
+            .unwrap();
+
+        let imported = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "fvtt desc",
+            &[],
+            &world_attribution("Chicago", "chi_iron"),
+        )
+        .await
+        .unwrap();
+
+        match imported {
+            ImportOutcome::Inserted { name, .. } => {
+                assert_eq!(name, "Iron Gullet (FVTT — Chicago)");
+            }
+            other => panic!("expected Inserted with suffix, got {other:?}"),
+        }
+        let rows = db_list(&pool).await.unwrap();
+        let names: Vec<_> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"Iron Gullet"));
+        assert!(names.contains(&"Iron Gullet (FVTT — Chicago)"));
+    }
+
+    #[tokio::test]
+    async fn upsert_imported_repull_of_secondary_world_updates_in_place() {
+        let pool = test_pool().await;
+
+        let chi = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "v1",
+            &[],
+            &world_attribution("Chicago", "chi_iron"),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(chi, ImportOutcome::Inserted { ref name, .. } if name == "Iron Gullet"));
+
+        let ber1 = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "v1",
+            &[],
+            &world_attribution("Berlin", "ber_iron"),
+        )
+        .await
+        .unwrap();
+        let ber_id = match ber1 {
+            ImportOutcome::Inserted { id, name, .. } => {
+                assert_eq!(name, "Iron Gullet (FVTT — Berlin)");
+                id
+            }
+            other => panic!("expected suffixed Inserted, got {other:?}"),
+        };
+
+        let ber2 = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "v2",
+            &[],
+            &world_attribution("Berlin", "ber_iron"),
+        )
+        .await
+        .unwrap();
+        match ber2 {
+            ImportOutcome::Updated { id, .. } => assert_eq!(id, ber_id),
+            other => panic!("expected Updated on re-pull of secondary world, got {other:?}"),
+        }
+        let rows = db_list(&pool).await.unwrap();
+        let berlin_rows = rows
+            .iter()
+            .filter(|r| r.name == "Iron Gullet (FVTT — Berlin)")
+            .count();
+        assert_eq!(
+            berlin_rows, 1,
+            "re-pull of secondary-world item must update in place, not duplicate"
+        );
+        let chicago_rows = rows.iter().filter(|r| r.name == "Iron Gullet").count();
+        assert_eq!(
+            chicago_rows, 1,
+            "Chicago row must be untouched by Berlin re-pull"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_by_foundry_id_returns_none_for_local_row() {
+        let pool = test_pool().await;
+        db_insert(&pool, "Allies", "local", AdvantageKind::Background, None, &[], &[])
+            .await
+            .unwrap();
+        let found = db_find_by_foundry_id(&pool, "any_id", "Chicago").await.unwrap();
+        assert!(
+            found.is_none(),
+            "local row (NULL attribution) must never match a foundryId lookup"
+        );
     }
 }
