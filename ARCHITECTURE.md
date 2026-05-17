@@ -651,6 +651,22 @@ If TLS init fails at startup, the Foundry accept loop is NOT spawned
 in the Foundry browser). The failure is logged once and Foundry stays
 disabled for the session; Roll20 is unaffected.
 
+**Subscription collections (Foundry):** `actors` (auto-subscribed on
+Hello — always-on; preserves pre-Plan-0 behavior), `item` (opt-in via
+`bridge.subscribe { collection: "item" }` — Plan B+ Library Sync
+consumers). The subscription registry lives in
+`vtmtools-bridge/scripts/foundry-actions/bridge.js`; future collections
+(`journal`, `scene`, `chat`, `combat`) are reserved by name in the
+character-tooling roadmap §5 and activated when a consumer feature
+lands.
+
+**Outbound umbrellas (Foundry):** `actor.*` (per-actor edits), `game.*`
+(in-game/table rolls + chat), `storyteller.*` (GM-facing operations
+not tied to a single actor; v1 ships `storyteller.create_world_item`
+only — Library Sync push). See
+`docs/superpowers/specs/2026-04-26-foundry-helper-library-roadmap.md`
+§5 for the per-helper inventory.
+
 ### Tauri events (backend → frontend)
 
 | Event | Payload | Emitted when |
