@@ -2,9 +2,9 @@
 // components must NOT call invoke() directly — they go through here.
 
 import { invoke } from '@tauri-apps/api/core';
-import type { BridgeCharacter, CanonicalRoll, SourceKind } from '../../types';
+import type { BridgeCharacter, CanonicalRoll, CanonicalWorldItem, SourceKind } from '../../types';
 
-export type { BridgeCharacter, CanonicalRoll, SourceKind };
+export type { BridgeCharacter, CanonicalRoll, CanonicalWorldItem, SourceKind };
 
 export interface SourceInfo {
   worldId: string | null;
@@ -37,3 +37,6 @@ export const setAttribute = (
 
 export const bridgeGetSourceInfo = (source: SourceKind): Promise<SourceInfo | null> =>
   invoke<SourceInfo | null>('bridge_get_source_info', { source });
+
+export const bridgeGetWorldItems = (): Promise<CanonicalWorldItem[]> =>
+  invoke<CanonicalWorldItem[]>('bridge_get_world_items');
