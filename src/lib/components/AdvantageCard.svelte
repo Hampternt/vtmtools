@@ -1,11 +1,28 @@
 <script lang="ts">
   import type { Advantage, Field } from '../../types';
+  import { bridge } from '../../store/bridge.svelte';
+  import { pushAdvantageToWorld } from '$lib/library/api';
 
   const { entry, onedit, ondelete }: {
     entry: Advantage;
     onedit?: () => void;
     ondelete?: () => void;
   } = $props();
+
+  let pushing = $state(false);
+  let pushError = $state('');
+
+  async function handlePush() {
+    pushing = true;
+    pushError = '';
+    try {
+      await pushAdvantageToWorld(entry.id);
+    } catch (e) {
+      pushError = String(e);
+    } finally {
+      pushing = false;
+    }
+  }
 
   function findField(name: string): Field | undefined {
     return entry.properties.find(p => p.name === name);
@@ -82,6 +99,18 @@
   {/if}
 
   <footer class="foot">
+    {#if pushError}
+      <span class="push-error" title={pushError}>!</span>
+    {/if}
+    {#if bridge.connections.foundry}
+      <button
+        class="btn push"
+        onclick={handlePush}
+        disabled={pushing}
+        aria-label="Push to world"
+        title="Push to Foundry world"
+      >{pushing ? '…' : '⇡'}</button>
+    {/if}
     {#if entry.isCustom}
       <button class="btn edit"   onclick={onedit}   aria-label="Edit">✎</button>
       <button class="btn delete" onclick={ondelete} aria-label="Delete">✕</button>
@@ -145,5 +174,13 @@
     transition: color 0.15s, border-color 0.15s;
   }
   .btn:hover { color: var(--accent); border-color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .push-error {
+    color: var(--accent);
+    font-weight: bold;
+    font-size: 0.72rem;
+    align-self: center;
+    cursor: help;
+  }
   .builtin { color: var(--text-ghost); font-size: 0.62rem; font-style: italic; }
 </style>
