@@ -1195,7 +1195,7 @@ EOF
 )"
 ```
 
-- [ ] **Step 4: Single branch-wide code review** _(pending — running immediately after this checkbox commit)_
+- [x] **Step 4: Single branch-wide code review** _(ran 2026-05-17; found 1 high-confidence bug — `update_advantage` wiped `source_attribution` on imported-row edits — fixed in a follow-up commit with a regression test)_
 
 Per CLAUDE.md's lean-execution override, NOW (and not before) invoke `code-review:code-review` against the full Phase 4 branch diff (the union of Plan A + Plan B + Plan C commits). The reviewer agent's report informs any follow-up fix commits before merging.
 
