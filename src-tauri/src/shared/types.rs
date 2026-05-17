@@ -120,16 +120,40 @@ pub struct DyscrasiaEntry {
     pub is_custom: bool,
 }
 
-/// A library entry for a VTM 5e Merit, Background, or Flaw.
+/// Kind discriminator for the polymorphic `advantages` library table.
+/// Mirrors the SQL CHECK constraint in `0009_advantages_kind_and_source.sql`.
+///
+/// Partitioning rule (ARCHITECTURE.md §9): same row shape → same table with
+/// kind; different row shape → own table. The four variants here share the
+/// Advantage row shape AND the `actor.create_feature` push contract
+/// (foundry helper roadmap §5). Dyscrasias and (future) disciplines have
+/// different row shapes and get their own tables.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AdvantageKind {
+    Merit,
+    Flaw,
+    Background,
+    Boon,
+}
+
+/// A library entry for a VTM 5e Merit, Background, Flaw, or Boon.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Advantage {
     pub id: i64,
     pub name: String,
     pub description: String,
+    pub kind: AdvantageKind,
     pub tags: Vec<String>,
     pub properties: Vec<Field>,
     pub is_custom: bool,
+    /// FVTT-import provenance. None = hand-authored locally (corebook or
+    /// GM custom). Some = imported from a Foundry world; JSON shape
+    /// described in the migration comment. Promoted to a tagged enum
+    /// when a second source materializes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_attribution: Option<serde_json::Value>,
 }
 
 /// Full result of one resonance roll sequence
