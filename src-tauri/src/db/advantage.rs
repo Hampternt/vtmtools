@@ -180,9 +180,17 @@ async fn db_update(
         None => None,
     };
 
+    // `source_attribution` uses COALESCE so a NULL bind preserves the
+    // existing column value. The GM-edit path (`update_advantage` Tauri
+    // command) always binds None and must NOT wipe import provenance —
+    // wiping it would break the foundryId-keyed re-pull dedup in
+    // `db_upsert_imported` (the next pull would miss and INSERT a
+    // duplicate row). Callers that want to overwrite attribution should
+    // pass Some(value); callers that want to leave it alone pass None.
     let result = sqlx::query(
         "UPDATE advantages
-         SET name = ?, description = ?, tags_json = ?, properties_json = ?, kind = ?, source_attribution = ?
+         SET name = ?, description = ?, tags_json = ?, properties_json = ?, kind = ?,
+             source_attribution = COALESCE(?, source_attribution)
          WHERE id = ? AND is_custom = 1"
     )
     .bind(name)
@@ -1123,5 +1131,91 @@ mod tests {
             "error message missing prefix: {err}"
         );
         assert!(err.contains("no active Foundry"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn update_preserves_source_attribution_for_imported_rows() {
+        // Regression: editing an imported row via the GM-facing update path
+        // (Tauri `update_advantage` → `db_update(..., None, ...)`) must NOT
+        // wipe `source_attribution`. Otherwise the foundryId-keyed re-pull
+        // dedup (db_find_by_foundry_id) misses on the next pull and
+        // re-INSERTs the same Foundry item as a duplicate row.
+        let pool = test_pool().await;
+
+        let attribution = world_attribution("Chicago", "chi_iron");
+        let inserted = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "v1 desc",
+            &[],
+            &attribution,
+        )
+        .await
+        .unwrap();
+        let row_id = match inserted {
+            ImportOutcome::Inserted { id, .. } => id,
+            other => panic!("expected Inserted on fresh import, got {other:?}"),
+        };
+
+        // Simulate the GM clicking Edit on the imported row. The Tauri
+        // `update_advantage` command forwards None for source_attribution
+        // (the frontend AdvantageInput has no attribution field).
+        db_update(
+            &pool,
+            row_id,
+            "Iron Gullet (typo fix)",
+            "v1 with fixed typo",
+            AdvantageKind::Merit,
+            None,
+            &[],
+            &[],
+        )
+        .await
+        .unwrap();
+
+        // The foundryId lookup must still match → source_attribution survived.
+        let found = db_find_by_foundry_id(&pool, "chi_iron", "Chicago")
+            .await
+            .unwrap();
+        assert!(
+            found.is_some(),
+            "db_find_by_foundry_id must still match after GM edit; \
+             source_attribution must be preserved by db_update"
+        );
+        let row = found.unwrap();
+        assert_eq!(row.id, row_id);
+        assert_eq!(row.name, "Iron Gullet (typo fix)");
+        assert!(
+            row.source_attribution.is_some(),
+            "source_attribution must not be wiped by db_update"
+        );
+
+        // Re-pull (idempotency check). Must Update in place, NOT Insert a
+        // duplicate. This is the user-visible manifestation of the bug.
+        let repulled = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "v2 desc",
+            &[],
+            &attribution,
+        )
+        .await
+        .unwrap();
+        match repulled {
+            ImportOutcome::Updated { id, .. } => assert_eq!(id, row_id),
+            other => panic!("expected Updated on re-pull after GM edit, got {other:?}"),
+        }
+
+        let all = db_list(&pool).await.unwrap();
+        let imported = all
+            .iter()
+            .filter(|r| r.source_attribution.is_some())
+            .count();
+        assert_eq!(
+            imported, 1,
+            "GM edit + re-pull must leave exactly one imported row, not duplicate"
+        );
     }
 }
