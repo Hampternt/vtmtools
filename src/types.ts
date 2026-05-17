@@ -26,13 +26,32 @@ export interface DyscrasiaEntry {
   isCustom: boolean;
 }
 
+/**
+ * Mirrors src-tauri/src/shared/types.rs::AdvantageKind (serde
+ * rename_all = "snake_case"). Discriminates Advantage rows by V5
+ * category. Kept distinct from FeatureType (which discriminates the
+ * source-agnostic character feature surface) so the two can drift
+ * independently if the Library and bridge layers ever diverge.
+ */
+export type AdvantageKind = 'merit' | 'flaw' | 'background' | 'boon';
+
 export interface Advantage {
   id: number;
   name: string;
   description: string;
+  kind: AdvantageKind;
   tags: string[];
   properties: Field[];
   isCustom: boolean;
+  /**
+   * FVTT-import provenance. undefined = hand-authored locally
+   * (corebook or GM custom). Shape (when defined):
+   *   { source: 'foundry', worldTitle: string, worldId?: string,
+   *     systemVersion?: string, importedAt: string  // ISO-8601
+   *   }
+   * Stays as a free-form object until a second source materializes.
+   */
+  sourceAttribution?: Record<string, unknown>;
 }
 
 export interface ResonanceRollResult {

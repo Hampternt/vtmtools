@@ -8,6 +8,7 @@
   import type { SavedCharacter } from '$lib/saved-characters/api';
   import ModifierCard from './ModifierCard.svelte';
   import ModifierEffectEditor from './ModifierEffectEditor.svelte';
+  import CardOverlay from './CardOverlay.svelte';
   import RollDispatcherPopover from './RollDispatcherPopover.svelte';
   import ActiveEffectsSummary from './ActiveEffectsSummary.svelte';
   import DropZone from '$lib/components/dnd/DropZone.svelte';
@@ -35,7 +36,6 @@
                     | { kind: 'virtual', virt: VirtualCard };
   let editorOpen = $state(false);
   let editorTarget = $state<EditorTarget | null>(null);
-  let popoverPos = $state<{ left: number; top: number } | null>(null);
 
   // Roll dispatcher popover state — anchored to the 🎲 button.
   let rollPopoverOpen = $state(false);
@@ -333,21 +333,16 @@
     await modifiers.delete(e.mod.id);
   }
 
-  function openEditor(e: CardEntry, anchor: HTMLElement): void {
+  function openEditor(e: CardEntry, _anchor: HTMLElement): void {
     editorTarget = e.kind === 'materialized'
       ? { kind: 'materialized', mod: e.mod }
       : { kind: 'virtual', virt: e.virt };
-    // Anchor the popover just to the right of the cog and slightly below.
-    // Viewport coords pair with position:fixed below.
-    const rect = anchor.getBoundingClientRect();
-    popoverPos = { left: rect.right + 8, top: rect.bottom + 4 };
     editorOpen = true;
   }
 
   function closeEditor(): void {
     editorOpen = false;
     editorTarget = null;
-    popoverPos = null;
   }
 
   async function saveEditor(effects: ModifierEffect[], tags: string[]): Promise<void> {
@@ -522,16 +517,21 @@
     </p>
   {/if}
 
-  {#if editorOpen && editorTarget && popoverPos}
-    <div class="popover-wrap" style="left: {popoverPos.left}px; top: {popoverPos.top}px;">
+  {#if editorTarget}
+    {@const target = editorTarget}
+    <CardOverlay
+      bind:open={editorOpen}
+      title={target.kind === 'materialized' ? target.mod.name : target.virt.name}
+      onClose={closeEditor}
+    >
       <ModifierEffectEditor
-        initialEffects={editorTarget.kind === 'materialized' ? editorTarget.mod.effects : []}
-        initialTags={editorTarget.kind === 'materialized' ? editorTarget.mod.tags : []}
+        initialEffects={target.kind === 'materialized' ? target.mod.effects : []}
+        initialTags={target.kind === 'materialized' ? target.mod.tags : []}
         onSave={saveEditor}
         onCancel={closeEditor}
         {character}
       />
-    </div>
+    </CardOverlay>
   {/if}
 </section>
 
@@ -609,6 +609,8 @@
   }
 
   .modifier-row {
+    container-type: inline-size;
+    container-name: modrow;
     --card-trans-duration: 600ms;
     --card-trans-easing: linear(
       0, 0.01 0.8%, 0.038 1.6%, 0.154 3.4%, 0.781 9.7%, 1.01 12.5%,
@@ -616,12 +618,12 @@
       1.208 21.6%, 1.172 23.6%, 1.057 28.6%, 1.007 31.2%, 0.969 34.1%,
       0.951 37.1%, 0.953 40.9%, 0.998 50.4%, 1.011 56%, 0.998 74.7%, 1
     );
-    --card-width: 9rem;
+    --card-width: clamp(9rem, 14cqi, 14rem);
     --card-overlap: 0.55;
     --card-shift-delta: 0.5rem;
     /* --cards is set inline via the style prop above to drive the z-stack centering math. */
     position: relative;
-    height: 8rem;
+    height: 9.5rem;
     perspective: 800px;
   }
 
@@ -640,12 +642,6 @@
     box-sizing: border-box;
   }
   .add-modifier:hover { color: var(--text-primary); border-color: var(--border-surface); }
-
-  .popover-wrap {
-    /* Anchored to the cog via getBoundingClientRect() — viewport coords. */
-    position: fixed;
-    z-index: 1000;
-  }
 
   .push-notice {
     font-size: 0.7rem;

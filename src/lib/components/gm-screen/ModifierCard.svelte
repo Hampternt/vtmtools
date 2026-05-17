@@ -2,6 +2,9 @@
   import type { CharacterModifier, ModifierEffect, FoundryItemBonus } from '../../../types';
   import DragSource from '../dnd/DragSource.svelte';
   import type { DragSource as DragSourceType } from '../../dnd/types';
+  import CardDragHandle from './CardDragHandle.svelte';
+  import CardContextMenu, { type CardAction } from './CardContextMenu.svelte';
+  import { dndStore } from '../../dnd/store.svelte';
 
   interface Props {
     /**
@@ -77,7 +80,83 @@
     onSaveAsOverride,
   }: Props = $props();
 
-  let cogEl: HTMLButtonElement | undefined = $state();
+  let cardEl: HTMLDivElement | undefined = $state();
+
+  let ctxOpen = $state(false);
+  let ctxAnchor = $state<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  function handleContextMenu(e: MouseEvent) {
+    // Right-click during a held DnD pickup is reserved for cancellation by
+    // GmScreen.svelte's global listener. Do nothing here in that case.
+    if (dndStore.held !== null) return;
+    e.preventDefault();
+    ctxAnchor = { x: e.clientX, y: e.clientY };
+    ctxOpen = true;
+  }
+
+  function closeCtx() { ctxOpen = false; }
+
+  function handleBodyClick(_e: MouseEvent) {
+    // The overflow pill (Task 9) uses stop-propagation to avoid toggling on
+    // pill-click. This handler runs only for bare body clicks, which always
+    // toggle active.
+    onToggleActive();
+  }
+
+  function handleBodyKey(e: KeyboardEvent) {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      onToggleActive();
+    }
+  }
+
+  let cardActions = $derived<CardAction[]>(
+    (
+      [
+        {
+          kind: 'item' as const,
+          label: 'Open',
+          shortcut: 'Enter',
+          onActivate: () => { if (cardEl) onOpenEditor(cardEl); },
+        },
+        {
+          kind: 'item' as const,
+          label: modifier.isActive ? 'Deactivate' : 'Activate',
+          shortcut: 'Click',
+          onActivate: onToggleActive,
+        },
+        { kind: 'divider' as const },
+        {
+          kind: 'item' as const,
+          label: modifier.isHidden ? 'Unhide' : 'Hide',
+          onActivate: onHide,
+        },
+        canPush ? {
+          kind: 'item' as const,
+          label: 'Push to Foundry',
+          onActivate: () => onPush?.(),
+        } : null,
+        onSaveAsOverride ? {
+          kind: 'item' as const,
+          label: 'Save as local override',
+          onActivate: () => onSaveAsOverride?.(),
+        } : null,
+        { kind: 'divider' as const },
+        canReset ? {
+          kind: 'item' as const,
+          label: 'Reset card',
+          destructive: true as const,
+          onActivate: () => onReset?.(),
+        } : null,
+        onDelete ? {
+          kind: 'item' as const,
+          label: 'Delete',
+          destructive: true as const,
+          onActivate: () => onDelete?.(),
+        } : null,
+      ] as (CardAction | null)[]
+    ).filter((a): a is CardAction => a !== null)
+  );
 
   function summarize(e: ModifierEffect): string {
     if (e.kind === 'note') return e.note ?? 'note';
@@ -103,38 +182,55 @@
 
   // DnD pickup source. Virtual cards (id=0) are pickup-disabled — they have
   // no DB row yet, so emitting a DragSource pointing at id=0 would confuse
-  // the matrix. The GM materializes first (toggle / cog) before reshuffling.
+  // the matrix. The GM materializes first (click to activate) before reshuffling.
   let dragSource = $derived.by((): DragSourceType => {
     if (modifier.binding.kind === 'advantage') return { kind: 'advantage', mod: modifier };
     return { kind: 'free-mod', mod: modifier };
   });
 
   let dragDisabled = $derived(isVirtual);
+
+  // Static overflow heuristic (spec §6.2) — count every body element that
+  // renders a line, including the conditional ones. Tune the threshold if
+  // cards routinely under- or over-pill in practice.
+  let bodyLineCount = $derived.by(() => {
+    let n = 1; // .card-name
+    if (originTemplateName) n += 1;
+    n += bonuses.length;
+    if (conditionalsSkipped.length > 0) n += 1;
+    n += Math.max(modifier.effects.length, 1); // effects (or "(no effect)" placeholder)
+    if (modifier.tags.length > 0) n += 1;
+    return n;
+  });
+  const OVERFLOW_THRESHOLD = 5;
+  let hasOverflow = $derived(bodyLineCount > OVERFLOW_THRESHOLD);
+  let hiddenCount = $derived(Math.max(0, bodyLineCount - OVERFLOW_THRESHOLD));
 </script>
 
 <div
+  bind:this={cardEl}
   class="modifier-card"
   data-active={modifier.isActive ? 'true' : 'false'}
   data-hidden={modifier.isHidden ? 'true' : 'false'}
   data-zone={modifier.zone}
+  oncontextmenu={handleContextMenu}
 >
   <DragSource source={dragSource} disabled={dragDisabled}>
-    <div class="card-body">
-      {#if modifier.zone === 'situational'}
+    <CardDragHandle isActive={modifier.isActive} zone={modifier.zone} />
+  </DragSource>
+  <div
+    class="card-body"
+    role="button"
+    tabindex="0"
+    onclick={handleBodyClick}
+    onkeydown={handleBodyKey}
+  >
+    {#if modifier.zone === 'situational'}
         <span class="zone-chip" aria-label="Situational modifier">Situational</span>
       {/if}
-      <div class="head">
-        <span class="name" title={modifier.name}>
-          {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}{#if showOverride}<span class="override-mark" title="Saved local override — this card's data comes from your saved copy, which supersedes the live Foundry read-through">*</span>{/if}
-        </span>
-        <button
-          bind:this={cogEl}
-          class="cog"
-          title="Edit effects"
-          onpointerdown={(e) => e.stopPropagation()}
-          onclick={() => cogEl && onOpenEditor(cogEl)}
-        >⚙</button>
-      </div>
+      <p class="card-name" title={modifier.name}>
+        {modifier.name}{#if isVirtual}<span class="virtual-mark" title="Not yet customized">*</span>{/if}{#if showOverride}<span class="override-mark" title="Saved local override — this card's data comes from your saved copy, which supersedes the live Foundry read-through">*</span>{/if}
+      </p>
       {#if originTemplateName}
         <p class="origin">from "{originTemplateName}"</p>
       {/if}
@@ -168,57 +264,21 @@
         {/if}
       </div>
       {#if modifier.tags.length > 0}
-        <div class="tags">
-          {#each modifier.tags as t}<span class="tag">#{t}</span>{/each}
+        <div class="tags" title={modifier.tags.map(t => `#${t}`).join(' ')}>
+          {#each modifier.tags as t, i}{#if i > 0}{' '}{/if}<span class="tag">#{t}</span>{/each}
         </div>
       {/if}
     </div>
-  </DragSource>
-  <div class="foot">
+  {#if hasOverflow}
     <button
-      class="toggle"
-      class:on={modifier.isActive}
-      onclick={onToggleActive}
-    >{modifier.isActive ? 'ON' : 'OFF'}</button>
-    {#if onSaveAsOverride}
-      <button
-        class="save-override"
-        title="Snapshot the live Foundry bonuses into a saved local override"
-        aria-label="Save as local override"
-        onclick={onSaveAsOverride}
-      >💾</button>
-    {/if}
-    {#if canPush}
-      <button
-        class="push"
-        title="Push these effects to the merit on Foundry"
-        aria-label="Push effects to Foundry"
-        onclick={onPush}
-      >↑</button>
-    {/if}
-    {#if canReset}
-      <button
-        class="reset"
-        title="Reset card — drops local effects/paths/tags. Foundry bonuses unaffected."
-        aria-label="Reset card"
-        onclick={onReset}
-      >↺</button>
-    {/if}
-    {#if onDelete}
-      <button
-        class="delete"
-        title="Delete card permanently"
-        aria-label="Delete card permanently"
-        onclick={onDelete}
-      >🗑</button>
-    {/if}
-    <button
-      class="hide"
-      title={modifier.isHidden ? 'Show card again' : 'Hide card'}
-      aria-label={modifier.isHidden ? 'Show card again' : 'Hide card'}
-      onclick={onHide}
-    >{modifier.isHidden ? '+' : '×'}</button>
-  </div>
+      type="button"
+      class="overflow-pill"
+      title="Open full card"
+      aria-label="Open full card"
+      onclick={(e) => { e.stopPropagation(); if (cardEl) onOpenEditor(cardEl); }}
+    >+{hiddenCount} <span class="glyph">⤢</span></button>
+  {/if}
+  <CardContextMenu open={ctxOpen} anchor={ctxAnchor} actions={cardActions} onClose={closeCtx} />
 </div>
 
 <style>
@@ -244,10 +304,9 @@
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
-    /* Safety net: even with single-line bonuses/effects, a card with many
-       rows could still exceed the fixed 8rem height. Clip rather than spill
-       the .foot (toggle / hide) outside the card boundary. The card's own
-       :hover box-shadow renders outside the box and is unaffected. */
+    /* Safety net: clip overflowing content rather than letting it spill
+       outside the card boundary. The card's own :hover box-shadow renders
+       outside the box and is unaffected. */
     overflow: hidden;
     z-index: calc(100 - var(--distance));
 
@@ -304,15 +363,11 @@
     filter: saturate(0.6);
   }
 
-  .head { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; }
-  .name {
+  .card-name {
+    margin: 0 0 0.3rem;
     font-size: 0.85rem;
-    color: var(--text-primary);
     font-weight: 500;
-    /* Long merit names must not push the cog past the right edge of the
-       9rem card. min-width:0 lets a flex child shrink below its content. */
-    flex: 1;
-    min-width: 0;
+    color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -330,19 +385,6 @@
     color: var(--text-muted);
     font-style: italic;
   }
-  .cog {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 0.85rem;
-    cursor: pointer;
-    opacity: 0;
-    flex-shrink: 0;
-    transition: opacity 120ms ease;
-  }
-  .modifier-card:hover .cog,
-  .cog:focus { opacity: 1; }
-
   .bonuses { display: flex; flex-direction: column; gap: 0.1rem; }
   .bonus {
     font-size: 0.65rem;
@@ -351,8 +393,8 @@
     display: flex;
     gap: 0.4rem;
     align-items: baseline;
-    /* Stay on one line — wrapping pushed total content past 8rem and
-       spilled the foot below the card. Full text remains in the title. */
+    /* Stay on one line — wrapping pushed total content past the card height
+       and spilled the foot below the card. Full text remains in the title. */
     flex-wrap: nowrap;
     min-width: 0;
     overflow: hidden;
@@ -370,6 +412,15 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* Narrow-width adaptation. The .modifier-row declares container-type
+     in CharacterRow.svelte; this rule fires when the card's container
+     (the row) is ≤ 60rem wide, which is when card-width is at or near
+     the clamp() floor. The 60rem threshold corresponds to roughly 4
+     cards at 9rem + gaps; tune if cards feel cramped at typical widths. */
+  @container modrow (max-width: 60rem) {
+    .bonus-source { display: none; }
   }
 
   .conditionals-badge {
@@ -395,81 +446,43 @@
   }
   .no-effect { color: var(--text-muted); font-style: italic; }
 
-  .tags { display: flex; flex-wrap: wrap; gap: 0.2rem; }
-  .tag { font-size: 0.65rem; color: var(--text-muted); }
-
-  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: auto; }
-  .toggle {
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-faint);
-    border-radius: 999px;
-    padding: 0.15rem 0.55rem;
+  /* Single-line truncation: when tags overflow the card width, they ellipse
+     mid-string ("#social #physi…") rather than wrapping onto a second row.
+     Hover title surfaces the full tag list. */
+  .tags {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
     font-size: 0.65rem;
-    cursor: pointer;
-    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+    line-height: 1.2;
   }
-  .toggle.on {
-    background: var(--accent);
+  .tag { color: var(--text-muted); }
+
+  .overflow-pill {
+    position: absolute;
+    bottom: 0.3rem;
+    right: 0.5rem;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-faint);
     color: var(--text-primary);
+    font-size: 0.6rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    cursor: pointer;
+    z-index: 2;
+    transition: background 120ms ease, border-color 120ms ease;
+    font-family: inherit;
+  }
+  .overflow-pill:hover {
+    background: var(--accent);
     border-color: var(--accent-bright);
   }
-  .push {
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-faint);
-    border-radius: 0.3rem;
-    padding: 0.15rem 0.5rem;
-    font-size: 0.65rem;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+  .overflow-pill .glyph {
+    margin-left: 0.2rem;
+    opacity: 0.7;
   }
-  .modifier-card:hover .push,
-  .push:focus { opacity: 1; }
-  .push:hover { background: var(--accent); color: var(--text-primary); border-color: var(--accent-bright); }
-  .save-override {
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-faint);
-    border-radius: 0.3rem;
-    padding: 0.15rem 0.45rem;
-    font-size: 0.7rem;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
-  }
-  .modifier-card:hover .save-override,
-  .save-override:focus { opacity: 1; }
-  .save-override:hover { background: var(--accent); color: var(--text-primary); border-color: var(--accent-bright); }
-  .reset {
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    border: 1px solid var(--accent-amber);
-    border-radius: 0.3rem;
-    padding: 0.15rem 0.5rem;
-    font-size: 0.65rem;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
-  }
-  .modifier-card:hover .reset,
-  .reset:focus { opacity: 1; }
-  .reset:hover { background: var(--accent-amber); color: var(--bg-card); }
-  .hide {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 0.85rem;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 120ms ease;
-  }
-  .modifier-card:hover .hide,
-  .hide:focus { opacity: 1; }
-  /* Hidden cards are dimmed to ~0.45 opacity, but the unhide affordance
-     must stay discoverable without forcing the GM to hover-hunt for it. */
-  .modifier-card[data-hidden="true"] .hide { opacity: 1; }
 
   .card-body {
     display: flex;
@@ -477,6 +490,15 @@
     gap: 0.4rem;
     flex: 1;
     min-width: 0;
+    /* min-height: 0 overrides the default `min-height: auto` on flex children,
+       which would otherwise let content (tags, many bonuses) grow past the
+       card-body's flex allocation. Combined with overflow: hidden here so any
+       excess clips inside card-body rather than displacing the card boundary. */
+    min-height: 0;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(180deg, black 80%, transparent);
+            mask-image: linear-gradient(180deg, black 80%, transparent);
+    cursor: pointer;
   }
 
   .modifier-card[data-zone="situational"] {
@@ -499,19 +521,6 @@
     letter-spacing: 0.04em;
     line-height: 1.3;
   }
-
-  .delete {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 0.85rem;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 120ms ease, color 120ms ease;
-  }
-  .modifier-card:hover .delete,
-  .delete:focus { opacity: 1; }
-  .delete:hover { color: var(--accent-amber); }
 
   @media (prefers-reduced-motion: reduce) {
     .modifier-card {
