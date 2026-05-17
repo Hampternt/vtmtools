@@ -1,17 +1,20 @@
 <script lang="ts">
-  // ActiveEffectsSummary — left-side roll-up of every active effect on a
-  // single character. Shown alongside the modifier carousel in the GM screen
-  // CharacterRow. Renders nothing when no modifier on the character is active.
+  // ActiveEffectsSummary — left-side roll-up of every active contribution on
+  // a single character. Shown alongside the modifier carousel in the GM
+  // screen CharacterRow. Renders nothing when no modifier is active.
   //
   // Two-pass aggregation:
-  //   1. Path-bound effects (stat or pool with non-empty paths) — reuses
-  //      computeActiveDeltas() so the rollup matches what View 2 of the
-  //      character card displays.
-  //   2. Pathless pool / difficulty / note effects — iterated independently
-  //      because they don't project to a stat path (they're scope-based or
-  //      informational).
+  //   1. Path-bound contributions (stat / pool with non-empty paths from
+  //      active local modifiers, plus always-active Foundry bonuses
+  //      surfaced through active-toggled materialized rows with no local
+  //      path effects) — reuses computeActiveDeltas() so the rollup matches
+  //      what View 2 of the character card displays.
+  //   2. Pathless pool / difficulty / note effects from local active
+  //      modifiers — iterated independently because they don't project to a
+  //      stat path (they're scope-based or informational).
   //
-  // See: docs/superpowers/specs/2026-05-10-character-card-redesign-design.md §6.
+  // See: docs/superpowers/specs/2026-05-10-character-card-redesign-design.md §6
+  // and docs/superpowers/specs/2026-05-12-foundry-bonus-effect-pull-design.md §3.
 
   import type { BridgeCharacter, CharacterModifier } from '../../../types';
   import { computeActiveDeltas } from '$lib/character/active-deltas';

@@ -15,6 +15,11 @@ import type {
   CharacterModifier,
   SourceKind,
 } from '../../types';
+import {
+  advantageFeatures,
+  liveBonusesFor,
+  ownPushPrefixes,
+} from '$lib/foundry/raw';
 
 /** Per-path projection result. */
 export interface DeltaEntry {
@@ -26,7 +31,9 @@ export interface DeltaEntry {
   delta: number;
   /** baseline + delta. */
   modified: number;
-  /** Modifier names contributing to this delta, for hover-tooltip display. */
+  /** Modifier names contributing to this delta, for hover-tooltip display.
+   * `modifierId` is 0 for virtual contributions (un-materialized Foundry
+   * advantage bonuses read live from the actor sheet). */
   sources: { modifierId: number; modifierName: string; scope: string | null }[];
 }
 
@@ -102,20 +109,34 @@ function modifierMatchesChar(
 }
 
 /**
- * Project active path-bound modifiers onto a character's canonical paths.
+ * Project active path-bound contributions onto a character's canonical paths.
  *
- * Includes effects whose `kind` is `'stat'` (render-time only) OR `'pool'`
- * (also folds into rolls when the V5 dice helper lands). Pool effects must
- * have non-empty `paths` to project — pathless pool effects are scope-based
- * bonuses with no specific stat target. Difficulty and note kinds never
- * project to the card.
+ * Two contribution sources, merged into one path-keyed map:
  *
- * Returns a Map keyed by path. Entries with `delta === 0` after summation
- * (two opposing modifiers that cancel) are omitted from the map — the View 2
- * renderer uses `map.has(path)` to decide whether to apply the annotation.
+ *   1. **Local modifiers** — active `CharacterModifier` rows for this
+ *      character, projecting their stat/pool effects that have non-empty
+ *      `paths`. Inactive modifiers and modifiers belonging to other
+ *      characters are filtered out; the caller does NOT need to pre-filter.
  *
- * Inactive modifiers and modifiers belonging to other characters are filtered
- * out; the caller does NOT need to pre-filter `modifiers`.
+ *   2. **Live Foundry bonuses** — for each advantage feature on a Foundry
+ *      character that has NO matching materialized `CharacterModifier`
+ *      (i.e. virtual card), its always-active `system.bonuses[]` entries
+ *      project too. Own-pushed bonuses (tagged `GM Screen #<id>`) are
+ *      filtered out to avoid re-pulling our own writes.
+ *
+ *   The local-takes-priority rule: if ANY materialized modifier exists for
+ *   an advantage item (regardless of `isActive`), the live read-through is
+ *   suppressed for that item. Toggling the local modifier off means
+ *   "I want zero contribution from this item," not "fall back to live."
+ *   (Matches the saved-override semantics in
+ *   `docs/superpowers/specs/2026-05-12-foundry-bonus-effect-pull-design.md` §3.2.)
+ *
+ * Entries with `delta === 0` after summation (opposing contributions that
+ * cancel) are omitted from the returned map.
+ *
+ * Returns a Map keyed by path. The View 2 renderer uses `map.has(path)`
+ * to decide whether to apply the annotation; the GM screen
+ * `ActiveEffectsSummary` iterates the map to render the rollup.
  */
 export function computeActiveDeltas(
   char: BridgeCharacter,
@@ -123,6 +144,26 @@ export function computeActiveDeltas(
 ): Map<string, DeltaEntry> {
   const acc = new Map<string, DeltaEntry>();
 
+  function fold(path: string, delta: number, source: { modifierId: number; modifierName: string; scope: string | null }) {
+    if (delta === 0) return;
+    const existing = acc.get(path);
+    if (existing) {
+      existing.delta += delta;
+      existing.modified = existing.baseline + existing.delta;
+      existing.sources.push(source);
+    } else {
+      const baseline = readPath(char, path);
+      acc.set(path, {
+        path,
+        baseline,
+        delta,
+        modified: baseline + delta,
+        sources: [source],
+      });
+    }
+  }
+
+  // (1) Local active modifiers.
   for (const m of modifiers) {
     if (!m.isActive) continue;
     if (!modifierMatchesChar(m, char.source, char.source_id)) continue;
@@ -137,26 +178,49 @@ export function computeActiveDeltas(
       const delta = e.delta ?? 0;
       if (delta === 0) continue;
       for (const path of e.paths) {
-        const existing = acc.get(path);
-        if (existing) {
-          existing.delta += delta;
-          existing.modified = existing.baseline + existing.delta;
-          existing.sources.push({ modifierId: m.id, modifierName: m.name, scope: e.scope });
-        } else {
-          const baseline = readPath(char, path);
-          acc.set(path, {
-            path,
-            baseline,
-            delta,
-            modified: baseline + delta,
-            sources: [{ modifierId: m.id, modifierName: m.name, scope: e.scope }],
-          });
+        fold(path, delta, { modifierId: m.id, modifierName: m.name, scope: e.scope });
+      }
+    }
+  }
+
+  // (2) Live Foundry bonuses, gated on toggle state. The materialized
+  //     modifier is the per-card switch:
+  //
+  //       - No materialized row (virtual) → no contribution (implicit off).
+  //       - Materialized + isActive=false → no contribution.
+  //       - Materialized + isActive=true + has path-bound local effects →
+  //         local contributes (loop 1); live suppressed here.
+  //       - Materialized + isActive=true + no path-bound local effects →
+  //         live bonuses contribute here.
+  //
+  //     Roll20 has no `system.bonuses[]` equivalent, so this branch is a
+  //     no-op for Roll20 chars.
+  if (char.source === 'foundry') {
+    const charMods = modifiers.filter((m) => modifierMatchesChar(m, char.source, char.source_id));
+    const prefixes = ownPushPrefixes(charMods.map((m) => m.id));
+    const itemState = new Map<string, { active: boolean; hasPathEffects: boolean }>();
+    for (const m of charMods) {
+      if (m.binding.kind !== 'advantage') continue;
+      const hasPathEffects = m.effects.some(
+        (e) => (e.kind === 'stat' || e.kind === 'pool') && e.paths.length > 0,
+      );
+      itemState.set(m.binding.item_id, { active: m.isActive, hasPathEffects });
+    }
+    for (const item of advantageFeatures(char)) {
+      const state = itemState.get(item._id);
+      if (!state) continue;            // virtual — implicit off.
+      if (!state.active) continue;     // toggled off.
+      if (state.hasPathEffects) continue; // local supersedes; loop 1 handled it.
+      for (const b of liveBonusesFor(item, prefixes)) {
+        if (b.value === 0) continue;
+        for (const path of b.paths) {
+          fold(path, b.value, { modifierId: 0, modifierName: item.name, scope: b.source ?? null });
         }
       }
     }
   }
 
-  // Drop entries where opposing modifiers summed to zero.
+  // Drop entries where opposing contributions summed to zero.
   for (const [path, entry] of acc) {
     if (entry.delta === 0) acc.delete(path);
   }

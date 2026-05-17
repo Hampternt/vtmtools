@@ -1,4 +1,4 @@
-import type { BridgeCharacter, FoundryRaw, FoundryItem, FoundryActiveEffect } from '../../types';
+import type { BridgeCharacter, FoundryRaw, FoundryItem, FoundryItemBonus, FoundryActiveEffect } from '../../types';
 
 /// Returns the FoundryRaw blob for a Foundry-sourced character, or null
 /// for non-Foundry chars or when the raw blob is missing.
@@ -71,4 +71,43 @@ export function foundrySkillInt(char: BridgeCharacter, skillName: string): numbe
 /// on the document but don't apply mechanically.
 export function foundryEffectIsActive(effect: FoundryActiveEffect): boolean {
   return !effect.disabled;
+}
+
+/// All four advantage subtypes (merit, flaw, background, boon) collapsed
+/// into one list. The GM Screen card surface and the active-effects
+/// aggregator both walk this same set; defining it here keeps the filter
+/// in one place.
+export function advantageFeatures(char: BridgeCharacter): FoundryItem[] {
+  return foundryItemsByType(char, 'feature').filter((it) => {
+    const ft = (it.system as Record<string, unknown>)?.featuretype as string | undefined;
+    return ft === 'merit' || ft === 'flaw' || ft === 'background' || ft === 'boon';
+  });
+}
+
+/// Always-active, non-own-pushed bonuses on a Foundry feature item.
+/// `ownPushPrefixes` are the per-modifier `GM Screen #<id>` tags that
+/// would loop on re-pull if not filtered out. Missing `activeWhen` is
+/// treated as always-active per Foundry behavior.
+export function liveBonusesFor(item: FoundryItem, ownPushPrefixes: Iterable<string>): FoundryItemBonus[] {
+  const raw = (item.system as Record<string, unknown>)?.bonuses;
+  if (!Array.isArray(raw)) return [];
+  const prefixes = [...ownPushPrefixes];
+  return (raw as FoundryItemBonus[]).filter((b) => {
+    const src = b.source ?? '';
+    for (const prefix of prefixes) {
+      if (src === prefix || src.startsWith(prefix + ':')) return false;
+    }
+    const check = b.activeWhen?.check ?? 'always';
+    return check === 'always';
+  });
+}
+
+/// The own-push tag prefix set for one character's modifiers — the
+/// `GM Screen #<id>` strings used by `do_push_to_foundry` to tag bonuses
+/// it wrote. Paired with `liveBonusesFor` to filter out bonuses we
+/// pushed (avoids round-trip echo when we re-read them).
+export function ownPushPrefixes(modifierIds: Iterable<number>): Set<string> {
+  const out = new Set<string>();
+  for (const id of modifierIds) out.add(`GM Screen #${id}`);
+  return out;
 }
