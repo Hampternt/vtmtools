@@ -44,6 +44,27 @@ impl CanonicalCharacter {
     }
 }
 
+/// Source-agnostic shape for a world-level (compendium-style) Item doc.
+/// Foundry is the only producer in v1; Roll20 has no analog. The shape
+/// is intentionally minimal — `system` stays as `serde_json::Value` so
+/// the bridge stays a dumb pipe. Consumers (Plan C importer) read
+/// per-kind fields from `system` directly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanonicalWorldItem {
+    pub source: SourceKind,
+    /// Foundry document _id (or other source's stable id).
+    pub id: String,
+    pub name: String,
+    /// Foundry Item type — e.g. "feature", "speciality", "power".
+    pub kind: String,
+    /// system.featuretype when kind == "feature" — one of
+    /// {"merit","flaw","background","boon"} for the cases Plan B's
+    /// push and Plan C's pull both care about. None otherwise.
+    pub featuretype: Option<String>,
+    pub system: serde_json::Value,
+}
+
 /// Per-source connection metadata captured from the source's Hello frame.
 /// Populated by `bridge::handle_connection` on Hello receipt (pre-trait,
 /// because `BridgeSource::handle_inbound` is stateless and cannot write to

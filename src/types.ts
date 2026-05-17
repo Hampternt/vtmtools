@@ -160,6 +160,27 @@ export interface CanonicalRoll {
   raw: unknown;
 }
 
+/**
+ * Source-agnostic shape for a world-level (compendium-style) Item doc.
+ * Mirrors src-tauri/src/bridge/types.rs::CanonicalWorldItem. Foundry is
+ * the only producer in v1; Roll20 has no analog. `system` stays opaque
+ * (Record<string, unknown>) — bridge layer is a dumb pipe; per-kind
+ * decoding happens at consumer (Plan C importer).
+ */
+export interface CanonicalWorldItem {
+  source: SourceKind;
+  id: string;
+  name: string;
+  /** Foundry Item type — "feature", "speciality", "power", … */
+  kind: string;
+  /** system.featuretype for feature-typed items; one of
+   *  'merit' | 'flaw' | 'background' | 'boon' in practice. */
+  featuretype?: string;
+  /** Raw item.system blob — opaque on the TS side; Plan C
+   *  reads specific fields per Foundry Item.type. */
+  system: Record<string, unknown>;
+}
+
 export interface Roll20RawAttribute {
   name: string;
   current: string;
