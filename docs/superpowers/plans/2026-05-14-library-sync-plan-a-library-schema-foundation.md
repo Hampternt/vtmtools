@@ -83,7 +83,7 @@ Tasks 3 and 4 are independent of each other (different functions in different fi
 
 **Tests required:** YES — the verification step rebuilds the dev DB and confirms backfill correctness.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create `src-tauri/migrations/0009_advantages_kind_and_source.sql`:
 
@@ -121,13 +121,13 @@ UPDATE advantages
    END;
 ```
 
-- [ ] **Step 2: Verify the migration compiles**
+- [x] **Step 2: Verify the migration compiles**
 
 Run: `cargo check --manifest-path src-tauri/Cargo.toml`
 
 Expected: clean. `sqlx::migrate!` is a compile-time macro that ensures all migration files parse.
 
-- [ ] **Step 3: Verify backfill correctness on a dev DB**
+- [ ] **Step 3: Verify backfill correctness on a dev DB** _(deferred to user — requires interactive `npm run tauri dev` session)_
 
 The dev DB lives at the path returned by `app.path().app_data_dir()` (Tauri-managed). Easiest path: delete `~/.local/share/com.hampternt.vtmtools/vtmtools.db` (or whatever the dev path is — check `tauri.conf.json`), run `npm run tauri dev`, exit immediately after the world is seeded, then inspect the table:
 
@@ -144,11 +144,11 @@ Expected output (verify against `seed.rs::seed_rows`):
 
 If counts mismatch: inspect `tags_json` on the affected rows; the LIKE pattern requires the tag value to be quoted in the JSON exactly as `"Merit"` / `"Flaw"` / `"Background"` / `"Boon"` — case-sensitive.
 
-- [ ] **Step 4: Run `./scripts/verify.sh`**
+- [x] **Step 4: Run `./scripts/verify.sh`**
 
 Expected: green. Existing `db::advantage` tests still pass because `db_list` doesn't yet reference the new column (Task 3 changes that).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 git add src-tauri/migrations/0009_advantages_kind_and_source.sql
@@ -184,7 +184,7 @@ EOF
 
 **Tests required:** NO — struct definition only; runtime tests come in Task 3.
 
-- [ ] **Step 1: Add `AdvantageKind` enum**
+- [x] **Step 1: Add `AdvantageKind` enum**
 
 In `src-tauri/src/shared/types.rs`, immediately before the `pub struct Advantage` block (around line 124), add:
 
@@ -207,7 +207,7 @@ pub enum AdvantageKind {
 }
 ```
 
-- [ ] **Step 2: Extend the `Advantage` struct**
+- [x] **Step 2: Extend the `Advantage` struct**
 
 Edit the existing `pub struct Advantage` block:
 
@@ -234,13 +234,13 @@ pub struct Advantage {
 
 The `kind` field is placed between `description` and `tags` (matches the SQL column order from the migration). `#[serde(default)]` on `source_attribution` makes deserialization tolerant of pre-migration payloads in tests.
 
-- [ ] **Step 3: Verify compilation**
+- [x] **Step 3: Verify compilation**
 
 Run: `cargo check --manifest-path src-tauri/Cargo.toml`
 
 Expected: the build now fails everywhere `Advantage` is constructed without `kind` — this is the safety net. Note the failing locations: `db/advantage.rs` (insert helper, tests), `db/seed.rs` (not yet — seed writes raw SQL), and any tests in `db/modifier.rs` / `db/saved_character.rs` / `tools/character.rs` that construct `Advantage` values directly.
 
-- [ ] **Step 4: Commit (after Task 3 + 4 land — DO NOT commit Task 2 alone)**
+- [x] **Step 4: Commit (after Task 3 + 4 land — DO NOT commit Task 2 alone)**
 
 Task 2's diff doesn't compile in isolation (struct construction sites break). The implementer subagent should leave the working tree dirty after Task 2 and proceed directly to Tasks 3 and 4. The commit for Task 2 lands as part of Task 3's commit (atomic struct extension + first consumer update).
 
@@ -263,7 +263,7 @@ If using the single-implementer-per-task pattern strictly, dispatch Tasks 2 + 3 
 
 **Tests required:** YES — 3 new tests minimum (kind round-trip, source-attribution round-trip, `db_list_by_kind` filter). Plus all 11 existing tests must still pass.
 
-- [ ] **Step 1: Update internal helpers**
+- [x] **Step 1: Update internal helpers**
 
 In `src-tauri/src/db/advantage.rs`:
 
@@ -295,13 +295,13 @@ fn str_to_kind(s: &str) -> Result<AdvantageKind, String> {
 }
 ```
 
-- [ ] **Step 2: Update Tauri command signatures**
+- [x] **Step 2: Update Tauri command signatures**
 
 Extend `add_advantage` and `update_advantage` to accept `kind: AdvantageKind` (required, before `tags`). Frontend wrapper signature changes in Task 6.
 
 `list_advantages`, `delete_advantage`, `roll_random_advantage` are unchanged at the Tauri boundary — they only consume the row by id or list-all-then-filter-in-rust.
 
-- [ ] **Step 3: Update the in-memory test schema**
+- [x] **Step 3: Update the in-memory test schema**
 
 In the `#[cfg(test)] mod tests` block, the `test_pool()` helper currently creates `advantages` without the new columns. Update its CREATE TABLE to mirror the production schema post-migration:
 
@@ -327,11 +327,11 @@ async fn test_pool() -> SqlitePool {
 
 Note: column order matches the post-migration table (ALTER TABLE appends, so `kind` + `source_attribution` are at the end in the real DB; tests should mirror that).
 
-- [ ] **Step 4: Update existing tests for the new `kind` parameter**
+- [x] **Step 4: Update existing tests for the new `kind` parameter**
 
 Every `db_insert(&pool, "Name", "desc", &tags, &props)` call in tests becomes `db_insert(&pool, "Name", "desc", AdvantageKind::Merit, None, &tags, &props)` (or pick the appropriate kind). The 3 `roll_random_*` tests can keep merits/backgrounds/flaws but explicitly pass the matching `AdvantageKind` value.
 
-- [ ] **Step 5: Add three new tests**
+- [x] **Step 5: Add three new tests**
 
 ```rust
 #[tokio::test]
@@ -376,17 +376,17 @@ async fn list_by_kind_filters_correctly() {
 }
 ```
 
-- [ ] **Step 6: Run `cargo test`**
+- [x] **Step 6: Run `cargo test`**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml db::advantage`
 
 Expected: all existing tests pass (with kind=Merit injected at the unused-discriminator sites); 3 new tests pass.
 
-- [ ] **Step 7: Run `./scripts/verify.sh`**
+- [x] **Step 7: Run `./scripts/verify.sh`**
 
 Expected: `cargo check`, `cargo test`, `npm run check`, frontend build all green. `npm run check` may now fail at the TS boundary because `Advantage` has new required fields — Task 6 fixes the TS side; if `verify.sh` fails here, it's expected and Task 6 will resolve it. Move on to Task 4 (also independent of TS).
 
-- [ ] **Step 8: Commit (atomic with Task 2)**
+- [x] **Step 8: Commit (atomic with Task 2)**
 
 ```
 git add src-tauri/src/shared/types.rs src-tauri/src/db/advantage.rs
@@ -423,7 +423,7 @@ EOF
 
 **Tests required:** NO — the migration runtime check in Task 1 already verified seed kinds match expectations. Seed correctness is enforced by Task 1 Step 3's manual verification.
 
-- [ ] **Step 1: Extend `SeedRow` struct**
+- [x] **Step 1: Extend `SeedRow` struct**
 
 In `src-tauri/src/db/seed.rs` (around line 120), add a `kind` field:
 
@@ -439,7 +439,7 @@ struct SeedRow {
 }
 ```
 
-- [ ] **Step 2: Annotate every `SeedRow` literal**
+- [x] **Step 2: Annotate every `SeedRow` literal**
 
 In `fn seed_rows()`, add `kind: AdvantageKind::Merit` (or `Flaw` / `Background`) to each `SeedRow { … }` literal. Cross-check with the existing `tags` array — the kind matches whichever of "Merit" / "Flaw" / "Background" appears there.
 
@@ -453,7 +453,7 @@ The `tags` array keeps its `"Merit"` / `"Background"` / `"Flaw"` string for back
 
 Add an import line at the top of the file if it doesn't already pull `AdvantageKind`: `use crate::shared::types::AdvantageKind;`.
 
-- [ ] **Step 3: Update `seed_advantages` to emit `kind`**
+- [x] **Step 3: Update `seed_advantages` to emit `kind`**
 
 Change the INSERT statement and bind list:
 
@@ -475,13 +475,13 @@ Add the local `kind_to_str` helper at the top of `seed.rs` (duplicating the one 
 
 `source_attribution` is omitted from the INSERT — it defaults to NULL, which is correct for corebook rows.
 
-- [ ] **Step 4: Run `cargo check`**
+- [x] **Step 4: Run `cargo check`**
 
 Run: `cargo check --manifest-path src-tauri/Cargo.toml`
 
 Expected: clean.
 
-- [ ] **Step 5: Verify the destructive reseed still works**
+- [ ] **Step 5: Verify the destructive reseed still works** _(deferred to user — requires interactive `npm run tauri dev` session)_
 
 Delete the dev DB, run `npm run tauri dev`, exit immediately, then:
 
@@ -497,11 +497,11 @@ Expected:
 
 If counts are off, the seed annotation is wrong — go back to Step 2.
 
-- [ ] **Step 6: Run `./scripts/verify.sh`**
+- [x] **Step 6: Run `./scripts/verify.sh`**
 
 Expected: green (cargo side). TS side may still fail until Task 6 — acceptable; verify cargo passes.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```
 git add src-tauri/src/db/seed.rs
@@ -539,7 +539,7 @@ EOF
 
 **Tests required:** NO (audit task)
 
-- [ ] **Step 1: Compile-check the audit**
+- [x] **Step 1: Compile-check the audit**
 
 Run: `cargo check --manifest-path src-tauri/Cargo.toml`
 
@@ -547,21 +547,21 @@ If clean: every consumer reads `Advantage` via serde deserialization or by `id` 
 
 If there are compilation errors: each one is a site that constructs `Advantage { … }` literally. For each error, **add `kind: AdvantageKind::Merit, source_attribution: None,` to the literal** (the test sites in modifier.rs/character.rs are test fixtures that construct fake advantage rows — `Merit` is the safe default discriminator for fixture rows).
 
-- [ ] **Step 2: Verify `db/saved_character.rs::db_add_advantage`**
+- [x] **Step 2: Verify `db/saved_character.rs::db_add_advantage`**
 
 Read `src-tauri/src/db/saved_character.rs` lines ~215-240. The function validates featuretype against `merit/flaw/background/boon` via its own match. **Confirmation:** this function takes featuretype as a parameter (probably from a frontend call), not from a row in `advantages`. No change needed.
 
-- [ ] **Step 3: Verify `diff.ts`**
+- [x] **Step 3: Verify `diff.ts`**
 
 Read `src/lib/saved-characters/diff.ts`. Search for any reference to `advantage`, `tags`, `merit`, `flaw`, `background`. The diff projection is about character-on-actor specialties/items, not local-library advantages — should be unrelated.
 
 Confirmation: the file `src/lib/saved-characters/diff.ts` is referenced by `src/components/CompareModal.svelte` and does NOT consume `listAdvantages`. No change needed.
 
-- [ ] **Step 4: Run `./scripts/verify.sh`**
+- [x] **Step 4: Run `./scripts/verify.sh`**
 
 Expected: cargo green; TS still failing (Task 6 resolves).
 
-- [ ] **Step 5: Commit IF changes were made**
+- [x] **Step 5: Commit IF changes were made**
 
 If Step 1 required edits to test fixtures, stage only the files Step 1 actually modified (do NOT use `git add -A` — the working tree may contain unrelated state and blanket staging risks committing secrets, build artifacts, or other in-flight work). The likely modified files are some subset of:
 
@@ -603,7 +603,7 @@ If no changes were needed: skip the commit, leave a note in the task tracker tha
 
 **Tests required:** NO (TS-only; `npm run check` is the gate).
 
-- [ ] **Step 1: Mirror `AdvantageKind` in `src/types.ts`**
+- [x] **Step 1: Mirror `AdvantageKind` in `src/types.ts`**
 
 Add a discriminated string union (matches Rust's `#[serde(rename_all = "snake_case")]`):
 
@@ -611,7 +611,7 @@ Add a discriminated string union (matches Rust's `#[serde(rename_all = "snake_ca
 export type AdvantageKind = 'merit' | 'flaw' | 'background' | 'boon';
 ```
 
-- [ ] **Step 2: Extend the `Advantage` interface**
+- [x] **Step 2: Extend the `Advantage` interface**
 
 Find the existing `Advantage` interface in `src/types.ts` (it mirrors the Rust struct field-for-field with camelCase). Add the two new fields:
 
@@ -637,7 +637,7 @@ export interface Advantage {
 
 Note: the `serde(rename_all = "camelCase")` on the Rust struct converts `source_attribution → sourceAttribution` automatically. Use `sourceAttribution` on the TS side.
 
-- [ ] **Step 3: Extend `AdvantageInput` and wrappers in `api.ts`**
+- [x] **Step 3: Extend `AdvantageInput` and wrappers in `api.ts`**
 
 ```ts
 import { invoke } from '@tauri-apps/api/core';
@@ -672,11 +672,11 @@ export function rollRandomAdvantage(tags: string[]): Promise<Advantage | null> {
 }
 ```
 
-- [ ] **Step 4: Run `npm run check`**
+- [x] **Step 4: Run `npm run check`**
 
 Expected: errors at every `addAdvantage(...)` / `updateAdvantage(...)` call site that doesn't yet pass `kind`. Those are in `AdvantagesManager.svelte` and `AdvantageForm.svelte` (and possibly tests). Task 7 fixes them.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 git add src/types.ts src/lib/advantages/api.ts
@@ -713,7 +713,7 @@ EOF
 
 **Tests required:** NO (UI; manual smoke covers it). The verify gate is `npm run check` + `npm run build`.
 
-- [ ] **Step 1: Add a `kind` selector to `AdvantageForm.svelte`**
+- [x] **Step 1: Add a `kind` selector to `AdvantageForm.svelte`**
 
 Open `src/lib/components/AdvantageForm.svelte`. Locate the existing name/description/tags inputs. Add a `kind` selector (HTML `<select>` is sufficient — matches the existing form aesthetic):
 
@@ -721,7 +721,7 @@ Open `src/lib/components/AdvantageForm.svelte`. Locate the existing name/descrip
 - Add a labeled `<select>` between the name input and the tags input, with options `merit / flaw / background / boon`. Use existing form-row CSS classes.
 - Include `kind` in the `AdvantageInput` payload passed to the parent's save handler.
 
-- [ ] **Step 2: Display a kind chip on each row in `AdvantagesManager.svelte`**
+- [x] **Step 2: Display a kind chip on each row in `AdvantagesManager.svelte`**
 
 The exact location depends on whether per-row chips render in `AdvantagesManager.svelte` (top-level) or inside `AdvantageCard.svelte`. Read both files first.
 
@@ -744,7 +744,7 @@ CSS — add to the existing `<style>` block (or `AdvantageCard.svelte`'s style b
 
 The CSS uses `var(...)` with fallbacks so no token additions are required in `+layout.svelte` for v1; if the GM wants distinct accents per kind later, they're added to `:root` then.
 
-- [ ] **Step 3: Add a kind filter to the existing filter row**
+- [x] **Step 3: Add a kind filter to the existing filter row**
 
 In `AdvantagesManager.svelte`, the existing `activeTags: Set<string>` filter already covers tag-based filtering. Decide between:
 
@@ -753,15 +753,15 @@ In `AdvantagesManager.svelte`, the existing `activeTags: Set<string>` filter alr
 
 Pick Option A for Plan A; Option B becomes a follow-up if the kind/tag conflation in the UI confuses users.
 
-- [ ] **Step 4: Wire `kind` into Add / Edit dispatches**
+- [x] **Step 4: Wire `kind` into Add / Edit dispatches**
 
 Find every call to `addAdvantage({ ... })` and `updateAdvantage(id, { ... })` in `AdvantagesManager.svelte`. Each must now pass `kind`. The form's `kind` state (Task 1) is the source.
 
-- [ ] **Step 5: Run `npm run check` then `npm run build`**
+- [x] **Step 5: Run `npm run check` then `npm run build`**
 
 Expected: both green.
 
-- [ ] **Step 6: Manual smoke**
+- [ ] **Step 6: Manual smoke** _(deferred to user — requires interactive `npm run tauri dev` session)_
 
 Run `npm run tauri dev`. Open the Advantages tool.
 
@@ -770,11 +770,11 @@ Run `npm run tauri dev`. Open the Advantages tool.
 - ✅ Add Advantage form has a kind selector; defaults to "Merit"; saving a new "Boon" row shows up with the boon chip color.
 - ✅ Edit existing custom row: kind selector preselected; changing kind + saving persists across app restart.
 
-- [ ] **Step 7: Run `./scripts/verify.sh`**
+- [x] **Step 7: Run `./scripts/verify.sh`**
 
 Expected: full green.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```
 git add src/tools/AdvantagesManager.svelte src/lib/components/AdvantageForm.svelte src/lib/components/AdvantageCard.svelte
@@ -809,7 +809,7 @@ EOF
 
 **Tests required:** NO (docs).
 
-- [ ] **Step 1: Add §6 paragraph on `is_custom` semantics**
+- [x] **Step 1: Add §6 paragraph on `is_custom` semantics**
 
 In `ARCHITECTURE.md` §6 Invariants, find the existing paragraph about destructive reseed (or add adjacent to it). Add:
 
@@ -820,17 +820,17 @@ In `ARCHITECTURE.md` §6 Invariants, find the existing paragraph about destructi
 >
 >   UI filters and reaper helpers MUST treat the latter two as semantically distinct "local" vs. "imported" states despite identical persistence flags.
 
-- [ ] **Step 2: Add §9 paragraph on "Add a library kind"**
+- [x] **Step 2: Add §9 paragraph on "Add a library kind"**
 
 In `ARCHITECTURE.md` §9 Extensibility seams (after "Add a VTT bridge source" and before "Add a card-shaped surface"), insert:
 
 > - **Add a library kind.** Phase 4 partitioning rule: **same row shape → polymorphic table with a `kind` discriminator column; different row shape → its own table.** The four featuretype variants (`merit`, `flaw`, `background`, `boon`) share an identical row shape AND an identical Foundry push contract (`actor.create_feature` accepts featuretype as a payload field — foundry helper roadmap §5), so they share the polymorphic `advantages` table. Dyscrasias have a distinct shape (`resonance_type`, `bonus`) and their own table. Disciplines (when they land) will have yet another distinct shape (power tree, Amalgam refs, level-gated powers) and their own table. To add a new variant that shares the advantage row shape: extend `AdvantageKind` enum in `shared/types.rs`, update the SQL CHECK constraint via a new migration, annotate any new seed rows, and wire the chip in `AdvantagesManager.svelte`. To add a new variant that does NOT share the row shape: new table + new `db/<kind>.rs` module + new manager tool, following the dyscrasia pattern.
 
-- [ ] **Step 3: Run `./scripts/verify.sh`**
+- [x] **Step 3: Run `./scripts/verify.sh`**
 
 Expected: green.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 git add ARCHITECTURE.md
@@ -854,11 +854,11 @@ EOF
 
 **Goal:** Confirm Plan A end-to-end before handing off to Plan B / Plan C.
 
-- [ ] **Step 1: Run `./scripts/verify.sh`**
+- [x] **Step 1: Run `./scripts/verify.sh`**
 
 Expected: full green.
 
-- [ ] **Step 2: Smoke-test against a clean dev DB**
+- [ ] **Step 2: Smoke-test against a clean dev DB** _(deferred to user — requires interactive `npm run tauri dev` session)_
 
 Delete the dev DB; `npm run tauri dev`; open Advantages tool; verify:
 
@@ -867,7 +867,7 @@ Delete the dev DB; `npm run tauri dev`; open Advantages tool; verify:
 - Add a custom Boon → appears with boon-colored chip.
 - Restart app → custom row survives; corebook reseeds (kind preserved on corebook).
 
-- [ ] **Step 3: Update plan checkbox state**
+- [x] **Step 3: Update plan checkbox state**
 
 Mark every Task 1–8 step as `[x]` in this file. Commit:
 
