@@ -35,6 +35,17 @@ export interface DyscrasiaEntry {
  */
 export type AdvantageKind = 'merit' | 'flaw' | 'background' | 'boon';
 
+/**
+ * Outcome of one import attempt for a single Foundry world item.
+ * Mirrors src-tauri/src/shared/types.rs::ImportOutcome (serde tag
+ * `action`, rename_all snake_case → wire literals 'inserted' /
+ * 'updated' / 'skipped'). Discriminated union; check `action`.
+ */
+export type ImportOutcome =
+  | { action: 'inserted'; id: number; name: string; kind: AdvantageKind }
+  | { action: 'updated';  id: number; name: string; kind: AdvantageKind }
+  | { action: 'skipped';  reason: string; name: string };
+
 export interface Advantage {
   id: number;
   name: string;
