@@ -388,6 +388,7 @@ mod tests {
             source_info: Mutex::new(HashMap::new()),
             sources,
             roll_history: Mutex::new(std::collections::VecDeque::new()),
+            world_items: Mutex::new(HashMap::new()),
         });
         (state, rx_opt)
     }

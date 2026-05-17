@@ -5,8 +5,8 @@
 
 use serde_json::Value;
 
-use crate::bridge::foundry::types::FoundryActor;
-use crate::bridge::types::{CanonicalCharacter, HealthTrack, SourceKind};
+use crate::bridge::foundry::types::{FoundryActor, FoundryWorldItem};
+use crate::bridge::types::{CanonicalCharacter, CanonicalWorldItem, HealthTrack, SourceKind};
 
 pub fn to_canonical(raw: &FoundryActor) -> CanonicalCharacter {
     let sys = &raw.system;
@@ -47,5 +47,38 @@ fn value_to_u8(v: &Value) -> Option<u8> {
         Value::Number(n) => n.as_u64().and_then(|x| u8::try_from(x).ok()),
         Value::String(s) => s.parse::<u8>().ok(),
         _ => None,
+    }
+}
+
+pub fn to_canonical_world_item(item: &FoundryWorldItem) -> CanonicalWorldItem {
+    CanonicalWorldItem {
+        source: SourceKind::Foundry,
+        id: item.id.clone(),
+        name: item.name.clone(),
+        kind: item.item_type.clone(),
+        featuretype: item.featuretype.clone(),
+        system: item.system.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn translate_world_item_preserves_featuretype() {
+        let wire = FoundryWorldItem {
+            id: "i1".into(),
+            name: "Iron Gullet".into(),
+            item_type: "feature".into(),
+            featuretype: Some("merit".into()),
+            system: serde_json::json!({"description": "..."}),
+        };
+        let canonical = to_canonical_world_item(&wire);
+        assert_eq!(canonical.source, SourceKind::Foundry);
+        assert_eq!(canonical.id, "i1");
+        assert_eq!(canonical.name, "Iron Gullet");
+        assert_eq!(canonical.kind, "feature");
+        assert_eq!(canonical.featuretype.as_deref(), Some("merit"));
     }
 }

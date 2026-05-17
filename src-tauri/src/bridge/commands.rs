@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use crate::bridge::types::{CanonicalCharacter, CanonicalRoll, SourceInfo, SourceKind};
+use crate::bridge::types::{
+    CanonicalCharacter, CanonicalRoll, CanonicalWorldItem, SourceInfo, SourceKind,
+};
 use crate::bridge::BridgeConn;
 use crate::bridge::BridgeState;
 
@@ -37,6 +39,17 @@ pub async fn bridge_get_rolls(
     conn: State<'_, BridgeConn>,
 ) -> Result<Vec<CanonicalRoll>, String> {
     Ok(conn.0.get_rolls().await)
+}
+
+/// Returns every world-level item known across every source. Used by
+/// the frontend on initial load; live updates flow through the
+/// `bridge://foundry/items-updated` event.
+#[tauri::command]
+pub async fn bridge_get_world_items(
+    conn: State<'_, BridgeConn>,
+) -> Result<Vec<CanonicalWorldItem>, String> {
+    let store = conn.0.world_items.lock().await;
+    Ok(store.values().flat_map(|m| m.values().cloned()).collect())
 }
 
 /// Inner logic shared by the Tauri command and any non-IPC caller (the new
