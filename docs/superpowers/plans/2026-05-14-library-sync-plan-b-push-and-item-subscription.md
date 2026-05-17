@@ -103,7 +103,7 @@ Tasks 1, 6, 7, 9 are independent (Rust types / JS subscriber / JS handler / Rust
 
 **Tests required:** YES — one deserialize-round-trip test per variant (3 tests).
 
-- [ ] **Step 1: Add `FoundryWorldItem` struct**
+- [x] **Step 1: Add `FoundryWorldItem` struct**
 
 In `src-tauri/src/bridge/foundry/types.rs`, after the existing `FoundryActor` struct (around line 92), add:
 
@@ -132,7 +132,7 @@ pub struct FoundryWorldItem {
 }
 ```
 
-- [ ] **Step 2: Extend `FoundryInbound` enum**
+- [x] **Step 2: Extend `FoundryInbound` enum**
 
 In the existing `pub enum FoundryInbound` block (lines 11-48), add three new variants:
 
@@ -160,7 +160,7 @@ In the existing `pub enum FoundryInbound` block (lines 11-48), add three new var
 
 Note: the existing `ItemDeleted { actor_id, item_id }` variant stays — it's actor-scoped and serves modifier reaping (a different concern). The new `WorldItemDeleted` is world-scoped (no actor_id).
 
-- [ ] **Step 3: Add deserialize tests**
+- [x] **Step 3: Add deserialize tests**
 
 In the existing `#[cfg(test)] mod tests` block (or add one if absent — verify file structure first), add:
 
@@ -216,17 +216,17 @@ fn world_item_deleted_deserializes() {
 
 Wire `type` strings come from `#[serde(tag = "type", rename_all = "snake_case")]` on the enum. The variant names map: `Items → "items"`, `WorldItemUpsert → "world_item_upsert"`, `WorldItemDeleted → "world_item_deleted"`. The JS-side payload must emit these exact strings (Task 6).
 
-- [ ] **Step 4: Run `cargo test`**
+- [x] **Step 4: Run `cargo test`**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml bridge::foundry::types`
 
 Expected: 3 new tests pass; no regressions.
 
-- [ ] **Step 5: Run `./scripts/verify.sh`**
+- [x] **Step 5: Run `./scripts/verify.sh`**
 
 Expected: cargo green; downstream code (`bridge/foundry/mod.rs::handle_inbound`) may not yet handle the new variants — that compiles fine as long as `match` is non-exhaustive over `FoundryInbound`. **Verify:** current `mod.rs::handle_inbound` uses an exhaustive match over `FoundryInbound`, so this step WILL fail at cargo check. That's expected — Task 4 fixes it. If verify.sh fails here at `bridge/foundry/mod.rs::handle_inbound`, commit Task 1 with the failure pinned to Task 4, OR roll Tasks 1+4 into the same commit. **Recommended:** dispatch Tasks 1+4 to the same implementer as a single atomic commit since they share an exhaustiveness invariant.
 
-- [ ] **Step 6: Commit (joint with Task 4 — defer)**
+- [x] **Step 6: Commit (joint with Task 4 — defer)**
 
 Hold this commit until Task 4 lands; the joint commit is at Task 4 Step 5.
 
@@ -248,7 +248,7 @@ Hold this commit until Task 4 lands; the joint commit is at Task 4 Step 5.
 
 **Tests required:** NO
 
-- [ ] **Step 1: Add `CanonicalWorldItem` struct**
+- [x] **Step 1: Add `CanonicalWorldItem` struct**
 
 In `src-tauri/src/bridge/types.rs`, after `CanonicalCharacter` (or wherever canonical types live; verify file structure), add:
 
@@ -277,7 +277,7 @@ pub struct CanonicalWorldItem {
 
 Note: the `kind` field here is the Foundry **Item type** ("feature" / "speciality" / "power"), NOT the `AdvantageKind` enum from Plan A (which is the featuretype sub-discriminator for `kind = "feature"` items). They're related but distinct. Plan C's importer maps `(kind == "feature", featuretype) → AdvantageKind`.
 
-- [ ] **Step 2: Mirror in `src/types.ts`**
+- [x] **Step 2: Mirror in `src/types.ts`**
 
 Add to `src/types.ts` (camelCase, matching serde):
 
@@ -297,11 +297,11 @@ export interface CanonicalWorldItem {
 }
 ```
 
-- [ ] **Step 3: Run `./scripts/verify.sh`**
+- [x] **Step 3: Run `./scripts/verify.sh`**
 
 Expected: green on the cargo + TS sides; nothing consumes the new type yet.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 git add src-tauri/src/bridge/types.rs src/types.ts
@@ -337,7 +337,7 @@ EOF
 
 **Tests required:** YES — 1 test for `to_canonical_world_item`.
 
-- [ ] **Step 1: Extend `InboundEvent`**
+- [x] **Step 1: Extend `InboundEvent`**
 
 In `src-tauri/src/bridge/source.rs`, add to the existing `InboundEvent` enum:
 
@@ -365,7 +365,7 @@ In `src-tauri/src/bridge/source.rs`, add to the existing `InboundEvent` enum:
     },
 ```
 
-- [ ] **Step 2: Add `to_canonical_world_item` in `translate.rs`**
+- [x] **Step 2: Add `to_canonical_world_item` in `translate.rs`**
 
 In `src-tauri/src/bridge/foundry/translate.rs`, add (or add a new module if translate.rs is actor-only; check the file's current structure first):
 
@@ -384,7 +384,7 @@ pub fn to_canonical_world_item(
 }
 ```
 
-- [ ] **Step 3: Add a test for the translator**
+- [x] **Step 3: Add a test for the translator**
 
 In `translate.rs`'s `#[cfg(test)] mod tests` block (or add one):
 
@@ -407,13 +407,13 @@ fn translate_world_item_preserves_featuretype() {
 }
 ```
 
-- [ ] **Step 4: Run `cargo test` (target translate + source modules)**
+- [x] **Step 4: Run `cargo test` (target translate + source modules)**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml bridge::`
 
 Expected: existing tests still pass; new test passes.
 
-- [ ] **Step 5: Commit (atomic with Task 4 — defer)**
+- [x] **Step 5: Commit (atomic with Task 4 — defer)**
 
 Hold this commit until Task 4; combined commit at Task 4 Step 5.
 
@@ -434,7 +434,7 @@ Hold this commit until Task 4; combined commit at Task 4 Step 5.
 
 **Tests required:** YES — 3 tests (one per new variant), pattern matches the existing `actor_deleted_inbound_produces_character_removed_event` test.
 
-- [ ] **Step 1: Add three arms to `handle_inbound`**
+- [x] **Step 1: Add three arms to `handle_inbound`**
 
 In the `match parsed` block of `src-tauri/src/bridge/foundry/mod.rs::handle_inbound`, after the existing `FoundryInbound::ItemDeleted` arm, add:
 
@@ -460,7 +460,7 @@ In the `match parsed` block of `src-tauri/src/bridge/foundry/mod.rs::handle_inbo
             }
 ```
 
-- [ ] **Step 2: Add three tests**
+- [x] **Step 2: Add three tests**
 
 In the existing `#[cfg(test)] mod tests` block of `bridge/foundry/mod.rs`:
 
@@ -516,15 +516,15 @@ async fn world_item_deleted_produces_event() {
 }
 ```
 
-- [ ] **Step 3: Run `./scripts/verify.sh`**
+- [x] **Step 3: Run `./scripts/verify.sh`**
 
 Expected: cargo green. `bridge/mod.rs::accept_loop` may now warn about unhandled `InboundEvent::WorldItem*` variants in the match — Task 5 resolves. If the match is currently exhaustive, the build fails; add `WorldItem* => continue,` placeholders inline as TODOs that Task 5 replaces. **Recommended:** ship Tasks 1+3+4+5 as one implementer commit since they share the inbound-pipeline exhaustiveness invariant.
 
-- [ ] **Step 4: Verify state of dependent files**
+- [x] **Step 4: Verify state of dependent files**
 
 Confirm `bridge/mod.rs::accept_loop` has been pre-prepared (Task 5) OR has placeholder arms. If neither, this task's commit will leave the working tree non-buildable. Coordinate via the joint Task 5 commit.
 
-- [ ] **Step 5: Joint commit (Tasks 1, 3, 4 + minimal Task 5 stub)**
+- [x] **Step 5: Joint commit (Tasks 1, 3, 4 + minimal Task 5 stub)**
 
 ```
 git add src-tauri/src/bridge/foundry/types.rs \
@@ -569,7 +569,7 @@ If Task 5 stubs are added as part of this commit, drop the trailing paragraph fr
 
 **Tests required:** NO — covered by manual smoke (Task 16) plus cargo build (the new Tauri command's compile shape is the gate).
 
-- [ ] **Step 1: Add `world_items` to `BridgeState`**
+- [x] **Step 1: Add `world_items` to `BridgeState`**
 
 In `src-tauri/src/bridge/mod.rs`, find the existing `BridgeState` struct. Add a `world_items` field:
 
@@ -584,7 +584,7 @@ pub world_items: tokio::sync::Mutex<
 
 Update `BridgeState::new()` (or the equivalent constructor) to initialize the new field with an empty HashMap.
 
-- [ ] **Step 2: Add three event arms to `accept_loop`**
+- [x] **Step 2: Add three event arms to `accept_loop`**
 
 In `src-tauri/src/bridge/mod.rs::accept_loop`, in the `match event` block (search for `InboundEvent::CharactersSnapshot`), add three new arms after `InboundEvent::ItemDeleted`:
 
@@ -634,7 +634,7 @@ async fn collect_world_items_snapshot(
 
 The emitted payload is a flat `Vec<CanonicalWorldItem>`; the frontend partitions by source if it needs to (the `source` field on each item carries it).
 
-- [ ] **Step 3: Add `bridge_get_world_items` Tauri command**
+- [x] **Step 3: Add `bridge_get_world_items` Tauri command**
 
 In `src-tauri/src/bridge/commands.rs`, after `bridge_get_rolls`:
 
@@ -653,22 +653,22 @@ pub async fn bridge_get_world_items(
 
 (Adjust the `CanonicalWorldItem` import at the top of the file.)
 
-- [ ] **Step 4: Register the new command**
+- [x] **Step 4: Register the new command**
 
 In `src-tauri/src/lib.rs::invoke_handler!`, append `bridge::commands::bridge_get_world_items` to the command list (next to `bridge_get_rolls`).
 
-- [ ] **Step 5: Update `ARCHITECTURE.md` §4 (same-commit rule)**
+- [x] **Step 5: Update `ARCHITECTURE.md` §4 (same-commit rule)**
 
 CLAUDE.md mandates that any new `#[tauri::command]` lands in the same commit as its ARCH §4 entry. Edit `ARCHITECTURE.md` §4:
 - Append `bridge_get_world_items` to the per-file IPC entry for `bridge/commands.rs`.
 - Bump the running command total: **63 → 64**.
 - Add `bridge://foundry/items-updated` to the events table (this task is where it starts being emitted).
 
-- [ ] **Step 6: Run `./scripts/verify.sh`**
+- [x] **Step 6: Run `./scripts/verify.sh`**
 
 Expected: green.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```
 git add src-tauri/src/bridge/mod.rs \
@@ -711,7 +711,7 @@ EOF
 
 **Tests required:** NO — JS side has no unit-test infrastructure in this repo. Manual smoke against a live Foundry world covers it (Task 16).
 
-- [ ] **Step 1: Create `item.js`**
+- [x] **Step 1: Create `item.js`**
 
 Create `vtmtools-bridge/scripts/foundry-actions/item.js`:
 
@@ -785,7 +785,7 @@ export const itemsSubscriber = {
 };
 ```
 
-- [ ] **Step 2: Register `item` collection in `bridge.js` subscribers map**
+- [x] **Step 2: Register `item` collection in `bridge.js` subscribers map**
 
 In `vtmtools-bridge/scripts/foundry-actions/bridge.js`, add the import and registration:
 
@@ -801,15 +801,15 @@ const subscribers = {
 
 **Collection name:** `item` (singular) matches the spec sketch's `collection: "item"` envelope. The desktop will send `bridge.subscribe { collection: "item" }` to activate it.
 
-- [ ] **Step 3: Manual smoke (deferred to Task 16)**
+- [ ] **Step 3: Manual smoke (deferred to Task 16)** _(this step is itself a deferral — covered by Task 16 Step 2/3)_
 
 Smoke verification is part of Task 16's E2E gate. For this task's verification: confirm `npm run check` (frontend type-check has no opinion on the bridge module — JS module is loaded by Foundry runtime, not by SvelteKit).
 
-- [ ] **Step 4: Run `./scripts/verify.sh`**
+- [x] **Step 4: Run `./scripts/verify.sh`**
 
 Required by CLAUDE.md before every commit, even for JS-only changes. The Rust/TS toolchain pieces of `verify.sh` will no-op on the JS file changes, but a green run confirms nothing else regressed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 git add vtmtools-bridge/scripts/foundry-actions/item.js \
@@ -850,7 +850,7 @@ EOF
 
 **Tests required:** NO (manual smoke covers it in Task 16).
 
-- [ ] **Step 1: Replace the storyteller.js stub**
+- [x] **Step 1: Replace the storyteller.js stub**
 
 Replace the entire contents of `vtmtools-bridge/scripts/foundry-actions/storyteller.js` (currently a 2-line stub) with:
 
@@ -901,15 +901,15 @@ export const handlers = {
 };
 ```
 
-- [ ] **Step 2: Verify `index.js` does not need editing**
+- [x] **Step 2: Verify `index.js` does not need editing**
 
 Confirm via `grep storytellerHandlers vtmtools-bridge/scripts/foundry-actions/index.js` that the import + spread already exist (they should — `storyteller.js` was previously a reserved-umbrella stub already wired in). If a fresh checkout somehow lacks the wiring, restore it; otherwise do nothing.
 
-- [ ] **Step 3: Run `./scripts/verify.sh`**
+- [x] **Step 3: Run `./scripts/verify.sh`**
 
 Required by CLAUDE.md before every commit, even for JS-only changes.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 git add vtmtools-bridge/scripts/foundry-actions/storyteller.js
@@ -951,15 +951,15 @@ EOF
 
 **Tests required:** NO
 
-- [ ] **Step 1: Bump version**
+- [x] **Step 1: Bump version**
 
 Change `module.json`'s `"version": "0.5.0"` to `"version": "0.6.0"`.
 
-- [ ] **Step 2: Run `./scripts/verify.sh`**
+- [x] **Step 2: Run `./scripts/verify.sh`**
 
 Required by CLAUDE.md before every commit.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```
 git add vtmtools-bridge/module.json
@@ -1000,7 +1000,7 @@ EOF
 
 **Tests required:** YES — 2 tests (happy path envelope shape + invalid featuretype rejection).
 
-- [ ] **Step 1: Replace the storyteller.rs stub**
+- [x] **Step 1: Replace the storyteller.rs stub**
 
 Replace the entire contents of `src-tauri/src/bridge/foundry/actions/storyteller.rs` (currently a 1-line stub) with:
 
@@ -1067,21 +1067,21 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Verify `actions/mod.rs` does not need editing**
+- [x] **Step 2: Verify `actions/mod.rs` does not need editing**
 
 Confirm via `grep 'pub mod storyteller' src-tauri/src/bridge/foundry/actions/mod.rs` that the module declaration already exists (it should — the reserved-umbrella stub was declared previously). If a fresh checkout somehow lacks it, restore it; otherwise do nothing.
 
-- [ ] **Step 3: Run `cargo test`**
+- [x] **Step 3: Run `cargo test`**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml bridge::foundry::actions::storyteller`
 
 Expected: 2 tests pass.
 
-- [ ] **Step 4: Run `./scripts/verify.sh`**
+- [x] **Step 4: Run `./scripts/verify.sh`**
 
 Required by CLAUDE.md before every commit.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```
 git add src-tauri/src/bridge/foundry/actions/storyteller.rs
@@ -1121,7 +1121,7 @@ EOF
 
 **Tests required:** YES — 1 happy-path test using an in-memory pool + a faked outbound channel via a temporary `BridgeState` that captures sent messages.
 
-- [ ] **Step 1: Create `library_push.rs`**
+- [x] **Step 1: Create `library_push.rs`**
 
 Create `src-tauri/src/tools/library_push.rs`:
 
@@ -1204,13 +1204,13 @@ mod tests {
 
 **Implementation note on `__internal_db_list`:** the existing `db::advantage::db_list` is private to the module. Promote it to `pub(crate)` (rename optional — `db_list` is fine for the crate-internal name) so `tools/library_push` can read advantages without going through Tauri state from a Tauri command. Update `db/advantage.rs` to add `pub(crate)` to the function signature.
 
-- [ ] **Step 2: Promote `db_list` to `pub(crate)`**
+- [x] **Step 2: Promote `db_list` to `pub(crate)`**
 
 In `src-tauri/src/db/advantage.rs`, change `async fn db_list(...)` to `pub(crate) async fn db_list(...)`. Use this from `library_push.rs` directly: `crate::db::advantage::db_list(&db.0).await`.
 
 Drop the `__internal_db_list` rename in the snippet above; just use `db_list`.
 
-- [ ] **Step 3: Register the module**
+- [x] **Step 3: Register the module**
 
 In `src-tauri/src/tools/mod.rs`:
 
@@ -1219,7 +1219,7 @@ pub mod library_push;
 // (alongside existing pub mod entries)
 ```
 
-- [ ] **Step 4: Add unit test**
+- [x] **Step 4: Add unit test**
 
 In `library_push.rs::tests`:
 
@@ -1264,23 +1264,23 @@ mod tests {
 
 Full integration (DB → builder → outbound channel) is covered by Task 16's manual E2E smoke. Unit tests cover the two pure helpers.
 
-- [ ] **Step 5: Run `cargo test`**
+- [x] **Step 5: Run `cargo test`**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml tools::library_push`
 
 Expected: 4 tests pass.
 
-- [ ] **Step 6: Update `ARCHITECTURE.md` §4 (same-commit rule)**
+- [x] **Step 6: Update `ARCHITECTURE.md` §4 (same-commit rule)**
 
 CLAUDE.md mandates that any new `#[tauri::command]` lands in the same commit as its ARCH §4 entry. Edit `ARCHITECTURE.md` §4:
 - Add a new per-file entry for `tools/library_push.rs` listing `push_advantage_to_world`.
 - Bump the running command total: **64 → 65**.
 
-- [ ] **Step 7: Run `./scripts/verify.sh`**
+- [x] **Step 7: Run `./scripts/verify.sh`**
 
 Expected: green.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```
 git add src-tauri/src/tools/library_push.rs \
@@ -1324,7 +1324,7 @@ EOF
 
 **Tests required:** NO
 
-- [ ] **Step 1: Add to `invoke_handler!`**
+- [x] **Step 1: Add to `invoke_handler!`**
 
 In `src-tauri/src/lib.rs`, in the `generate_handler![...]` list, add:
 
@@ -1334,11 +1334,11 @@ tools::library_push::push_advantage_to_world,
 
 near the other `tools::` entries (e.g., next to `tools::foundry_chat::*`).
 
-- [ ] **Step 2: Run `./scripts/verify.sh`**
+- [x] **Step 2: Run `./scripts/verify.sh`**
 
 Expected: green.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```
 git add src-tauri/src/lib.rs
@@ -1374,7 +1374,7 @@ EOF
 
 **Tests required:** NO
 
-- [ ] **Step 1: Create `src/lib/library/api.ts`**
+- [x] **Step 1: Create `src/lib/library/api.ts`**
 
 ```ts
 import { invoke } from '@tauri-apps/api/core';
@@ -1393,15 +1393,15 @@ export function pushAdvantageToWorld(id: number): Promise<void> {
 }
 ```
 
-- [ ] **Step 2: Run `npm run check`**
+- [x] **Step 2: Run `npm run check`**
 
 Expected: green.
 
-- [ ] **Step 3: Run `./scripts/verify.sh`**
+- [x] **Step 3: Run `./scripts/verify.sh`**
 
 Required by CLAUDE.md before every commit. `npm run check` alone is not the gate — `verify.sh` also runs `cargo check`, `cargo test`, and the frontend build.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 git add src/lib/library/api.ts
@@ -1435,17 +1435,17 @@ EOF
 
 **Tests required:** NO
 
-- [ ] **Step 1: Read current `bridge.svelte.ts` structure**
+- [x] **Step 1: Read current `bridge.svelte.ts` structure**
 
 Locate the existing characters-updated subscription. The pattern: on mount, call `invoke('bridge_get_characters')`; subscribe to `bridge://characters-updated` and replace `characters` state on each emit.
 
-- [ ] **Step 2: Add `worldItems` state and subscription**
+- [x] **Step 2: Add `worldItems` state and subscription**
 
 Add `let worldItems: CanonicalWorldItem[] = $state([])` and an `unlisten` for `bridge://foundry/items-updated`. Hydrate on init via a wrapper call. Use the same lifecycle pattern as `characters` — the goal is a drop-in mirror.
 
 If the store has a single `init()` that registers all subscriptions, append the items-updated listener there. If it's per-piece-of-state, copy the characters pattern verbatim with `worldItems` substituted.
 
-- [ ] **Step 3: Add a typed wrapper for `bridge_get_world_items`**
+- [x] **Step 3: Add a typed wrapper for `bridge_get_world_items`**
 
 In `src/lib/bridge/api.ts` (or wherever existing `bridge_*` wrappers live):
 
@@ -1455,15 +1455,15 @@ export function bridgeGetWorldItems(): Promise<CanonicalWorldItem[]> {
 }
 ```
 
-- [ ] **Step 4: Run `npm run check` and `npm run build`**
+- [x] **Step 4: Run `npm run check` and `npm run build`**
 
 Expected: green.
 
-- [ ] **Step 5: Run `./scripts/verify.sh`**
+- [x] **Step 5: Run `./scripts/verify.sh`**
 
 Required by CLAUDE.md before every commit. The npm steps above are a tighter inner loop; `verify.sh` is the full gate.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 git add src/store/bridge.svelte.ts src/lib/bridge/api.ts
@@ -1499,11 +1499,11 @@ EOF
 
 **Tests required:** NO (manual smoke covers it).
 
-- [ ] **Step 1: Find the per-row action surface**
+- [x] **Step 1: Find the per-row action surface**
 
 Locate where each row's actions render (probably in `AdvantageCard.svelte`'s footer). The existing "Edit" and "Delete" buttons live there.
 
-- [ ] **Step 2: Add "Push to world" button**
+- [x] **Step 2: Add "Push to world" button**
 
 Add a button next to Edit/Delete:
 
@@ -1542,11 +1542,11 @@ The `bridgeStore.status.foundry` predicate gates visibility — disconnected ses
 
 CSS — reuse the existing row-action button styling. No new tokens.
 
-- [ ] **Step 3: Run `npm run check` and `npm run build`**
+- [x] **Step 3: Run `npm run check` and `npm run build`**
 
 Expected: green.
 
-- [ ] **Step 4: Manual smoke**
+- [ ] **Step 4: Manual smoke** _(deferred to user — requires interactive `npm run tauri dev` + live Foundry world)_
 
 `npm run tauri dev` with a Foundry world running and the bridge connected:
 
@@ -1556,11 +1556,11 @@ Expected: green.
 - ✅ Disconnect Foundry → push buttons disappear (or grey out, depending on the reactive guard).
 - ✅ Push a custom Boon → world Item appears with featuretype = boon.
 
-- [ ] **Step 5: Run `./scripts/verify.sh`**
+- [x] **Step 5: Run `./scripts/verify.sh`**
 
 Required by CLAUDE.md before every commit.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 git add src/tools/AdvantagesManager.svelte \
@@ -1596,7 +1596,7 @@ EOF
 
 **Tests required:** NO
 
-- [ ] **Step 1: Update Bridge WebSocket protocol section**
+- [x] **Step 1: Update Bridge WebSocket protocol section**
 
 In §4 Bridge WebSocket protocol, after the existing message-framing paragraph, add a paragraph on the `item` subscription and `storyteller.*` umbrella:
 
@@ -1604,11 +1604,11 @@ In §4 Bridge WebSocket protocol, after the existing message-framing paragraph, 
 >
 > **Outbound umbrellas (Foundry):** `actor.*` (per-actor edits), `game.*` (in-game/table rolls + chat), `storyteller.*` (GM-facing operations not tied to a single actor; v1 ships `storyteller.create_world_item` only — Library Sync push). See `docs/superpowers/specs/2026-04-26-foundry-helper-library-roadmap.md` §5 for the per-helper inventory.
 
-- [ ] **Step 2: Run `./scripts/verify.sh`**
+- [x] **Step 2: Run `./scripts/verify.sh`**
 
 Expected: green.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```
 git add ARCHITECTURE.md
@@ -1636,11 +1636,11 @@ EOF
 
 **Goal:** Confirm Plan B end-to-end against a live Foundry world before handing off to Plan C.
 
-- [ ] **Step 1: Run `./scripts/verify.sh`**
+- [x] **Step 1: Run `./scripts/verify.sh`**
 
 Expected: full green.
 
-- [ ] **Step 2: Live-Foundry smoke — push side (#13)**
+- [ ] **Step 2: Live-Foundry smoke — push side (#13)** _(deferred to user — requires interactive `npm run tauri dev` + live Foundry world with vtmtools-bridge@0.6.0)_
 
 Boot the Tauri app + a Foundry world with `vtmtools-bridge@0.6.0` installed.
 
@@ -1650,7 +1650,7 @@ Boot the Tauri app + a Foundry world with `vtmtools-bridge@0.6.0` installed.
 - ✅ Click push on "Prey Exclusion" flaw → same path, featuretype=Flaw.
 - ✅ Push a custom row with kind=Boon → appears as featuretype=Boon.
 
-- [ ] **Step 3: Live-Foundry smoke — subscription side (#27)**
+- [ ] **Step 3: Live-Foundry smoke — subscription side (#27)** _(deferred to user — naturally covered by Plan C's importer flow if manual triggering proves unreachable)_
 
 (Without Plan C's import UI, the desktop never sends `bridge.subscribe { item }` automatically. Test by manually triggering subscription from the JS console of the Foundry browser session OR by waiting for Plan C.)
 
@@ -1667,7 +1667,7 @@ const ws = game.modules.get("vtmtools-bridge")?._socket;
 
 If manual triggering proves unreachable, mark this smoke as **DEFER TO PLAN C** in the verification log — Plan C's importer flow tests the subscription end-to-end naturally.
 
-- [ ] **Step 4: Update plan checkboxes**
+- [x] **Step 4: Update plan checkboxes**
 
 Mark every Task 1–15 step as `[x]` in this file. Commit:
 
