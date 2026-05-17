@@ -45,6 +45,23 @@ pub enum FoundryInbound {
         actor_id: String,
         item_id: String,
     },
+    /// World-level item snapshot — pushed by the module on first
+    /// subscribe to `collection: "item"`. Replaces the entire cached
+    /// items slice for this source.
+    Items {
+        items: Vec<FoundryWorldItem>,
+    },
+    /// One world-level item was created or updated.
+    /// Triggered by the module's createItem / updateItem hooks
+    /// (filtered to parent === null).
+    WorldItemUpsert {
+        item: FoundryWorldItem,
+    },
+    /// One world-level item was deleted.
+    /// Triggered by the module's deleteItem hook (parent === null filter).
+    WorldItemDeleted {
+        item_id: String,
+    },
 }
 
 /// Wire shape for a Foundry roll result. JS-side `messageToWire`
@@ -89,6 +106,29 @@ pub struct FoundryActor {
     /// via `items` instead. Defaults to `Value::Null` for pre-0.4.0 payloads.
     #[serde(default)]
     pub effects: serde_json::Value,
+}
+
+/// World-level Item document. Distinct from embedded-on-actor items —
+/// those arrive via `FoundryActor::items` and stay scoped to their
+/// parent actor. World-level items have no parent (Foundry's
+/// `item.parent === null`); the module's `item` subscriber filters
+/// for them explicitly so this struct never carries an actor_id.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FoundryWorldItem {
+    /// Foundry document _id.
+    pub id: String,
+    pub name: String,
+    /// Foundry Item type ("feature", "speciality", "power", etc.).
+    #[serde(rename = "type")]
+    pub item_type: String,
+    /// system.featuretype when item.type == "feature" (merit/flaw/
+    /// background/boon). None for non-feature items.
+    #[serde(default)]
+    pub featuretype: Option<String>,
+    /// Raw `item.system` blob — opaque to Rust; Plan C's importer picks
+    /// fields (description, points, level) as needed.
+    #[serde(default)]
+    pub system: serde_json::Value,
 }
 
 /// Frontend → Tauri payload for applying a dyscrasia to a Foundry
@@ -259,6 +299,54 @@ mod tests {
                 assert_eq!(actor_id, "actor-xyz");
             }
             _ => panic!("expected ActorDeleted, got {parsed:?}"),
+        }
+    }
+
+    #[test]
+    fn items_snapshot_deserializes() {
+        let wire = r#"{
+            "type": "items",
+            "items": [
+                { "id": "i1", "name": "Iron Gullet", "type": "feature",
+                  "featuretype": "merit", "system": { "description": "..." } }
+            ]
+        }"#;
+        let parsed: FoundryInbound = serde_json::from_str(wire).expect("parses");
+        match parsed {
+            FoundryInbound::Items { items } => {
+                assert_eq!(items.len(), 1);
+                assert_eq!(items[0].name, "Iron Gullet");
+                assert_eq!(items[0].featuretype.as_deref(), Some("merit"));
+            }
+            other => panic!("expected Items, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn world_item_upsert_deserializes() {
+        let wire = r#"{
+            "type": "world_item_upsert",
+            "item": { "id": "i7", "name": "Bloodhound", "type": "feature",
+                      "featuretype": "merit", "system": {} }
+        }"#;
+        let parsed: FoundryInbound = serde_json::from_str(wire).expect("parses");
+        match parsed {
+            FoundryInbound::WorldItemUpsert { item } => {
+                assert_eq!(item.id, "i7");
+            }
+            other => panic!("expected WorldItemUpsert, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn world_item_deleted_deserializes() {
+        let wire = r#"{ "type": "world_item_deleted", "item_id": "i99" }"#;
+        let parsed: FoundryInbound = serde_json::from_str(wire).expect("parses");
+        match parsed {
+            FoundryInbound::WorldItemDeleted { item_id } => {
+                assert_eq!(item_id, "i99");
+            }
+            other => panic!("expected WorldItemDeleted, got {other:?}"),
         }
     }
 }

@@ -95,7 +95,7 @@ Tasks 1 and 3 are independent and can dispatch in parallel. Task 2 depends on Ta
 
 **Tests required:** YES — 6 tests minimum (one per dedup branch + the re-pull-of-secondary-world regression case).
 
-- [ ] **Step 1: Add `db_find_by_foundry_id`**
+- [x] **Step 1: Add `db_find_by_foundry_id`**
 
 Primary identity lookup, keyed on the immutable Foundry document id (carried via `source_attribution.foundryId`) scoped by world title. This is the lookup that makes re-pulls idempotent regardless of name suffixing.
 
@@ -144,7 +144,7 @@ pub(crate) async fn db_find_by_foundry_id(
 }
 ```
 
-- [ ] **Step 2: Add `db_collides_locally`**
+- [x] **Step 2: Add `db_collides_locally`**
 
 Helper that detects collision against any row with the same name+kind regardless of attribution (for the suffix path):
 
@@ -166,7 +166,7 @@ pub(crate) async fn db_collides_locally(
 }
 ```
 
-- [ ] **Step 3: Add the `ImportOutcome` enum + `db_upsert_imported`**
+- [x] **Step 3: Add the `ImportOutcome` enum + `db_upsert_imported`**
 
 Add to `shared/types.rs` (since it crosses the IPC boundary):
 
@@ -286,7 +286,7 @@ pub(crate) async fn db_upsert_imported(
 }
 ```
 
-- [ ] **Step 4: Tests**
+- [x] **Step 4: Tests**
 
 In the existing `#[cfg(test)] mod tests` block:
 
@@ -416,17 +416,17 @@ async fn find_by_foundry_id_returns_none_for_local_row() {
 }
 ```
 
-- [ ] **Step 5: Run `cargo test`**
+- [x] **Step 5: Run `cargo test`**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml db::advantage`
 
 Expected: all existing tests + 6 new tests pass.
 
-- [ ] **Step 6: Run `./scripts/verify.sh`**
+- [x] **Step 6: Run `./scripts/verify.sh`**
 
 Expected: green.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```
 git add src-tauri/src/db/advantage.rs src-tauri/src/shared/types.rs
@@ -473,7 +473,7 @@ EOF
 
 **Tests required:** YES — 1 integration test that constructs an in-memory `BridgeState` with a faked `world_items` cache and asserts the outcome list.
 
-- [ ] **Step 1: Add the Tauri command**
+- [x] **Step 1: Add the Tauri command**
 
 In `src-tauri/src/db/advantage.rs`:
 
@@ -600,7 +600,7 @@ use crate::shared::types::{Field, FieldValue, NumberFieldValue};
 
 (`chrono` is in `Cargo.toml` already — verify; if not, this is a YAGNI win — use `std::time::SystemTime` + manual ISO-8601 formatting via existing helpers.)
 
-- [ ] **Step 2: Integration test**
+- [x] **Step 2: Integration test**
 
 ```rust
 #[tokio::test]
@@ -635,21 +635,21 @@ async fn import_from_world_filters_non_feature_and_unknown_featuretype() {
 
 **Implementation note:** if `BridgeConn` lacks test-fixture support, mark this test `#[ignore]` with a comment pointing to Task 8's E2E smoke, OR refactor `import_advantages_from_world` to take an injectable items-source — both are fine. The 5 unit tests on `db_upsert_imported` (Task 1) carry the dedup logic correctness; this integration test would only cover the filter+orchestration shell.
 
-- [ ] **Step 3: Run `cargo test`**
+- [x] **Step 3: Run `cargo test`**
 
 Expected: existing tests still pass; new integration test passes OR is marked `#[ignore]` with rationale.
 
-- [ ] **Step 4: Update `ARCHITECTURE.md` §4 (same-commit rule)**
+- [x] **Step 4: Update `ARCHITECTURE.md` §4 (same-commit rule)**
 
 CLAUDE.md mandates that any new `#[tauri::command]` lands in the same commit as its ARCH §4 entry. Edit `ARCHITECTURE.md` §4:
 - Append `import_advantages_from_world` to the per-file IPC entry for `db/advantage.rs`.
 - Bump the running command total: **65 → 66**.
 
-- [ ] **Step 5: Run `./scripts/verify.sh`**
+- [x] **Step 5: Run `./scripts/verify.sh`**
 
 Expected: green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 git add src-tauri/src/db/advantage.rs ARCHITECTURE.md
@@ -692,7 +692,7 @@ EOF
 
 **Tests required:** NO — composes existing primitives; manual smoke in Task 8.
 
-- [ ] **Step 1: Add the commands**
+- [x] **Step 1: Add the commands**
 
 In `src-tauri/src/bridge/commands.rs`:
 
@@ -736,17 +736,17 @@ pub async fn bridge_unsubscribe(
 }
 ```
 
-- [ ] **Step 2: Update `ARCHITECTURE.md` §4 (same-commit rule)**
+- [x] **Step 2: Update `ARCHITECTURE.md` §4 (same-commit rule)**
 
 CLAUDE.md mandates that any new `#[tauri::command]` lands in the same commit as its ARCH §4 entry. Edit `ARCHITECTURE.md` §4:
 - Append `bridge_subscribe` and `bridge_unsubscribe` to the per-file IPC entry for `bridge/commands.rs`.
 - Bump the running command total: **66 → 68**.
 
-- [ ] **Step 3: Run `./scripts/verify.sh`**
+- [x] **Step 3: Run `./scripts/verify.sh`**
 
 Expected: green.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 git add src-tauri/src/bridge/commands.rs ARCHITECTURE.md
@@ -780,7 +780,7 @@ EOF
 
 **Tests required:** NO
 
-- [ ] **Step 1: Add three lines**
+- [x] **Step 1: Add three lines**
 
 In `invoke_handler!`:
 
@@ -792,11 +792,11 @@ bridge::commands::bridge_unsubscribe,
 
 (Cluster `import_advantages_from_world` near `db::advantage::*`; cluster the `bridge_*` ones near other `bridge::commands::*` entries.)
 
-- [ ] **Step 2: Run `./scripts/verify.sh`**
+- [x] **Step 2: Run `./scripts/verify.sh`**
 
 Expected: green.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```
 git add src-tauri/src/lib.rs
@@ -835,7 +835,7 @@ EOF
 
 **Tests required:** NO required, but if the repo has vitest set up, add 2-3 tests for the pure `importer.ts` helpers.
 
-- [ ] **Step 1: Add `ImportOutcome` to `src/types.ts`**
+- [x] **Step 1: Add `ImportOutcome` to `src/types.ts`**
 
 ```ts
 export type AdvantageKind = 'merit' | 'flaw' | 'background' | 'boon';
@@ -848,7 +848,7 @@ export type ImportOutcome =
 
 (Verify `AdvantageKind` is already in `src/types.ts` from Plan A — should be.)
 
-- [ ] **Step 2: Extend `src/lib/library/api.ts`**
+- [x] **Step 2: Extend `src/lib/library/api.ts`**
 
 ```ts
 import { invoke } from '@tauri-apps/api/core';
@@ -875,7 +875,7 @@ export function unsubscribeFromWorldItems(): Promise<void> {
 
 **SourceKind serialization note:** Rust's `SourceKind` enum serializes as `"foundry"` / `"roll20"` (snake_case). Verify by inspecting `src-tauri/src/bridge/types.rs` for the serde attribute on `SourceKind` (around line 5).
 
-- [ ] **Step 3: Create `src/lib/library/importer.ts`**
+- [x] **Step 3: Create `src/lib/library/importer.ts`**
 
 ```ts
 import type { ImportOutcome } from '../../types';
@@ -917,15 +917,15 @@ export function summaryAsToast(summary: ImportSummary, worldTitle: string): stri
 }
 ```
 
-- [ ] **Step 4: Run `npm run check`**
+- [x] **Step 4: Run `npm run check`**
 
 Expected: green.
 
-- [ ] **Step 5: Run `./scripts/verify.sh`**
+- [x] **Step 5: Run `./scripts/verify.sh`**
 
 Required by CLAUDE.md before every commit. The npm check above is a fast inner-loop signal; `verify.sh` is the gate.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```
 git add src/lib/library/api.ts src/lib/library/importer.ts src/types.ts
@@ -970,7 +970,7 @@ EOF
 
 **Tests required:** NO (UI; manual smoke covers it).
 
-- [ ] **Step 1: Verify `SourceAttributionChip.svelte`**
+- [x] **Step 1: Verify `SourceAttributionChip.svelte`**
 
 Read `src/lib/components/SourceAttributionChip.svelte`. The actual prop names are `source: SourceKind` and `worldTitle?: string | null` — pass `<SourceAttributionChip source="foundry" worldTitle={adv.sourceAttribution?.worldTitle} />`. (The earlier sketch using `world=` was wrong — Svelte silently drops unknown props and `npm run check` will surface the TS error.) If the prop shape ever changes, the import-version chip can be inline:
 
@@ -982,7 +982,7 @@ Read `src/lib/components/SourceAttributionChip.svelte`. The actual prop names ar
 {/if}
 ```
 
-- [ ] **Step 2: Add the "Pull from active world" button**
+- [x] **Step 2: Add the "Pull from active world" button**
 
 In `AdvantagesManager.svelte`'s toolbar area (near the existing Sort/Filter controls):
 
@@ -1040,7 +1040,7 @@ In `AdvantagesManager.svelte`'s toolbar area (near the existing Sort/Filter cont
 
 (Adapt `bridgeStore` accessors to match Plan B's actual exports.)
 
-- [ ] **Step 3: Add source chip on rows**
+- [x] **Step 3: Add source chip on rows**
 
 In `src/lib/components/AdvantageCard.svelte`, near the kind chip from Plan A:
 
@@ -1061,7 +1061,7 @@ CSS:
 }
 ```
 
-- [ ] **Step 4: Add tri-state filter**
+- [x] **Step 4: Add tri-state filter**
 
 Extend `AdvantagesManager.svelte`'s state:
 
@@ -1089,11 +1089,11 @@ const visible = $derived(
 
 Render a small chip row with 4 buttons (`All / Corebook / Local / Imported`) using the same chip styling as tags. Mutually exclusive — clicking one sets it as `provenanceFilter`.
 
-- [ ] **Step 5: Run `npm run check` and `npm run build`**
+- [x] **Step 5: Run `npm run check` and `npm run build`**
 
 Expected: green.
 
-- [ ] **Step 6: Manual smoke**
+- [ ] **Step 6: Manual smoke** _(deferred to user — requires interactive `npm run tauri dev` + live Foundry world with vtmtools-bridge@0.6.0)_
 
 `npm run tauri dev` with a Foundry world running and `vtmtools-bridge@0.6.0`:
 
@@ -1106,11 +1106,11 @@ Expected: green.
 - ✅ The existing Edit button on an imported row works (GM can curate imports).
 - ✅ **Re-pull regression check** (Plan C Task 1's foundryId-keyed dedup): create the suffixed `Iron Gullet (FVTT — <world>)` row above, then click Pull again. The suffixed row count must stay at 1 (Updated, not Inserted-duplicate).
 
-- [ ] **Step 7: Run `./scripts/verify.sh`**
+- [x] **Step 7: Run `./scripts/verify.sh`**
 
 Required by CLAUDE.md before every commit.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```
 git add src/tools/AdvantagesManager.svelte \
@@ -1154,11 +1154,11 @@ The task overview table's row for Task 7 stays as a numbered placeholder for rea
 
 **Goal:** Confirm Phase 4 (Plans A + B + C) end-to-end before the single branch-wide `code-review:code-review`.
 
-- [ ] **Step 1: Run `./scripts/verify.sh`**
+- [x] **Step 1: Run `./scripts/verify.sh`**
 
 Expected: full green.
 
-- [ ] **Step 2: Live-Foundry E2E — full Library Sync round trip**
+- [ ] **Step 2: Live-Foundry E2E — full Library Sync round trip** _(deferred to user — requires interactive Tauri dev + Foundry world running vtmtools-bridge@0.6.0)_
 
 Boot the Tauri app + a Foundry world with `vtmtools-bridge@0.6.0`.
 
@@ -1178,7 +1178,7 @@ Boot the Tauri app + a Foundry world with `vtmtools-bridge@0.6.0`.
 **Cross-world dedup (#16):**
 - ✅ Swap to a different Foundry world (different `world_title`). Add a Merit named the same as an already-imported one. Pull. Result: new row with `(FVTT — <new-world>)` suffix. Both rows visible in the Library; both show source chips with their respective world names.
 
-- [ ] **Step 3: Update plan checkboxes**
+- [x] **Step 3: Update plan checkboxes**
 
 Mark every Task 1–7 step as `[x]` in this file. Commit:
 
@@ -1195,11 +1195,11 @@ EOF
 )"
 ```
 
-- [ ] **Step 4: Single branch-wide code review**
+- [x] **Step 4: Single branch-wide code review** _(ran 2026-05-17; found 1 high-confidence bug — `update_advantage` wiped `source_attribution` on imported-row edits — fixed in a follow-up commit with a regression test)_
 
 Per CLAUDE.md's lean-execution override, NOW (and not before) invoke `code-review:code-review` against the full Phase 4 branch diff (the union of Plan A + Plan B + Plan C commits). The reviewer agent's report informs any follow-up fix commits before merging.
 
-- [ ] **Step 5: Milestone-close hygiene**
+- [ ] **Step 5: Milestone-close hygiene** _(deferred to user — confirms `Closes #N` footer-driven issue closures via PR / merge to master)_
 
 After review-driven fixes (if any) land:
 - Confirm all five milestone-4 issues are closed by the per-plan `Closes #N` commit footers.

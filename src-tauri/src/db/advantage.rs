@@ -1,6 +1,9 @@
 use rand::seq::SliceRandom;
 use sqlx::{Row, SqlitePool};
-use crate::shared::types::{Advantage, AdvantageKind, Field};
+use crate::bridge::{BridgeConn, BridgeState, types::SourceKind};
+use crate::shared::types::{
+    Advantage, AdvantageKind, Field, FieldValue, ImportOutcome, NumberFieldValue,
+};
 
 // --------------------------------------------------------------------------
 // JSON serde helpers for tags_json and properties_json columns
@@ -76,7 +79,7 @@ fn row_to_advantage(r: &sqlx::sqlite::SqliteRow) -> Result<Advantage, String> {
     })
 }
 
-async fn db_list(pool: &SqlitePool) -> Result<Vec<Advantage>, String> {
+pub(crate) async fn db_list(pool: &SqlitePool) -> Result<Vec<Advantage>, String> {
     let rows = sqlx::query(
         "SELECT id, name, description, tags_json, properties_json, is_custom, kind, source_attribution
          FROM advantages ORDER BY is_custom ASC, id ASC"
@@ -177,9 +180,17 @@ async fn db_update(
         None => None,
     };
 
+    // `source_attribution` uses COALESCE so a NULL bind preserves the
+    // existing column value. The GM-edit path (`update_advantage` Tauri
+    // command) always binds None and must NOT wipe import provenance —
+    // wiping it would break the foundryId-keyed re-pull dedup in
+    // `db_upsert_imported` (the next pull would miss and INSERT a
+    // duplicate row). Callers that want to overwrite attribution should
+    // pass Some(value); callers that want to leave it alone pass None.
     let result = sqlx::query(
         "UPDATE advantages
-         SET name = ?, description = ?, tags_json = ?, properties_json = ?, kind = ?, source_attribution = ?
+         SET name = ?, description = ?, tags_json = ?, properties_json = ?, kind = ?,
+             source_attribution = COALESCE(?, source_attribution)
          WHERE id = ? AND is_custom = 1"
     )
     .bind(name)
@@ -233,6 +244,264 @@ async fn db_roll_random(
 }
 
 // --------------------------------------------------------------------------
+// FVTT import path (parallel to db_insert / db_update — preserves dedup
+// identity on the immutable Foundry document _id carried via
+// source_attribution.foundryId, NOT on the mutable display name).
+// --------------------------------------------------------------------------
+
+/// Identity lookup keyed on the immutable Foundry document id (carried via
+/// `source_attribution.foundryId`) scoped by `worldTitle`. Returns None for
+/// any row whose `source_attribution` is NULL (i.e. local rows never match).
+pub(crate) async fn db_find_by_foundry_id(
+    pool: &SqlitePool,
+    foundry_id: &str,
+    world_title: &str,
+) -> Result<Option<Advantage>, String> {
+    let row = sqlx::query(
+        "SELECT id, name, description, tags_json, properties_json, is_custom,
+                kind, source_attribution
+         FROM advantages
+         WHERE json_extract(source_attribution, '$.foundryId')  = ?
+           AND json_extract(source_attribution, '$.worldTitle') = ?
+         LIMIT 1"
+    )
+    .bind(foundry_id)
+    .bind(world_title)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("db/advantage.find_by_foundry_id: {}", e))?;
+
+    match row {
+        Some(r) => Ok(Some(row_to_advantage(&r)?)),
+        None => Ok(None),
+    }
+}
+
+/// True iff any row matches (name, kind) regardless of attribution. Used by
+/// the import path to decide when to auto-suffix imported names so a
+/// hand-authored "Iron Gullet" can coexist with the FVTT-imported one.
+pub(crate) async fn db_collides_locally(
+    pool: &SqlitePool,
+    name: &str,
+    kind: AdvantageKind,
+) -> Result<bool, String> {
+    let row = sqlx::query("SELECT COUNT(*) AS c FROM advantages WHERE name = ? AND kind = ?")
+        .bind(name)
+        .bind(kind_to_str(kind))
+        .fetch_one(pool)
+        .await
+        .map_err(|e| format!("db/advantage.collides_locally: {}", e))?;
+    let c: i64 = row.get("c");
+    Ok(c > 0)
+}
+
+/// Import-flow workhorse. Resolves the dedup decision tree:
+///   - Same (foundryId, worldTitle) already imported → UPDATE in place
+///     (description, properties, attribution), preserving the row id and
+///     the stored name (which may already carry a suffix).
+///   - Different attribution but (name, kind) collides with any local row
+///     → auto-suffix "(FVTT — <worldTitle>)" and INSERT.
+///   - No collision → straight INSERT.
+///
+/// Imported rows are always `is_custom = 1` (survives destructive reseed,
+/// per ARCHITECTURE.md §6 tri-state) and start with empty tags.
+pub(crate) async fn db_upsert_imported(
+    pool: &SqlitePool,
+    name: &str,
+    kind: AdvantageKind,
+    description: &str,
+    properties: &[Field],
+    source_attribution: &serde_json::Value,
+) -> Result<ImportOutcome, String> {
+    let world_title = source_attribution
+        .get("worldTitle")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            "db/advantage.upsert_imported: source_attribution missing worldTitle".to_string()
+        })?;
+    let foundry_id = source_attribution
+        .get("foundryId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            "db/advantage.upsert_imported: source_attribution missing foundryId".to_string()
+        })?;
+
+    // Case 1: same (foundryId, worldTitle) → UPDATE in place.
+    if let Some(existing) = db_find_by_foundry_id(pool, foundry_id, world_title).await? {
+        let properties_json = serialize_properties(properties)?;
+        let attribution_str = serde_json::to_string(source_attribution)
+            .map_err(|e| format!("db/advantage.upsert_imported: serialize attribution: {}", e))?;
+
+        sqlx::query(
+            "UPDATE advantages
+             SET description = ?, properties_json = ?, source_attribution = ?
+             WHERE id = ?"
+        )
+        .bind(description)
+        .bind(&properties_json)
+        .bind(&attribution_str)
+        .bind(existing.id)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("db/advantage.upsert_imported: update: {}", e))?;
+
+        return Ok(ImportOutcome::Updated {
+            id: existing.id,
+            name: existing.name,
+            kind: existing.kind,
+        });
+    }
+
+    // Case 2 / 3: INSERT. Suffix name iff (name, kind) collides with any
+    // existing row (local hand-authored OR a different-world import).
+    let final_name = if db_collides_locally(pool, name, kind).await? {
+        format!("{} (FVTT — {})", name, world_title)
+    } else {
+        name.to_string()
+    };
+
+    let tags_json = serialize_tags(&[])?;
+    let properties_json = serialize_properties(properties)?;
+    let attribution_str = serde_json::to_string(source_attribution)
+        .map_err(|e| format!("db/advantage.upsert_imported: serialize attribution: {}", e))?;
+
+    let result = sqlx::query(
+        "INSERT INTO advantages
+            (name, description, tags_json, properties_json, is_custom, kind, source_attribution)
+         VALUES (?, ?, ?, ?, 1, ?, ?)"
+    )
+    .bind(&final_name)
+    .bind(description)
+    .bind(&tags_json)
+    .bind(&properties_json)
+    .bind(kind_to_str(kind))
+    .bind(&attribution_str)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("db/advantage.upsert_imported: insert: {}", e))?;
+
+    Ok(ImportOutcome::Inserted {
+        id: result.last_insert_rowid(),
+        name: final_name,
+        kind,
+    })
+}
+
+// --------------------------------------------------------------------------
+// FVTT import orchestration (inner helper + Tauri wrapper)
+//
+// Split into an inner helper that takes `&SqlitePool` + `&BridgeState`
+// (unit-testable without a Tauri runtime) and a thin `#[tauri::command]`
+// wrapper that extracts the State references and delegates. Mirrors the
+// `db_list` / `list_advantages` pattern used throughout this file.
+// --------------------------------------------------------------------------
+
+/// Snapshot the active Foundry world info + cached world items, filter to
+/// feature-type rows with a known featuretype, and per-row delegate to
+/// `db_upsert_imported`. Non-feature items and unknown featuretypes are
+/// returned as `ImportOutcome::Skipped` for the frontend's summary toast.
+///
+/// Error prefix `db/advantage.import_from_world:` per ARCH §7.
+pub(crate) async fn db_import_from_world(
+    pool: &SqlitePool,
+    bridge: &BridgeState,
+) -> Result<Vec<ImportOutcome>, String> {
+    // Snapshot Foundry source info under one lock acquisition. world_title
+    // is required (it's the dedup-scope key); world_id and system_version
+    // are optional metadata stamped into source_attribution.
+    let (world_title, world_id, system_version) = {
+        let info = bridge.source_info.lock().await;
+        let i = info.get(&SourceKind::Foundry).ok_or_else(|| {
+            "db/advantage.import_from_world: no active Foundry connection".to_string()
+        })?;
+        let world_title = i.world_title.clone().ok_or_else(|| {
+            "db/advantage.import_from_world: no active Foundry world (connect first?)"
+                .to_string()
+        })?;
+        (world_title, i.world_id.clone(), i.system_version.clone())
+    };
+
+    let items: Vec<crate::bridge::types::CanonicalWorldItem> = {
+        let store = bridge.world_items.lock().await;
+        store
+            .get(&SourceKind::Foundry)
+            .map(|m| m.values().cloned().collect())
+            .unwrap_or_default()
+    };
+
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let mut outcomes = Vec::with_capacity(items.len());
+    for item in items {
+        if item.kind != "feature" {
+            outcomes.push(ImportOutcome::Skipped {
+                reason: format!("non-feature item kind: {}", item.kind),
+                name: item.name,
+            });
+            continue;
+        }
+        let ft = match item.featuretype.as_deref() {
+            Some("merit")      => AdvantageKind::Merit,
+            Some("flaw")       => AdvantageKind::Flaw,
+            Some("background") => AdvantageKind::Background,
+            Some("boon")       => AdvantageKind::Boon,
+            other => {
+                outcomes.push(ImportOutcome::Skipped {
+                    reason: format!("unknown featuretype: {:?}", other),
+                    name: item.name,
+                });
+                continue;
+            }
+        };
+
+        let description = item
+            .system
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let points = item
+            .system
+            .get("points")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+
+        let properties: Vec<Field> = if points > 0 {
+            vec![Field {
+                name: "level".into(),
+                value: FieldValue::Number {
+                    value: NumberFieldValue::Single(points as f64),
+                },
+            }]
+        } else {
+            vec![]
+        };
+
+        let attribution = serde_json::json!({
+            "source":        "foundry",
+            "worldTitle":    world_title,
+            "worldId":       world_id,
+            "systemVersion": system_version,
+            "foundryId":     item.id,
+            "importedAt":    now,
+        });
+
+        let outcome = db_upsert_imported(
+            pool,
+            &item.name,
+            ft,
+            &description,
+            &properties,
+            &attribution,
+        )
+        .await?;
+        outcomes.push(outcome);
+    }
+
+    Ok(outcomes)
+}
+
+// --------------------------------------------------------------------------
 // Tauri command handlers (thin wrappers around the helpers above)
 // --------------------------------------------------------------------------
 
@@ -282,6 +551,23 @@ pub async fn roll_random_advantage(
     tags: Vec<String>,
 ) -> Result<Option<Advantage>, String> {
     db_roll_random(&pool.0, &tags).await
+}
+
+/// Import feature-type world items from the active Foundry world into the
+/// local advantages library. Pulls from `BridgeState.world_items` — the
+/// frontend must have subscribed to the `item` collection beforehand
+/// (Task 6 wires the subscription).
+///
+/// Filter: only `kind == "feature"` items with featuretype ∈ {merit,
+/// flaw, background, boon}. Other item kinds (speciality, power, etc.)
+/// and unknown featuretypes are returned as `ImportOutcome::Skipped` for
+/// the frontend's summary toast.
+#[tauri::command]
+pub async fn import_advantages_from_world(
+    db: tauri::State<'_, crate::DbState>,
+    bridge: tauri::State<'_, BridgeConn>,
+) -> Result<Vec<ImportOutcome>, String> {
+    db_import_from_world(&db.0, &bridge.0).await
 }
 
 #[cfg(test)]
@@ -507,5 +793,429 @@ mod tests {
         let flaws = db_list_by_kind(&pool, AdvantageKind::Flaw).await.unwrap();
         assert_eq!(flaws.len(), 2);
         assert!(flaws.iter().all(|r| r.kind == AdvantageKind::Flaw));
+    }
+
+    // ─── New tests: FVTT import dedup helpers ───────────────────────────
+
+    fn world_attribution(world: &str, foundry_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "source": "foundry",
+            "worldTitle": world,
+            "foundryId": foundry_id,
+            "importedAt": "2026-05-14T12:00:00Z",
+        })
+    }
+
+    #[tokio::test]
+    async fn upsert_imported_new_row_inserts() {
+        let pool = test_pool().await;
+        let out = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "desc",
+            &[],
+            &world_attribution("Chicago", "chi_iron"),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(out, ImportOutcome::Inserted { ref name, .. } if name == "Iron Gullet"));
+    }
+
+    #[tokio::test]
+    async fn upsert_imported_same_world_updates_in_place() {
+        let pool = test_pool().await;
+        let first = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "desc1",
+            &[],
+            &world_attribution("Chicago", "chi_iron"),
+        )
+        .await
+        .unwrap();
+        let first_id = match first {
+            ImportOutcome::Inserted { id, .. } => id,
+            other => panic!("expected Inserted on first import, got {other:?}"),
+        };
+
+        let second = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "desc2 (revised)",
+            &[],
+            &world_attribution("Chicago", "chi_iron"),
+        )
+        .await
+        .unwrap();
+
+        match second {
+            ImportOutcome::Updated { id, .. } => assert_eq!(id, first_id),
+            other => panic!("expected Updated, got {other:?}"),
+        }
+        let rows = db_list(&pool).await.unwrap();
+        assert_eq!(rows.iter().filter(|r| r.name == "Iron Gullet").count(), 1);
+        assert_eq!(
+            rows.iter().find(|r| r.id == first_id).unwrap().description,
+            "desc2 (revised)"
+        );
+    }
+
+    #[tokio::test]
+    async fn upsert_imported_different_world_suffixes_name() {
+        let pool = test_pool().await;
+        db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "d",
+            &[],
+            &world_attribution("Chicago", "chi_iron"),
+        )
+        .await
+        .unwrap();
+
+        let second = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "d",
+            &[],
+            &world_attribution("Berlin", "ber_iron"),
+        )
+        .await
+        .unwrap();
+
+        match second {
+            ImportOutcome::Inserted { name, .. } => {
+                assert_eq!(name, "Iron Gullet (FVTT — Berlin)");
+            }
+            other => panic!("expected Inserted with suffix, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn upsert_imported_suffixes_against_local_row() {
+        let pool = test_pool().await;
+        db_insert(&pool, "Iron Gullet", "local desc", AdvantageKind::Merit, None, &[], &[])
+            .await
+            .unwrap();
+
+        let imported = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "fvtt desc",
+            &[],
+            &world_attribution("Chicago", "chi_iron"),
+        )
+        .await
+        .unwrap();
+
+        match imported {
+            ImportOutcome::Inserted { name, .. } => {
+                assert_eq!(name, "Iron Gullet (FVTT — Chicago)");
+            }
+            other => panic!("expected Inserted with suffix, got {other:?}"),
+        }
+        let rows = db_list(&pool).await.unwrap();
+        let names: Vec<_> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert!(names.contains(&"Iron Gullet"));
+        assert!(names.contains(&"Iron Gullet (FVTT — Chicago)"));
+    }
+
+    #[tokio::test]
+    async fn upsert_imported_repull_of_secondary_world_updates_in_place() {
+        let pool = test_pool().await;
+
+        let chi = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "v1",
+            &[],
+            &world_attribution("Chicago", "chi_iron"),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(chi, ImportOutcome::Inserted { ref name, .. } if name == "Iron Gullet"));
+
+        let ber1 = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "v1",
+            &[],
+            &world_attribution("Berlin", "ber_iron"),
+        )
+        .await
+        .unwrap();
+        let ber_id = match ber1 {
+            ImportOutcome::Inserted { id, name, .. } => {
+                assert_eq!(name, "Iron Gullet (FVTT — Berlin)");
+                id
+            }
+            other => panic!("expected suffixed Inserted, got {other:?}"),
+        };
+
+        let ber2 = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "v2",
+            &[],
+            &world_attribution("Berlin", "ber_iron"),
+        )
+        .await
+        .unwrap();
+        match ber2 {
+            ImportOutcome::Updated { id, .. } => assert_eq!(id, ber_id),
+            other => panic!("expected Updated on re-pull of secondary world, got {other:?}"),
+        }
+        let rows = db_list(&pool).await.unwrap();
+        let berlin_rows = rows
+            .iter()
+            .filter(|r| r.name == "Iron Gullet (FVTT — Berlin)")
+            .count();
+        assert_eq!(
+            berlin_rows, 1,
+            "re-pull of secondary-world item must update in place, not duplicate"
+        );
+        let chicago_rows = rows.iter().filter(|r| r.name == "Iron Gullet").count();
+        assert_eq!(
+            chicago_rows, 1,
+            "Chicago row must be untouched by Berlin re-pull"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_by_foundry_id_returns_none_for_local_row() {
+        let pool = test_pool().await;
+        db_insert(&pool, "Allies", "local", AdvantageKind::Background, None, &[], &[])
+            .await
+            .unwrap();
+        let found = db_find_by_foundry_id(&pool, "any_id", "Chicago").await.unwrap();
+        assert!(
+            found.is_none(),
+            "local row (NULL attribution) must never match a foundryId lookup"
+        );
+    }
+
+    // ─── Integration test: db_import_from_world filter + orchestration ──
+
+    #[tokio::test]
+    async fn import_from_world_filters_non_feature_and_unknown_featuretype() {
+        use crate::bridge::types::{CanonicalWorldItem, SourceInfo};
+        use std::collections::HashMap;
+
+        let pool = test_pool().await;
+
+        // Construct a real BridgeState with empty sources map (the import
+        // path only reads source_info + world_items — never invokes the
+        // BridgeSource trait — so an empty sources HashMap is fine).
+        let bridge = BridgeState::new(HashMap::new());
+        {
+            let mut info = bridge.source_info.lock().await;
+            info.insert(
+                SourceKind::Foundry,
+                SourceInfo {
+                    world_id:         Some("world_chi".into()),
+                    world_title:      Some("Chicago".into()),
+                    system_id:        Some("vtm5e".into()),
+                    system_version:   Some("0.9.0".into()),
+                    protocol_version: 1,
+                    capabilities:     vec!["actors".into(), "items".into()],
+                },
+            );
+        }
+        {
+            let mut store = bridge.world_items.lock().await;
+            let slot = store.entry(SourceKind::Foundry).or_default();
+            slot.insert(
+                "merit_id".into(),
+                CanonicalWorldItem {
+                    source: SourceKind::Foundry,
+                    id:     "merit_id".into(),
+                    name:   "Iron Gullet".into(),
+                    kind:   "feature".into(),
+                    featuretype: Some("merit".into()),
+                    system: serde_json::json!({
+                        "description": "Can drink rancid blood",
+                        "points":      1,
+                    }),
+                },
+            );
+            slot.insert(
+                "spec_id".into(),
+                CanonicalWorldItem {
+                    source: SourceKind::Foundry,
+                    id:     "spec_id".into(),
+                    name:   "Survival: Urban".into(),
+                    kind:   "speciality".into(),
+                    featuretype: None,
+                    system: serde_json::json!({}),
+                },
+            );
+            slot.insert(
+                "unknown_ft_id".into(),
+                CanonicalWorldItem {
+                    source: SourceKind::Foundry,
+                    id:     "unknown_ft_id".into(),
+                    name:   "Mystery Feature".into(),
+                    kind:   "feature".into(),
+                    featuretype: Some("discipline".into()),
+                    system: serde_json::json!({}),
+                },
+            );
+        }
+
+        let outcomes = db_import_from_world(&pool, &bridge).await.unwrap();
+        assert_eq!(outcomes.len(), 3, "one outcome per snapshot item");
+
+        // HashMap iteration order is unspecified — partition by variant.
+        let mut inserted = 0;
+        let mut skipped_non_feature = 0;
+        let mut skipped_unknown_ft = 0;
+        for o in &outcomes {
+            match o {
+                ImportOutcome::Inserted { name, kind, .. } => {
+                    inserted += 1;
+                    assert_eq!(name, "Iron Gullet");
+                    assert_eq!(*kind, AdvantageKind::Merit);
+                }
+                ImportOutcome::Skipped { reason, .. } => {
+                    if reason.contains("non-feature") {
+                        skipped_non_feature += 1;
+                    } else if reason.contains("unknown featuretype") {
+                        skipped_unknown_ft += 1;
+                    } else {
+                        panic!("unexpected Skipped reason: {reason}");
+                    }
+                }
+                ImportOutcome::Updated { .. } => {
+                    panic!("expected Inserted, got Updated on a fresh import")
+                }
+            }
+        }
+        assert_eq!(inserted, 1, "merit feature should Insert");
+        assert_eq!(skipped_non_feature, 1, "speciality should Skip (non-feature)");
+        assert_eq!(skipped_unknown_ft, 1, "unknown featuretype should Skip");
+
+        // Verify the inserted row landed in the DB with correct attribution.
+        let rows = db_list(&pool).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.name, "Iron Gullet");
+        assert_eq!(r.kind, AdvantageKind::Merit);
+        let attrib = r.source_attribution.as_ref().unwrap();
+        assert_eq!(attrib["worldTitle"], "Chicago");
+        assert_eq!(attrib["worldId"], "world_chi");
+        assert_eq!(attrib["systemVersion"], "0.9.0");
+        assert_eq!(attrib["foundryId"], "merit_id");
+        assert_eq!(attrib["source"], "foundry");
+        // Properties should carry a level=1 field since points > 0.
+        assert_eq!(r.properties.len(), 1);
+        assert_eq!(r.properties[0].name, "level");
+    }
+
+    #[tokio::test]
+    async fn import_from_world_errors_when_no_foundry_connected() {
+        use std::collections::HashMap;
+        let pool = test_pool().await;
+        let bridge = BridgeState::new(HashMap::new());
+        let err = db_import_from_world(&pool, &bridge).await.unwrap_err();
+        assert!(
+            err.contains("db/advantage.import_from_world"),
+            "error message missing prefix: {err}"
+        );
+        assert!(err.contains("no active Foundry"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn update_preserves_source_attribution_for_imported_rows() {
+        // Regression: editing an imported row via the GM-facing update path
+        // (Tauri `update_advantage` → `db_update(..., None, ...)`) must NOT
+        // wipe `source_attribution`. Otherwise the foundryId-keyed re-pull
+        // dedup (db_find_by_foundry_id) misses on the next pull and
+        // re-INSERTs the same Foundry item as a duplicate row.
+        let pool = test_pool().await;
+
+        let attribution = world_attribution("Chicago", "chi_iron");
+        let inserted = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "v1 desc",
+            &[],
+            &attribution,
+        )
+        .await
+        .unwrap();
+        let row_id = match inserted {
+            ImportOutcome::Inserted { id, .. } => id,
+            other => panic!("expected Inserted on fresh import, got {other:?}"),
+        };
+
+        // Simulate the GM clicking Edit on the imported row. The Tauri
+        // `update_advantage` command forwards None for source_attribution
+        // (the frontend AdvantageInput has no attribution field).
+        db_update(
+            &pool,
+            row_id,
+            "Iron Gullet (typo fix)",
+            "v1 with fixed typo",
+            AdvantageKind::Merit,
+            None,
+            &[],
+            &[],
+        )
+        .await
+        .unwrap();
+
+        // The foundryId lookup must still match → source_attribution survived.
+        let found = db_find_by_foundry_id(&pool, "chi_iron", "Chicago")
+            .await
+            .unwrap();
+        assert!(
+            found.is_some(),
+            "db_find_by_foundry_id must still match after GM edit; \
+             source_attribution must be preserved by db_update"
+        );
+        let row = found.unwrap();
+        assert_eq!(row.id, row_id);
+        assert_eq!(row.name, "Iron Gullet (typo fix)");
+        assert!(
+            row.source_attribution.is_some(),
+            "source_attribution must not be wiped by db_update"
+        );
+
+        // Re-pull (idempotency check). Must Update in place, NOT Insert a
+        // duplicate. This is the user-visible manifestation of the bug.
+        let repulled = db_upsert_imported(
+            &pool,
+            "Iron Gullet",
+            AdvantageKind::Merit,
+            "v2 desc",
+            &[],
+            &attribution,
+        )
+        .await
+        .unwrap();
+        match repulled {
+            ImportOutcome::Updated { id, .. } => assert_eq!(id, row_id),
+            other => panic!("expected Updated on re-pull after GM edit, got {other:?}"),
+        }
+
+        let all = db_list(&pool).await.unwrap();
+        let imported = all
+            .iter()
+            .filter(|r| r.source_attribution.is_some())
+            .count();
+        assert_eq!(
+            imported, 1,
+            "GM edit + re-pull must leave exactly one imported row, not duplicate"
+        );
     }
 }

@@ -79,6 +79,9 @@ pub fn run() {
             tools::character::character_remove_advantage,
             bridge::commands::bridge_get_characters,
             bridge::commands::bridge_get_rolls,
+            bridge::commands::bridge_get_world_items,
+            bridge::commands::bridge_subscribe,
+            bridge::commands::bridge_unsubscribe,
             bridge::commands::bridge_get_status,
             bridge::commands::bridge_refresh,
             bridge::commands::bridge_set_attribute,
@@ -127,6 +130,8 @@ pub fn run() {
             db::advantage::update_advantage,
             db::advantage::delete_advantage,
             db::advantage::roll_random_advantage,
+            db::advantage::import_advantages_from_world,
+            tools::library_push::push_advantage_to_world,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

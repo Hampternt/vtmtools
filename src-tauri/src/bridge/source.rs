@@ -33,6 +33,27 @@ pub enum InboundEvent {
         source_id: String,
         item_id: String,
     },
+    /// Source pushed a full world-level item snapshot. The bridge cache
+    /// replaces this source's world-items slice — every entry whose
+    /// `source` matches is dropped, then `items` are inserted. Empty
+    /// `items` is legal and means "this source now has zero
+    /// world-level items".
+    WorldItemsSnapshot {
+        source: crate::bridge::types::SourceKind,
+        items: Vec<crate::bridge::types::CanonicalWorldItem>,
+    },
+    /// One world-level item was added or changed. The bridge cache
+    /// inserts or overwrites a single entry keyed by `(source, id)`.
+    WorldItemUpsert {
+        source: crate::bridge::types::SourceKind,
+        item: crate::bridge::types::CanonicalWorldItem,
+    },
+    /// One world-level item was removed. The bridge cache evicts the
+    /// entry keyed by `(source, id)`.
+    WorldItemDeleted {
+        source: crate::bridge::types::SourceKind,
+        item_id: String,
+    },
 }
 
 /// Per-source protocol adapter. Sources are stateless transformers;

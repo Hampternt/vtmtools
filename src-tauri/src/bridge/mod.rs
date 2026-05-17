@@ -48,6 +48,12 @@ pub struct BridgeState {
     // caches (characters, connections, source_info). tokio's Mutex doesn't
     // poison; push_roll / get_rolls are async because acquisition awaits.
     pub roll_history: Mutex<VecDeque<CanonicalRoll>>,
+    /// Cache of world-level Item documents per source. Keyed by SourceKind
+    /// then by canonical item id. Replaced wholesale per source on
+    /// `WorldItemsSnapshot`; per-entry mutated on Upsert/Delete.
+    pub world_items: Mutex<
+        HashMap<SourceKind, HashMap<String, crate::bridge::types::CanonicalWorldItem>>,
+    >,
 }
 
 impl BridgeState {
@@ -65,6 +71,7 @@ impl BridgeState {
             source_info: Mutex::new(HashMap::new()),
             sources,
             roll_history: Mutex::new(VecDeque::with_capacity(ROLL_HISTORY_CAPACITY)),
+            world_items: Mutex::new(HashMap::new()),
         }
     }
 
@@ -408,6 +415,36 @@ async fn handle_connection<S>(
                                 }
                             }
                         }
+                        InboundEvent::WorldItemsSnapshot { source, items } => {
+                            {
+                                let mut store = state.world_items.lock().await;
+                                let slot = store.entry(source).or_default();
+                                slot.clear();
+                                for i in &items {
+                                    slot.insert(i.id.clone(), i.clone());
+                                }
+                            }
+                            let snapshot = collect_world_items_snapshot(&state).await;
+                            let _ = handle.emit("bridge://foundry/items-updated", snapshot);
+                        }
+                        InboundEvent::WorldItemUpsert { source, item } => {
+                            {
+                                let mut store = state.world_items.lock().await;
+                                store.entry(source).or_default().insert(item.id.clone(), item);
+                            }
+                            let snapshot = collect_world_items_snapshot(&state).await;
+                            let _ = handle.emit("bridge://foundry/items-updated", snapshot);
+                        }
+                        InboundEvent::WorldItemDeleted { source, item_id } => {
+                            {
+                                let mut store = state.world_items.lock().await;
+                                if let Some(slot) = store.get_mut(&source) {
+                                    slot.remove(&item_id);
+                                }
+                            }
+                            let snapshot = collect_world_items_snapshot(&state).await;
+                            let _ = handle.emit("bridge://foundry/items-updated", snapshot);
+                        }
                     }
                 }
             }
@@ -428,6 +465,17 @@ async fn handle_connection<S>(
         info.remove(&kind);
     }
     let _ = handle.emit(&format!("bridge://{}/disconnected", kind.as_str()), ());
+}
+
+/// Flatten the per-source world-item caches into a single
+/// `Vec<CanonicalWorldItem>` for emission on
+/// `bridge://foundry/items-updated`. Mirrors the
+/// `characters` flatten pattern used in the snapshot arms above.
+async fn collect_world_items_snapshot(
+    state: &Arc<BridgeState>,
+) -> Vec<crate::bridge::types::CanonicalWorldItem> {
+    let store = state.world_items.lock().await;
+    store.values().flat_map(|m| m.values().cloned()).collect()
 }
 
 #[cfg(test)]

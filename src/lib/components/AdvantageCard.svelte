@@ -1,11 +1,28 @@
 <script lang="ts">
   import type { Advantage, Field } from '../../types';
+  import { bridge } from '../../store/bridge.svelte';
+  import { pushAdvantageToWorld } from '$lib/library/api';
 
   const { entry, onedit, ondelete }: {
     entry: Advantage;
     onedit?: () => void;
     ondelete?: () => void;
   } = $props();
+
+  let pushing = $state(false);
+  let pushError = $state('');
+
+  async function handlePush() {
+    pushing = true;
+    pushError = '';
+    try {
+      await pushAdvantageToWorld(entry.id);
+    } catch (e) {
+      pushError = String(e);
+    } finally {
+      pushing = false;
+    }
+  }
 
   function findField(name: string): Field | undefined {
     return entry.properties.find(p => p.name === name);
@@ -51,6 +68,11 @@
     <h3 class="name">{entry.name}</h3>
     <div class="tags">
       <span class="tag kind-chip" data-kind={entry.kind}>{capitalize(entry.kind)}</span>
+      {#if entry.sourceAttribution}
+        <span class="tag source-chip" data-source={(entry.sourceAttribution.source as string | undefined) ?? 'foundry'}>
+          FVTT · {(entry.sourceAttribution.worldTitle as string | undefined) ?? '?'}
+        </span>
+      {/if}
       {#each entry.tags as t}
         <span class="tag">{t}</span>
       {/each}
@@ -82,6 +104,18 @@
   {/if}
 
   <footer class="foot">
+    {#if pushError}
+      <span class="push-error" title={pushError}>!</span>
+    {/if}
+    {#if bridge.connections.foundry}
+      <button
+        class="btn push"
+        onclick={handlePush}
+        disabled={pushing}
+        aria-label="Push to world"
+        title="Push to Foundry world"
+      >{pushing ? '…' : '⇡'}</button>
+    {/if}
     {#if entry.isCustom}
       <button class="btn edit"   onclick={onedit}   aria-label="Edit">✎</button>
       <button class="btn delete" onclick={ondelete} aria-label="Delete">✕</button>
@@ -126,6 +160,18 @@
   .kind-chip[data-kind="flaw"]       { background: var(--accent-flaw,       var(--accent-bright)); }
   .kind-chip[data-kind="background"] { background: var(--accent-background, var(--accent-card-dossier)); }
   .kind-chip[data-kind="boon"]       { background: var(--accent-boon,       var(--accent-amber)); }
+  /* Source-attribution chip — visually distinguishes imported (FVTT)
+     rows from corebook + locally-authored ones. Mirrors the kind-chip
+     shape so the two chips read as a paired strip. Uses token
+     fallbacks since a dedicated --accent-foundry token isn't defined
+     in :root yet. */
+  .source-chip {
+    color: var(--text-primary);
+    font-variant: small-caps;
+    letter-spacing: 0.04em;
+  }
+  .source-chip[data-source="foundry"] { background: var(--accent-foundry, var(--accent-card-dossier)); }
+  .source-chip[data-source="roll20"]  { background: var(--accent-roll20,  var(--accent-merit)); }
   .desc { color: var(--text-secondary); font-size: 0.74rem; margin: 0; line-height: 1.4; }
   .dots { color: var(--text-ghost); letter-spacing: 0.08em; font-size: 0.85rem; }
   .dots .filled { color: var(--accent); }
@@ -145,5 +191,13 @@
     transition: color 0.15s, border-color 0.15s;
   }
   .btn:hover { color: var(--accent); border-color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .push-error {
+    color: var(--accent);
+    font-weight: bold;
+    font-size: 0.72rem;
+    align-self: center;
+    cursor: help;
+  }
   .builtin { color: var(--text-ghost); font-size: 0.62rem; font-style: italic; }
 </style>

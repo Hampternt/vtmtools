@@ -156,6 +156,20 @@ pub struct Advantage {
     pub source_attribution: Option<serde_json::Value>,
 }
 
+/// Outcome of one import attempt for a single world item.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum ImportOutcome {
+    /// Row didn't exist locally. Inserted as-is (may include world-suffix
+    /// in the name if a same-name local row already existed).
+    Inserted { id: i64, name: String, kind: AdvantageKind },
+    /// Same (foundryId, worldTitle) already imported here. Updated description
+    /// + bumped imported_at; row id preserved.
+    Updated  { id: i64, name: String, kind: AdvantageKind },
+    /// Filtered out (non-feature item.kind, or unrecognized featuretype).
+    Skipped  { reason: String, name: String },
+}
+
 /// Full result of one resonance roll sequence
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

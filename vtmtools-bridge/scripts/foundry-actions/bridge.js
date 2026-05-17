@@ -9,9 +9,11 @@
 // combat) will register themselves here when their consumer features land.
 
 import { actorsSubscriber } from "./actor.js";
+import { itemsSubscriber } from "./item.js";
 
 const subscribers = {
   actors: actorsSubscriber,
+  item: itemsSubscriber,
 };
 
 const active = new Map(); // collection -> attached subscriber

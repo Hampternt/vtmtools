@@ -50,6 +50,25 @@ impl BridgeSource for FoundrySource {
                     item_id,
                 }])
             }
+            FoundryInbound::Items { items } => {
+                let canonical: Vec<_> = items.iter().map(translate::to_canonical_world_item).collect();
+                Ok(vec![InboundEvent::WorldItemsSnapshot {
+                    source: crate::bridge::types::SourceKind::Foundry,
+                    items: canonical,
+                }])
+            }
+            FoundryInbound::WorldItemUpsert { item } => {
+                Ok(vec![InboundEvent::WorldItemUpsert {
+                    source: crate::bridge::types::SourceKind::Foundry,
+                    item: translate::to_canonical_world_item(&item),
+                }])
+            }
+            FoundryInbound::WorldItemDeleted { item_id } => {
+                Ok(vec![InboundEvent::WorldItemDeleted {
+                    source: crate::bridge::types::SourceKind::Foundry,
+                    item_id,
+                }])
+            }
         }
     }
 
@@ -140,6 +159,56 @@ mod tests {
                 assert_eq!(item_id, "merit-1");
             }
             other => panic!("expected ItemDeleted event, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn items_snapshot_produces_world_items_snapshot_event() {
+        let source = FoundrySource;
+        let msg = json!({
+            "type": "items",
+            "items": [
+                { "id": "i1", "name": "Iron Gullet", "type": "feature",
+                  "featuretype": "merit", "system": {} }
+            ]
+        });
+        let events = source.handle_inbound(msg).await.expect("handles");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            InboundEvent::WorldItemsSnapshot { source: src, items } => {
+                assert_eq!(*src, SourceKind::Foundry);
+                assert_eq!(items.len(), 1);
+                assert_eq!(items[0].name, "Iron Gullet");
+            }
+            other => panic!("expected WorldItemsSnapshot, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn world_item_upsert_produces_event() {
+        let source = FoundrySource;
+        let msg = json!({
+            "type": "world_item_upsert",
+            "item": { "id": "i7", "name": "Bloodhound", "type": "feature",
+                      "featuretype": "merit", "system": {} }
+        });
+        let events = source.handle_inbound(msg).await.expect("handles");
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], InboundEvent::WorldItemUpsert { .. }));
+    }
+
+    #[tokio::test]
+    async fn world_item_deleted_produces_event() {
+        let source = FoundrySource;
+        let msg = json!({ "type": "world_item_deleted", "item_id": "i99" });
+        let events = source.handle_inbound(msg).await.expect("handles");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            InboundEvent::WorldItemDeleted { source: src, item_id } => {
+                assert_eq!(*src, SourceKind::Foundry);
+                assert_eq!(item_id, "i99");
+            }
+            other => panic!("expected WorldItemDeleted, got {other:?}"),
         }
     }
 }

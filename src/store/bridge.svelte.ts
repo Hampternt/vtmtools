@@ -3,13 +3,20 @@
 // the merged character list.
 
 import { listen } from '@tauri-apps/api/event';
-import { getStatus, getCharacters, bridgeGetSourceInfo, type SourceInfo } from '$lib/bridge/api';
-import type { BridgeCharacter, SourceKind } from '../types';
+import {
+  getStatus,
+  getCharacters,
+  bridgeGetSourceInfo,
+  bridgeGetWorldItems,
+  type SourceInfo,
+} from '$lib/bridge/api';
+import type { BridgeCharacter, CanonicalWorldItem, SourceKind } from '../types';
 
 interface BridgeStore {
   connections: Record<SourceKind, boolean>;
   sourceInfo: Record<SourceKind, SourceInfo | null>;
   characters: BridgeCharacter[];
+  worldItems: CanonicalWorldItem[];
   lastSync: Date | null;
 }
 
@@ -17,6 +24,7 @@ export const bridge = $state<BridgeStore>({
   connections: { roll20: false, foundry: false },
   sourceInfo: { roll20: null, foundry: null },
   characters: [],
+  worldItems: [],
   lastSync: null,
 });
 
@@ -46,6 +54,12 @@ export async function initBridge(): Promise<void> {
     console.warn('[bridge] getCharacters failed:', e);
   }
 
+  try {
+    bridge.worldItems = await bridgeGetWorldItems();
+  } catch (e) {
+    console.warn('[bridge] bridgeGetWorldItems failed:', e);
+  }
+
   // Initial fetch — covers the case where the bridge connected before
   // initBridge ran, so the connected listener never fired.
   void refreshSourceInfo('roll20');
@@ -70,6 +84,10 @@ export async function initBridge(): Promise<void> {
     }),
     listen<BridgeCharacter[]>('bridge://characters-updated', (e) => {
       bridge.characters = e.payload;
+      bridge.lastSync = new Date();
+    }),
+    listen<CanonicalWorldItem[]>('bridge://foundry/items-updated', (e) => {
+      bridge.worldItems = e.payload;
       bridge.lastSync = new Date();
     }),
   ]);
