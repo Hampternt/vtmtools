@@ -600,10 +600,11 @@ Rust signature + the types it references in §2) is the stable contract.
   `gm_screen_push_to_foundry`.
 - **`src-tauri/src/tools/library_push.rs`** (1):
   `push_advantage_to_world`.
-- **`src-tauri/src/bridge/commands.rs`** (7):
+- **`src-tauri/src/bridge/commands.rs`** (9):
   `bridge_get_characters`, `bridge_get_rolls`,
   `bridge_get_world_items`, `bridge_get_status`, `bridge_refresh`,
-  `bridge_set_attribute`, `bridge_get_source_info`.
+  `bridge_set_attribute`, `bridge_get_source_info`,
+  `bridge_subscribe`, `bridge_unsubscribe`.
   Generic across Roll20 and Foundry — `set_attribute`'s `name` is
   opaque to the frontend and translated per-source by the source's
   `BridgeSource` impl. `bridge_get_rolls` snapshots the in-memory
@@ -612,7 +613,7 @@ Rust signature + the types it references in §2) is the stable contract.
   snapshots the per-source world-level item caches (Foundry only in
   v1); paired live event is `bridge://foundry/items-updated`.
 
-Total: 66 commands. New commands are registered in
+Total: 68 commands. New commands are registered in
 `src-tauri/src/lib.rs` (`invoke_handler(tauri::generate_handler![...])`).
 See §8 for the Tauri capability / ACL surface.
 

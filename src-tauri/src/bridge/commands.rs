@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use tauri::State;
 
+use crate::bridge::foundry::actions::bridge as bridge_actions;
 use crate::bridge::types::{
     CanonicalCharacter, CanonicalRoll, CanonicalWorldItem, SourceInfo, SourceKind,
 };
@@ -145,4 +146,46 @@ pub async fn bridge_get_source_info(
 ) -> Result<Option<SourceInfo>, String> {
     let info = conn.0.source_info.lock().await;
     Ok(info.get(&source).cloned())
+}
+
+/// Send `bridge.subscribe { collection }` to the named source. No-op
+/// if the source isn't connected. Per-source dispatch: in v1 only
+/// Foundry implements bridge.* subscriptions; Roll20 returns an error
+/// string rather than silently ignoring — gives the frontend a clearer
+/// signal.
+#[tauri::command]
+pub async fn bridge_subscribe(
+    conn: State<'_, BridgeConn>,
+    source: SourceKind,
+    collection: String,
+) -> Result<(), String> {
+    if source != SourceKind::Foundry {
+        return Err(format!(
+            "bridge/subscribe: source {source:?} does not support subscriptions"
+        ));
+    }
+    let payload = bridge_actions::build_subscribe(&collection);
+    let text = serde_json::to_string(&payload)
+        .map_err(|e| format!("bridge/subscribe: serialize: {e}"))?;
+    send_to_source_inner(&conn.0, source, text).await
+}
+
+/// Send `bridge.unsubscribe { collection }` to the named source. No-op
+/// if the source isn't connected. v1 only Foundry implements bridge.*
+/// subscriptions; Roll20 returns an error string.
+#[tauri::command]
+pub async fn bridge_unsubscribe(
+    conn: State<'_, BridgeConn>,
+    source: SourceKind,
+    collection: String,
+) -> Result<(), String> {
+    if source != SourceKind::Foundry {
+        return Err(format!(
+            "bridge/unsubscribe: source {source:?} does not support subscriptions"
+        ));
+    }
+    let payload = bridge_actions::build_unsubscribe(&collection);
+    let text = serde_json::to_string(&payload)
+        .map_err(|e| format!("bridge/unsubscribe: serialize: {e}"))?;
+    send_to_source_inner(&conn.0, source, text).await
 }
