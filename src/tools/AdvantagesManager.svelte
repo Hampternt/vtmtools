@@ -6,9 +6,16 @@
   import AdvantageCard from '$lib/components/AdvantageCard.svelte';
   import AdvantageForm from '$lib/components/AdvantageForm.svelte';
   import { listAdvantages, deleteAdvantage } from '$lib/advantages/api';
+  import {
+    importAdvantagesFromWorld,
+    subscribeToWorldItems,
+  } from '$lib/library/api';
+  import { summarizeImport, summaryAsToast } from '$lib/library/importer';
+  import { bridge } from '../store/bridge.svelte';
   import type { Advantage, Field } from '../types';
 
   type SortKey = 'name-asc' | 'name-desc' | 'level-asc' | 'level-desc' | 'recent';
+  type ProvenanceFilter = 'all' | 'corebook' | 'local' | 'imported';
 
   let allEntries: Advantage[] = $state([]);
   let loading       = $state(true);
@@ -18,8 +25,14 @@
   let searchQuery   = $state('');
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   let sortKey: SortKey = $state('name-asc');
+  let provenanceFilter: ProvenanceFilter = $state('all');
   let showAddForm   = $state(false);
   let editingId: number | null = $state(null);
+
+  // Pull-from-world transient state. Resets each invocation.
+  let pulling     = $state(false);
+  let pullSummary = $state('');
+  let pullError   = $state('');
 
   // ---- helpers --------------------------------------------------------------
 
@@ -51,6 +64,24 @@
     if (adv.description.toLowerCase().includes(q)) return true;
     if (adv.tags.some(t => t.toLowerCase().includes(q))) return true;
     return false;
+  }
+
+  /**
+   * Tri-state provenance discriminator built from the advantages
+   * `is_custom` tri-state (see ARCH §6):
+   *   - corebook: `is_custom = 0` → reseed-managed.
+   *   - local:    `is_custom = 1 AND source_attribution IS NULL`
+   *               → GM hand-authored, survives reseed.
+   *   - imported: `is_custom = 1 AND source_attribution IS NOT NULL`
+   *               → FVTT-imported, survives reseed.
+   */
+  function matchesProvenance(adv: Advantage): boolean {
+    switch (provenanceFilter) {
+      case 'all':      return true;
+      case 'corebook': return !adv.isCustom;
+      case 'local':    return adv.isCustom && !adv.sourceAttribution;
+      case 'imported': return adv.isCustom && !!adv.sourceAttribution;
+    }
   }
 
   function sortRows(rows: Advantage[]): Advantage[] {
@@ -98,7 +129,9 @@
   }
 
   const visible = $derived(
-    sortRows(allEntries.filter(e => matchesTags(e) && matchesQuery(e)))
+    sortRows(allEntries.filter(e =>
+      matchesTags(e) && matchesQuery(e) && matchesProvenance(e)
+    ))
   );
 
   // ---- actions --------------------------------------------------------------
@@ -149,6 +182,35 @@
     }
   }
 
+  /**
+   * Pull the active Foundry world's feature items into the local
+   * advantages library: subscribe → wait for snapshot → import →
+   * summarize → reload local rows so chips/filter reflect the new
+   * imports.
+   *
+   * The 1.5s wait covers typical Foundry response latency on
+   * localhost. If the bridge cache is already hot (subscribed in a
+   * prior pull this session) the wait is no-cost.
+   */
+  async function pullFromWorld() {
+    pulling = true;
+    pullSummary = '';
+    pullError = '';
+    try {
+      await subscribeToWorldItems();
+      await new Promise(r => setTimeout(r, 1500));
+      const outcomes = await importAdvantagesFromWorld();
+      const summary = summarizeImport(outcomes);
+      const worldTitle = bridge.sourceInfo.foundry?.worldTitle ?? 'Foundry';
+      pullSummary = summaryAsToast(summary, worldTitle);
+      await loadAll();
+    } catch (e) {
+      pullError = String(e);
+    } finally {
+      pulling = false;
+    }
+  }
+
   $effect(() => { untrack(() => loadAll()); });
   $effect(() => { return () => { if (searchTimer) clearTimeout(searchTimer); }; });
 </script>
@@ -174,6 +236,37 @@
     <button class="add-btn" onclick={() => { showAddForm = !showAddForm; editingId = null; }}>
       {showAddForm ? '✕ Cancel' : '+ Add Custom'}
     </button>
+    {#if bridge.connections.foundry}
+      <button
+        class="add-btn pull-btn"
+        disabled={pulling}
+        onclick={pullFromWorld}
+        title="Import feature items from the active Foundry world"
+      >
+        {pulling ? 'Pulling…' : '⇣ Pull from world'}
+      </button>
+    {/if}
+  </div>
+
+  {#if pullSummary || pullError}
+    <div class="pull-status">
+      {#if pullSummary}<span class="pull-summary">{pullSummary}</span>{/if}
+      {#if pullError}<span class="pull-error">{pullError}</span>{/if}
+    </div>
+  {/if}
+
+  <div class="chips provenance-chips" role="group" aria-label="Provenance filter">
+    <button class="chip" class:active={provenanceFilter === 'all'}
+      onclick={() => { provenanceFilter = 'all'; }}>All sources</button>
+    <button class="chip" class:active={provenanceFilter === 'corebook'}
+      data-provenance="corebook"
+      onclick={() => { provenanceFilter = 'corebook'; }}>Corebook</button>
+    <button class="chip" class:active={provenanceFilter === 'local'}
+      data-provenance="local"
+      onclick={() => { provenanceFilter = 'local'; }}>Local</button>
+    <button class="chip" class:active={provenanceFilter === 'imported'}
+      data-provenance="imported"
+      onclick={() => { provenanceFilter = 'imported'; }}>Imported</button>
   </div>
 
   <div class="chips">
@@ -280,6 +373,21 @@
     cursor: pointer;
     white-space: nowrap;
   }
+  .add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  /* Pull-from-world reuses .add-btn shape but borrows the foundry
+     source-chip accent so the action visually echoes the per-row
+     "FVTT" chip it produces. */
+  .pull-btn {
+    background: var(--bg-card);
+    border-color: var(--accent-foundry, var(--accent-card-dossier));
+    color: var(--accent-foundry, var(--accent-card-dossier));
+  }
+
+  /* Pull status + error toasts — single-line, sit between controls
+     and the chip rows. Cleared on next pull attempt. */
+  .pull-status   { margin: 0 0 0.6rem; font-size: 0.74rem; }
+  .pull-summary  { color: var(--text-secondary); }
+  .pull-error    { color: var(--accent); }
 
   .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
   .chip {

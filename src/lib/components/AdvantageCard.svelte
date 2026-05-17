@@ -68,6 +68,11 @@
     <h3 class="name">{entry.name}</h3>
     <div class="tags">
       <span class="tag kind-chip" data-kind={entry.kind}>{capitalize(entry.kind)}</span>
+      {#if entry.sourceAttribution}
+        <span class="tag source-chip" data-source={(entry.sourceAttribution.source as string | undefined) ?? 'foundry'}>
+          FVTT · {(entry.sourceAttribution.worldTitle as string | undefined) ?? '?'}
+        </span>
+      {/if}
       {#each entry.tags as t}
         <span class="tag">{t}</span>
       {/each}
@@ -155,6 +160,18 @@
   .kind-chip[data-kind="flaw"]       { background: var(--accent-flaw,       var(--accent-bright)); }
   .kind-chip[data-kind="background"] { background: var(--accent-background, var(--accent-card-dossier)); }
   .kind-chip[data-kind="boon"]       { background: var(--accent-boon,       var(--accent-amber)); }
+  /* Source-attribution chip — visually distinguishes imported (FVTT)
+     rows from corebook + locally-authored ones. Mirrors the kind-chip
+     shape so the two chips read as a paired strip. Uses token
+     fallbacks since a dedicated --accent-foundry token isn't defined
+     in :root yet. */
+  .source-chip {
+    color: var(--text-primary);
+    font-variant: small-caps;
+    letter-spacing: 0.04em;
+  }
+  .source-chip[data-source="foundry"] { background: var(--accent-foundry, var(--accent-card-dossier)); }
+  .source-chip[data-source="roll20"]  { background: var(--accent-roll20,  var(--accent-merit)); }
   .desc { color: var(--text-secondary); font-size: 0.74rem; margin: 0; line-height: 1.4; }
   .dots { color: var(--text-ghost); letter-spacing: 0.08em; font-size: 0.85rem; }
   .dots .filled { color: var(--accent); }
