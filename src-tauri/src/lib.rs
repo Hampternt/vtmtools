@@ -128,6 +128,7 @@ pub fn run() {
             db::advantage::update_advantage,
             db::advantage::delete_advantage,
             db::advantage::roll_random_advantage,
+            db::advantage::import_advantages_from_world,
             tools::library_push::push_advantage_to_world,
         ])
         .run(tauri::generate_context!())

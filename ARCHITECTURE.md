@@ -577,9 +577,10 @@ Rust signature + the types it references in §2) is the stable contract.
   `delete_character_modifier`, `set_modifier_active`,
   `set_modifier_hidden`, `set_modifier_zone`,
   `materialize_advantage_modifier`.
-- **`src-tauri/src/db/advantage.rs`** (5):
+- **`src-tauri/src/db/advantage.rs`** (6):
   `list_advantages`, `add_advantage`, `update_advantage`,
-  `delete_advantage`, `roll_random_advantage`.
+  `delete_advantage`, `roll_random_advantage`,
+  `import_advantages_from_world`.
 - **`src-tauri/src/db/status_template.rs`** (4):
   `list_status_templates`, `add_status_template`,
   `update_status_template`, `delete_status_template`.
@@ -611,7 +612,7 @@ Rust signature + the types it references in §2) is the stable contract.
   snapshots the per-source world-level item caches (Foundry only in
   v1); paired live event is `bridge://foundry/items-updated`.
 
-Total: 65 commands. New commands are registered in
+Total: 66 commands. New commands are registered in
 `src-tauri/src/lib.rs` (`invoke_handler(tauri::generate_handler![...])`).
 See §8 for the Tauri capability / ACL surface.
 

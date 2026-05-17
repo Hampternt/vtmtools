@@ -1,6 +1,9 @@
 use rand::seq::SliceRandom;
 use sqlx::{Row, SqlitePool};
-use crate::shared::types::{Advantage, AdvantageKind, Field, ImportOutcome};
+use crate::bridge::{BridgeConn, BridgeState, types::SourceKind};
+use crate::shared::types::{
+    Advantage, AdvantageKind, Field, FieldValue, ImportOutcome, NumberFieldValue,
+};
 
 // --------------------------------------------------------------------------
 // JSON serde helpers for tags_json and properties_json columns
@@ -377,6 +380,120 @@ pub(crate) async fn db_upsert_imported(
 }
 
 // --------------------------------------------------------------------------
+// FVTT import orchestration (inner helper + Tauri wrapper)
+//
+// Split into an inner helper that takes `&SqlitePool` + `&BridgeState`
+// (unit-testable without a Tauri runtime) and a thin `#[tauri::command]`
+// wrapper that extracts the State references and delegates. Mirrors the
+// `db_list` / `list_advantages` pattern used throughout this file.
+// --------------------------------------------------------------------------
+
+/// Snapshot the active Foundry world info + cached world items, filter to
+/// feature-type rows with a known featuretype, and per-row delegate to
+/// `db_upsert_imported`. Non-feature items and unknown featuretypes are
+/// returned as `ImportOutcome::Skipped` for the frontend's summary toast.
+///
+/// Error prefix `db/advantage.import_from_world:` per ARCH §7.
+pub(crate) async fn db_import_from_world(
+    pool: &SqlitePool,
+    bridge: &BridgeState,
+) -> Result<Vec<ImportOutcome>, String> {
+    // Snapshot Foundry source info under one lock acquisition. world_title
+    // is required (it's the dedup-scope key); world_id and system_version
+    // are optional metadata stamped into source_attribution.
+    let (world_title, world_id, system_version) = {
+        let info = bridge.source_info.lock().await;
+        let i = info.get(&SourceKind::Foundry).ok_or_else(|| {
+            "db/advantage.import_from_world: no active Foundry connection".to_string()
+        })?;
+        let world_title = i.world_title.clone().ok_or_else(|| {
+            "db/advantage.import_from_world: no active Foundry world (connect first?)"
+                .to_string()
+        })?;
+        (world_title, i.world_id.clone(), i.system_version.clone())
+    };
+
+    let items: Vec<crate::bridge::types::CanonicalWorldItem> = {
+        let store = bridge.world_items.lock().await;
+        store
+            .get(&SourceKind::Foundry)
+            .map(|m| m.values().cloned().collect())
+            .unwrap_or_default()
+    };
+
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let mut outcomes = Vec::with_capacity(items.len());
+    for item in items {
+        if item.kind != "feature" {
+            outcomes.push(ImportOutcome::Skipped {
+                reason: format!("non-feature item kind: {}", item.kind),
+                name: item.name,
+            });
+            continue;
+        }
+        let ft = match item.featuretype.as_deref() {
+            Some("merit")      => AdvantageKind::Merit,
+            Some("flaw")       => AdvantageKind::Flaw,
+            Some("background") => AdvantageKind::Background,
+            Some("boon")       => AdvantageKind::Boon,
+            other => {
+                outcomes.push(ImportOutcome::Skipped {
+                    reason: format!("unknown featuretype: {:?}", other),
+                    name: item.name,
+                });
+                continue;
+            }
+        };
+
+        let description = item
+            .system
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let points = item
+            .system
+            .get("points")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+
+        let properties: Vec<Field> = if points > 0 {
+            vec![Field {
+                name: "level".into(),
+                value: FieldValue::Number {
+                    value: NumberFieldValue::Single(points as f64),
+                },
+            }]
+        } else {
+            vec![]
+        };
+
+        let attribution = serde_json::json!({
+            "source":        "foundry",
+            "worldTitle":    world_title,
+            "worldId":       world_id,
+            "systemVersion": system_version,
+            "foundryId":     item.id,
+            "importedAt":    now,
+        });
+
+        let outcome = db_upsert_imported(
+            pool,
+            &item.name,
+            ft,
+            &description,
+            &properties,
+            &attribution,
+        )
+        .await?;
+        outcomes.push(outcome);
+    }
+
+    Ok(outcomes)
+}
+
+// --------------------------------------------------------------------------
 // Tauri command handlers (thin wrappers around the helpers above)
 // --------------------------------------------------------------------------
 
@@ -426,6 +543,23 @@ pub async fn roll_random_advantage(
     tags: Vec<String>,
 ) -> Result<Option<Advantage>, String> {
     db_roll_random(&pool.0, &tags).await
+}
+
+/// Import feature-type world items from the active Foundry world into the
+/// local advantages library. Pulls from `BridgeState.world_items` — the
+/// frontend must have subscribed to the `item` collection beforehand
+/// (Task 6 wires the subscription).
+///
+/// Filter: only `kind == "feature"` items with featuretype ∈ {merit,
+/// flaw, background, boon}. Other item kinds (speciality, power, etc.)
+/// and unknown featuretypes are returned as `ImportOutcome::Skipped` for
+/// the frontend's summary toast.
+#[tauri::command]
+pub async fn import_advantages_from_world(
+    db: tauri::State<'_, crate::DbState>,
+    bridge: tauri::State<'_, BridgeConn>,
+) -> Result<Vec<ImportOutcome>, String> {
+    db_import_from_world(&db.0, &bridge.0).await
 }
 
 #[cfg(test)]
@@ -859,5 +993,135 @@ mod tests {
             found.is_none(),
             "local row (NULL attribution) must never match a foundryId lookup"
         );
+    }
+
+    // ─── Integration test: db_import_from_world filter + orchestration ──
+
+    #[tokio::test]
+    async fn import_from_world_filters_non_feature_and_unknown_featuretype() {
+        use crate::bridge::types::{CanonicalWorldItem, SourceInfo};
+        use std::collections::HashMap;
+
+        let pool = test_pool().await;
+
+        // Construct a real BridgeState with empty sources map (the import
+        // path only reads source_info + world_items — never invokes the
+        // BridgeSource trait — so an empty sources HashMap is fine).
+        let bridge = BridgeState::new(HashMap::new());
+        {
+            let mut info = bridge.source_info.lock().await;
+            info.insert(
+                SourceKind::Foundry,
+                SourceInfo {
+                    world_id:         Some("world_chi".into()),
+                    world_title:      Some("Chicago".into()),
+                    system_id:        Some("vtm5e".into()),
+                    system_version:   Some("0.9.0".into()),
+                    protocol_version: 1,
+                    capabilities:     vec!["actors".into(), "items".into()],
+                },
+            );
+        }
+        {
+            let mut store = bridge.world_items.lock().await;
+            let slot = store.entry(SourceKind::Foundry).or_default();
+            slot.insert(
+                "merit_id".into(),
+                CanonicalWorldItem {
+                    source: SourceKind::Foundry,
+                    id:     "merit_id".into(),
+                    name:   "Iron Gullet".into(),
+                    kind:   "feature".into(),
+                    featuretype: Some("merit".into()),
+                    system: serde_json::json!({
+                        "description": "Can drink rancid blood",
+                        "points":      1,
+                    }),
+                },
+            );
+            slot.insert(
+                "spec_id".into(),
+                CanonicalWorldItem {
+                    source: SourceKind::Foundry,
+                    id:     "spec_id".into(),
+                    name:   "Survival: Urban".into(),
+                    kind:   "speciality".into(),
+                    featuretype: None,
+                    system: serde_json::json!({}),
+                },
+            );
+            slot.insert(
+                "unknown_ft_id".into(),
+                CanonicalWorldItem {
+                    source: SourceKind::Foundry,
+                    id:     "unknown_ft_id".into(),
+                    name:   "Mystery Feature".into(),
+                    kind:   "feature".into(),
+                    featuretype: Some("discipline".into()),
+                    system: serde_json::json!({}),
+                },
+            );
+        }
+
+        let outcomes = db_import_from_world(&pool, &bridge).await.unwrap();
+        assert_eq!(outcomes.len(), 3, "one outcome per snapshot item");
+
+        // HashMap iteration order is unspecified — partition by variant.
+        let mut inserted = 0;
+        let mut skipped_non_feature = 0;
+        let mut skipped_unknown_ft = 0;
+        for o in &outcomes {
+            match o {
+                ImportOutcome::Inserted { name, kind, .. } => {
+                    inserted += 1;
+                    assert_eq!(name, "Iron Gullet");
+                    assert_eq!(*kind, AdvantageKind::Merit);
+                }
+                ImportOutcome::Skipped { reason, .. } => {
+                    if reason.contains("non-feature") {
+                        skipped_non_feature += 1;
+                    } else if reason.contains("unknown featuretype") {
+                        skipped_unknown_ft += 1;
+                    } else {
+                        panic!("unexpected Skipped reason: {reason}");
+                    }
+                }
+                ImportOutcome::Updated { .. } => {
+                    panic!("expected Inserted, got Updated on a fresh import")
+                }
+            }
+        }
+        assert_eq!(inserted, 1, "merit feature should Insert");
+        assert_eq!(skipped_non_feature, 1, "speciality should Skip (non-feature)");
+        assert_eq!(skipped_unknown_ft, 1, "unknown featuretype should Skip");
+
+        // Verify the inserted row landed in the DB with correct attribution.
+        let rows = db_list(&pool).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.name, "Iron Gullet");
+        assert_eq!(r.kind, AdvantageKind::Merit);
+        let attrib = r.source_attribution.as_ref().unwrap();
+        assert_eq!(attrib["worldTitle"], "Chicago");
+        assert_eq!(attrib["worldId"], "world_chi");
+        assert_eq!(attrib["systemVersion"], "0.9.0");
+        assert_eq!(attrib["foundryId"], "merit_id");
+        assert_eq!(attrib["source"], "foundry");
+        // Properties should carry a level=1 field since points > 0.
+        assert_eq!(r.properties.len(), 1);
+        assert_eq!(r.properties[0].name, "level");
+    }
+
+    #[tokio::test]
+    async fn import_from_world_errors_when_no_foundry_connected() {
+        use std::collections::HashMap;
+        let pool = test_pool().await;
+        let bridge = BridgeState::new(HashMap::new());
+        let err = db_import_from_world(&pool, &bridge).await.unwrap_err();
+        assert!(
+            err.contains("db/advantage.import_from_world"),
+            "error message missing prefix: {err}"
+        );
+        assert!(err.contains("no active Foundry"), "unexpected error: {err}");
     }
 }
