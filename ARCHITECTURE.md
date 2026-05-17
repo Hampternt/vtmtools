@@ -597,6 +597,8 @@ Rust signature + the types it references in §2) is the stable contract.
   `trigger_foundry_roll`, `post_foundry_chat`.
 - **`src-tauri/src/tools/gm_screen.rs`** (1):
   `gm_screen_push_to_foundry`.
+- **`src-tauri/src/tools/library_push.rs`** (1):
+  `push_advantage_to_world`.
 - **`src-tauri/src/bridge/commands.rs`** (7):
   `bridge_get_characters`, `bridge_get_rolls`,
   `bridge_get_world_items`, `bridge_get_status`, `bridge_refresh`,
@@ -609,7 +611,7 @@ Rust signature + the types it references in §2) is the stable contract.
   snapshots the per-source world-level item caches (Foundry only in
   v1); paired live event is `bridge://foundry/items-updated`.
 
-Total: 64 commands. New commands are registered in
+Total: 65 commands. New commands are registered in
 `src-tauri/src/lib.rs` (`invoke_handler(tauri::generate_handler![...])`).
 See §8 for the Tauri capability / ACL surface.
 

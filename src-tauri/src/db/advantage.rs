@@ -76,7 +76,7 @@ fn row_to_advantage(r: &sqlx::sqlite::SqliteRow) -> Result<Advantage, String> {
     })
 }
 
-async fn db_list(pool: &SqlitePool) -> Result<Vec<Advantage>, String> {
+pub(crate) async fn db_list(pool: &SqlitePool) -> Result<Vec<Advantage>, String> {
     let rows = sqlx::query(
         "SELECT id, name, description, tags_json, properties_json, is_custom, kind, source_attribution
          FROM advantages ORDER BY is_custom ASC, id ASC"
