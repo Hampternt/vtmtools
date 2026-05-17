@@ -113,13 +113,23 @@ pub async fn seed_dyscrasias(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-use crate::shared::types::{Field, FieldValue, NumberFieldValue};
+use crate::shared::types::{AdvantageKind, Field, FieldValue, NumberFieldValue};
+
+fn kind_to_str(k: AdvantageKind) -> &'static str {
+    match k {
+        AdvantageKind::Merit      => "merit",
+        AdvantageKind::Flaw       => "flaw",
+        AdvantageKind::Background => "background",
+        AdvantageKind::Boon       => "boon",
+    }
+}
 
 /// One canonical row shape used during seeding. `level` and `level_max` are
 /// optional; when present they become number-typed Fields inside properties_json.
 struct SeedRow {
     name: &'static str,
     description: &'static str,
+    kind: AdvantageKind,
     tags: &'static [&'static str],
     level: Option<i64>,
     level_max: Option<i64>,
@@ -132,6 +142,7 @@ fn seed_rows() -> &'static [SeedRow] {
         SeedRow {
             name: "Iron Gullet",
             description: "Your character can digest rancid, defiled, or otherwise corrupted blood without issue.",
+            kind: AdvantageKind::Merit,
             tags: &["VTM 5e", "Merit", "Feeding"],
             level: Some(3), level_max: None,
             source: "V5 Corebook",
@@ -139,6 +150,7 @@ fn seed_rows() -> &'static [SeedRow] {
         SeedRow {
             name: "Eat Food",
             description: "Your character can still consume and enjoy food like a mortal would, though it does not nourish them.",
+            kind: AdvantageKind::Merit,
             tags: &["VTM 5e", "Merit", "Feeding"],
             level: Some(2), level_max: None,
             source: "V5 Corebook",
@@ -146,6 +158,7 @@ fn seed_rows() -> &'static [SeedRow] {
         SeedRow {
             name: "Bloodhound",
             description: "Your character can sniff out distinct Resonances in a blood vessel simply by being near them.",
+            kind: AdvantageKind::Merit,
             tags: &["VTM 5e", "Merit", "Supernatural"],
             level: Some(1), level_max: None,
             source: "V5 Corebook",
@@ -153,6 +166,7 @@ fn seed_rows() -> &'static [SeedRow] {
         SeedRow {
             name: "Beautiful",
             description: "Add one die to related Social pools.",
+            kind: AdvantageKind::Merit,
             tags: &["VTM 5e", "Merit", "Social"],
             level: Some(2), level_max: None,
             source: "V5 Corebook",
@@ -161,6 +175,7 @@ fn seed_rows() -> &'static [SeedRow] {
         SeedRow {
             name: "Allies",
             description: "Mortal friends or family who stand with your character, specified at purchase. Rated by Effectiveness (dots) and Reliability (further dots).",
+            kind: AdvantageKind::Background,
             tags: &["VTM 5e", "Background", "Social"],
             level: Some(1), level_max: Some(5),
             source: "V5 Corebook",
@@ -168,6 +183,7 @@ fn seed_rows() -> &'static [SeedRow] {
         SeedRow {
             name: "Contacts",
             description: "Mortal sources of information or goods. Rated by usefulness and influence.",
+            kind: AdvantageKind::Background,
             tags: &["VTM 5e", "Background", "Social"],
             level: Some(1), level_max: Some(5),
             source: "V5 Corebook",
@@ -175,6 +191,7 @@ fn seed_rows() -> &'static [SeedRow] {
         SeedRow {
             name: "Haven",
             description: "A refuge your character can use as a base. Rated from a squat (1) to a fortress (5).",
+            kind: AdvantageKind::Background,
             tags: &["VTM 5e", "Background", "Territorial"],
             level: Some(1), level_max: Some(5),
             source: "V5 Corebook",
@@ -182,6 +199,7 @@ fn seed_rows() -> &'static [SeedRow] {
         SeedRow {
             name: "Resources",
             description: "Financial stability ranging from beggary (1) to millionaire (5). Does not represent liquid cash.",
+            kind: AdvantageKind::Background,
             tags: &["VTM 5e", "Background", "Material"],
             level: Some(1), level_max: Some(5),
             source: "V5 Corebook",
@@ -190,6 +208,7 @@ fn seed_rows() -> &'static [SeedRow] {
         SeedRow {
             name: "Prey Exclusion",
             description: "Your character cannot feed from a specific class of mortals (children, the elderly, etc.). Suffer one-point stains if they do.",
+            kind: AdvantageKind::Flaw,
             tags: &["VTM 5e", "Flaw", "Feeding"],
             level: Some(1), level_max: None,
             source: "V5 Corebook",
@@ -197,6 +216,7 @@ fn seed_rows() -> &'static [SeedRow] {
         SeedRow {
             name: "Enemy",
             description: "A mortal or ghoul who actively works against your character. The player and Storyteller define the threat.",
+            kind: AdvantageKind::Flaw,
             tags: &["VTM 5e", "Flaw", "Social"],
             level: Some(1), level_max: Some(2),
             source: "V5 Corebook",
@@ -254,11 +274,12 @@ pub async fn seed_advantages(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .expect("seed properties must serialize");
 
         sqlx::query(
-            "INSERT INTO advantages (name, description, tags_json, properties_json, is_custom)
-             VALUES (?, ?, ?, ?, 0)"
+            "INSERT INTO advantages (name, description, kind, tags_json, properties_json, is_custom)
+             VALUES (?, ?, ?, ?, ?, 0)"
         )
         .bind(row.name)
         .bind(row.description)
+        .bind(kind_to_str(row.kind))
         .bind(&tags_json)
         .bind(&props_json)
         .execute(pool)
