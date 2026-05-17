@@ -1,6 +1,13 @@
 <script lang="ts">
-  import type { Advantage, Field, FieldValue } from '../../types';
+  import type { Advantage, AdvantageKind, Field, FieldValue } from '../../types';
   import { addAdvantage, updateAdvantage, type AdvantageInput } from '$lib/advantages/api';
+
+  const KIND_OPTIONS: { value: AdvantageKind; label: string }[] = [
+    { value: 'merit',      label: 'Merit'      },
+    { value: 'flaw',       label: 'Flaw'       },
+    { value: 'background', label: 'Background' },
+    { value: 'boon',       label: 'Boon'       },
+  ];
   import { FIELD_PRESETS, type FieldPreset } from '$lib/advantages/fieldPresets';
   import PropertyEditor from '$lib/components/properties/PropertyEditor.svelte';
   import { SUPPORTED_TYPES } from '$lib/components/properties/property-widgets';
@@ -13,6 +20,7 @@
 
   let name        = $state(entry?.name ?? '');
   let description = $state(entry?.description ?? '');
+  let kind: AdvantageKind     = $state(entry?.kind ?? 'merit');
   let tags: string[]          = $state(entry ? [...entry.tags]       : []);
   let properties: Field[]     = $state(entry ? [...entry.properties] : []);
   let tagDraft    = $state('');
@@ -94,6 +102,7 @@
     const input: AdvantageInput = {
       name: name.trim(),
       description,
+      kind,
       tags: trimmedTags,
       properties: properties.map(p => ({ ...p, name: p.name.trim() })),
     };
@@ -119,6 +128,13 @@
 
     <label class="label" for="adv-desc">Description</label>
     <textarea id="adv-desc" class="textarea" bind:value={description}></textarea>
+
+    <label class="label" for="adv-kind">Kind</label>
+    <select id="adv-kind" class="input" bind:value={kind}>
+      {#each KIND_OPTIONS as opt}
+        <option value={opt.value}>{opt.label}</option>
+      {/each}
+    </select>
   </section>
 
   <section class="section">

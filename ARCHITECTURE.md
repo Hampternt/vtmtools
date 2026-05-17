@@ -712,6 +712,23 @@ Properties that must hold across all features.
 - Seed reconciliation on app start is destructive for
   `is_custom = 0` rows. Do not revert to a count-check guard
   ([ADR 0002](docs/adr/0002-destructive-reseed.md)).
+- **`advantages.is_custom` tri-state read.** Pre-Phase-4 the column
+  was binary (0 = corebook reseed-managed, 1 = GM hand-authored).
+  Post-Phase-4 imported FVTT rows are also `is_custom = 1` (so
+  destructive reseed leaves them alone — same survival semantics as
+  hand-authored) BUT they're visually distinguished by a non-null
+  `source_attribution` JSON column. The tri-state is therefore:
+  - `is_custom = 0` → corebook seed; replaced on every startup
+    ([ADR 0002](docs/adr/0002-destructive-reseed.md)).
+  - `is_custom = 1 AND source_attribution IS NULL` → GM hand-authored
+    locally; survives reseed; editable in AdvantagesManager.
+  - `is_custom = 1 AND source_attribution IS NOT NULL` →
+    FVTT-imported; survives reseed; UI shows source chip with world
+    title.
+
+  UI filters and reaper helpers MUST treat the latter two as
+  semantically distinct "local" vs. "imported" states despite
+  identical persistence flags.
 - CSS colors use tokens from `:global(:root)` in
   `src/routes/+layout.svelte`. Hex is allowed only for transient
   states with no semantic token (hover intermediates, glow shadows).
@@ -879,6 +896,24 @@ inventing a new hook.
   beyond the new `SourceKind` variant — the bridge store and tools
   already iterate per-source. See
   [ADR 0006](docs/adr/0006-bridge-source-generalization.md).
+- **Add a library kind.** Phase 4 partitioning rule: **same row
+  shape → polymorphic table with a `kind` discriminator column;
+  different row shape → its own table.** The four featuretype
+  variants (`merit`, `flaw`, `background`, `boon`) share an
+  identical row shape AND an identical Foundry push contract
+  (`actor.create_feature` accepts featuretype as a payload field —
+  foundry helper roadmap §5), so they share the polymorphic
+  `advantages` table. Dyscrasias have a distinct shape
+  (`resonance_type`, `bonus`) and their own table. Disciplines
+  (when they land) will have yet another distinct shape (power
+  tree, Amalgam refs, level-gated powers) and their own table. To
+  add a new variant that shares the advantage row shape: extend
+  `AdvantageKind` enum in `shared/types.rs`, update the SQL CHECK
+  constraint via a new migration, annotate any new seed rows, and
+  wire the chip in `AdvantagesManager.svelte`. To add a new
+  variant that does NOT share the row shape: new table + new
+  `db/<kind>.rs` module + new manager tool, following the
+  dyscrasia pattern.
 - **Add a card-shaped surface.** Follow the card pattern in §6:
   handle + name + body + optional overflow pill, with menus and
   overlays portal-rendered. Reuse `CardContextMenu` for right-click

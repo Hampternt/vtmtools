@@ -80,6 +80,23 @@
     [...new Set(allEntries.flatMap(e => e.tags))].sort((a, b) => a.localeCompare(b))
   );
 
+  /**
+   * Filter-row Option A (per Phase 4 Library Sync plan): kind tags
+   * already filter implicitly via the existing tag-chip mechanism.
+   * We just give those specific filter chips a `data-kind-tag`
+   * attribute so CSS can color-code them, matching the per-row
+   * kind-chip palette in AdvantageCard.svelte. No new filter state.
+   */
+  const KIND_TAG_LOOKUP: Record<string, string> = {
+    Merit:      'merit',
+    Flaw:       'flaw',
+    Background: 'background',
+    Boon:       'boon',
+  };
+  function kindTagValue(tag: string): string | undefined {
+    return KIND_TAG_LOOKUP[tag];
+  }
+
   const visible = $derived(
     sortRows(allEntries.filter(e => matchesTags(e) && matchesQuery(e)))
   );
@@ -169,6 +186,7 @@
       <button
         class="chip"
         class:active={activeTags.has(tag)}
+        data-kind-tag={kindTagValue(tag)}
         onclick={() => toggleTag(tag)}
       >{tag}</button>
     {/each}
@@ -275,6 +293,17 @@
   }
   .chip:hover  { border-color: var(--border-surface); color: var(--text-primary); }
   .chip.active { border-color: var(--text-label); color: var(--text-primary); background: var(--bg-raised); }
+
+  /* Kind-tag filter chips (Option A): visually distinguish the four
+     V5 kind tags from generic free-form tags via a colored left
+     border. Color palette matches the per-row kind chip in
+     AdvantageCard.svelte, using existing accent tokens as fallbacks
+     since dedicated --accent-* kind tokens are not (yet) defined. */
+  .chip[data-kind-tag]                              { border-left-width: 3px; padding-left: calc(0.7rem - 2px); }
+  .chip[data-kind-tag="merit"]                      { border-left-color: var(--accent-merit,      var(--accent)); }
+  .chip[data-kind-tag="flaw"]                       { border-left-color: var(--accent-flaw,       var(--accent-bright)); }
+  .chip[data-kind-tag="background"]                 { border-left-color: var(--accent-background, var(--accent-card-dossier)); }
+  .chip[data-kind-tag="boon"]                       { border-left-color: var(--accent-boon,       var(--accent-amber)); }
 
   .results-label { font-size: 0.68rem; color: var(--text-ghost); margin-bottom: 0.75rem; }
   .loading-text  { color: var(--text-ghost); font-size: 0.8rem; }

@@ -1,9 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Advantage, Field } from '../../types';
+import type { Advantage, AdvantageKind, Field } from '../../types';
 
 export type AdvantageInput = {
   name: string;
   description: string;
+  kind: AdvantageKind;
   tags: string[];
   properties: Field[];
 };
