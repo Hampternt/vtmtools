@@ -27,6 +27,10 @@
     entry.properties.filter(p => !['level', 'min_level', 'max_level'].includes(p.name))
   );
 
+  function capitalize(s: string): string {
+    return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
   function displayValue(f: Field): string {
     switch (f.type) {
       case 'string':  return Array.isArray(f.value) ? f.value.join(', ') : String(f.value);
@@ -45,13 +49,12 @@
 <article class="card">
   <header class="head">
     <h3 class="name">{entry.name}</h3>
-    {#if entry.tags.length > 0}
-      <div class="tags">
-        {#each entry.tags as t}
-          <span class="tag">{t}</span>
-        {/each}
-      </div>
-    {/if}
+    <div class="tags">
+      <span class="tag kind-chip" data-kind={entry.kind}>{capitalize(entry.kind)}</span>
+      {#each entry.tags as t}
+        <span class="tag">{t}</span>
+      {/each}
+    </div>
   </header>
 
   {#if entry.description}
@@ -109,6 +112,20 @@
     padding: 0.06rem 0.45rem;
     font-size: 0.62rem;
   }
+  /* Kind chip — color-coded by V5 advantage category. Uses token
+     fallbacks since kind-specific tokens are not (yet) defined in
+     :root; each kind falls through to a distinct existing accent so
+     chips are visually distinguishable without hardcoded hex. */
+  .kind-chip {
+    color: var(--text-primary);
+    text-transform: lowercase;
+    font-variant: small-caps;
+    letter-spacing: 0.04em;
+  }
+  .kind-chip[data-kind="merit"]      { background: var(--accent-merit,      var(--accent)); }
+  .kind-chip[data-kind="flaw"]       { background: var(--accent-flaw,       var(--accent-bright)); }
+  .kind-chip[data-kind="background"] { background: var(--accent-background, var(--accent-card-dossier)); }
+  .kind-chip[data-kind="boon"]       { background: var(--accent-boon,       var(--accent-amber)); }
   .desc { color: var(--text-secondary); font-size: 0.74rem; margin: 0; line-height: 1.4; }
   .dots { color: var(--text-ghost); letter-spacing: 0.08em; font-size: 0.85rem; }
   .dots .filled { color: var(--accent); }
