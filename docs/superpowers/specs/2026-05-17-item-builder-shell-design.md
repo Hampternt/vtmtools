@@ -53,18 +53,22 @@ pub enum ModifierKind {
 - Existing roller code does **not** consume the new variant in v1. It is render-time-only on cards (similar to `Stat`) until the dice helpers gain support.
 - DB migration: enum-as-text, no schema change required if the column is already `TEXT`. Verify with current advantage/template tables.
 
-### 2. WIP / draft flag on advantage and status-template
+### 2. WIP / draft flag + per-row confirmed-field tracking
 
 ```sql
--- migration: 0050_add_advantage_wip_flag.sql (or sequential)
+-- migration: 0050_add_wip_columns.sql (or sequential)
 ALTER TABLE advantage ADD COLUMN wip INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE advantage ADD COLUMN confirmed_fields TEXT;   -- JSON array of stage keys, NULL when wip=0
 ALTER TABLE status_template ADD COLUMN wip INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE status_template ADD COLUMN confirmed_fields TEXT;
 ```
 
 - `wip = 1` means "saved as draft — fields may be invalid or incomplete."
+- `confirmed_fields` is a JSON-encoded array of stage keys (e.g., `'["name","type","level"]'`) capturing which fields the user confirmed before saving the draft. NULL when `wip = 0` (saved as complete — implicitly all required fields confirmed).
 - Library list view shows a small "draft" indicator on WIP rows.
 - Foundry push action: drafts are skipped by default. The "Push to world" button gains an optional secondary "Push WIP too" affordance.
-- WIP advantages reopen in the builder at the **first unconfirmed field's stage**; user finishes and re-saves.
+- **WIP reopen flow:** when opening a WIP row, the builder seeds its `confirmedFields: Set<Stage>` from the stored JSON. The composer then advances the stage cursor to the first stage in `tabOrder` that is NOT in `confirmedFields`. The user lands directly on the first unconfirmed field's editor. If all required fields are in `confirmed_fields`, the builder opens directly in preview mode.
+- **Why explicit tracking, not data-presence inference:** the spec previously considered inferring "confirmed" from "field has a non-empty value." That breaks down: `name = ''` could be confirmed-empty (user explicitly Tab'd past with the placeholder) or unconfirmed (never reached). `effects: []` could be confirmed-no-effects or unconfirmed-not-yet-touched. Explicit `confirmed_fields` storage avoids the ambiguity.
 
 ### 3. Optional `bonus_name` per `ModifierEffect`
 
@@ -128,11 +132,11 @@ Conditional. Shown when caller does not provide `initialType`. Skipped when call
 </ItemBuilderShell>
 ```
 
-When user picks an `available` kind, the dialog transitions to Step 2 with `AdvantageBody` mounted and `kind` pre-set. When user clicks a `preview` card, button is disabled — hover shows tooltip "coming in v1.x — body needs design."
+When user picks an `available` kind, the dialog transitions to Step 2 with `AdvantageBody` mounted and `kind` pre-set. **Preview cards are visually disabled:** dashed border, `opacity: 0.45`, `cursor: not-allowed`, the "preview · needs design" pill is visible, hover tooltip says "coming in v1.x — body needs design." Click is no-op (preventDefault on the card element).
 
 Picker uses a 2×3 grid of cards (glyph + title + 1-line description + optional "preview" pill).
 
-**No user-visible entry point in v1** — no "Library home" page exists yet that calls the picker with no `initialType`. The picker ships in v1 anyway, smoke-tested via a temporary `/builder-test` route, so the Library home feature can land later without re-doing the picker.
+**No user-visible entry point in v1** — no "Library home" page exists yet that calls the picker with no `initialType`. The picker ships in v1 anyway, smoke-tested via a temporary `/builder-test` route, so the Library home feature can land later without re-doing the picker. This is consistent with the project's "pre-building per roadmap is the intended pattern" — building shell infrastructure ahead of consumers is preferable to retrofitting it once a third caller arrives.
 
 ### Step 2: CardComposer
 
@@ -191,9 +195,23 @@ The Level slot shows V5 tier dots inline (1-5 cap). The Bonus slot shows formatt
 
 When `confirmedFields.size === requiredFields.size` (all required fields confirmed), the top zone transitions from building → preview. Building's colored slot scaffolding fades out; the real library card fades in.
 
-The preview is rendered using the **same component the library list uses** to display saved items. This guarantees fidelity: what you see in preview = what appears in the AdvantagesManager grid after Save. Differences:
-- Preview gets an amber border and amber glow halo to indicate "this is a render, not yet saved."
-- Click anywhere on the preview returns to building mode focused on the clicked field.
+**Preview rendering uses extracted, shared card components:**
+
+- **`AdvantageCard.svelte`** — newly extracted from `AdvantagesManager.svelte`'s currently-inline rendering. Used by both the library list AND the builder's preview mode. Accepts a discriminated input shape:
+  ```typescript
+  type CardInput =
+    | { kind: 'saved'; data: Advantage }
+    | { kind: 'preview'; data: AdvantageInput; wip?: boolean };
+  ```
+  Preview kind wraps with `--accent-amber` border + glow halo to signal "render, not saved." Saved kind uses the normal `--border-surface`. The wrapper styles are conditional CSS classes on the component root.
+
+- **`StatusTemplateCard.svelte`** — analogous extraction from the status template render context. Same dual-mode pattern.
+
+- **No card for `ModifierEffectBody`** — that body has no preview mode (there's no library card to render; it edits effects on an existing character entity).
+
+This is the **dependency that motivates phasing step 6.5** (see Phasing): extract these card components BEFORE the AdvantagesManager / StatusPaletteDock migrations, so the builder and the library list share rendering from the moment the builder ships.
+
+Click anywhere on the preview card returns to building mode focused on the clicked field. Implementation: event delegation on the card root — `onClick` reads `data-stage` from the closest ancestor with that attribute, calls `composer.setStage(stage)`.
 
 Transition: 180ms cross-fade. The dialog height stays constant (both modes have similar footprint when complete).
 
@@ -256,22 +274,59 @@ interface BodyConfig {
 }
 ```
 
-For Advantage (merit/flaw/etc.):
+**Each body declares its own layouts.** The CardComposer renders whatever layout the body provides — no merit-shape assumption.
+
+For **AdvantageBody** (merit / flaw / background / boon):
 
 ```typescript
 {
   tabOrder: ['name', 'type', 'level', 'bonus', 'description', 'tags'],
   cardLayout: [
     { row: 1, cols: [{ stage: 'name' }, { stage: 'type' }] },
-    { row: 2, cols: [{ stage: 'level' }, { stage: 'category' /* n/a */ }] },
+    { row: 2, cols: [{ stage: 'level' }, { stage: 'category' /* n/a — dimmed */ }] },
     { row: 3, cols: [{ stage: 'description', span: 'full' }] },
     { row: 4, cols: [{ stage: 'bonus', span: 'full' }] },
     { row: 5, cols: [{ stage: 'tags', span: 'full' }] },
   ],
+  requiredFields: ['name', 'bonus'],
 }
 ```
 
-Note: `bonus` is row 4 (visually), but row 4 in tab order (i.e., before `description`). This is intentional — the user fills the mechanical bonus before the flavor description.
+Note: `bonus` is row 4 (visually), but row 4 in tab order (i.e., before `description`). Intentional — the user fills the mechanical bonus before the flavor description.
+
+For **StatusTemplateBody** (e.g. "Hunt Successful" buff template):
+
+```typescript
+{
+  tabOrder: ['name', 'effects', 'description', 'tags'],
+  cardLayout: [
+    { row: 1, cols: [{ stage: 'name', span: 'full' }] },
+    { row: 2, cols: [{ stage: 'effects', span: 'full' }] },
+    { row: 3, cols: [{ stage: 'description', span: 'full' }] },
+    { row: 4, cols: [{ stage: 'tags', span: 'full' }] },
+  ],
+  requiredFields: ['name', 'effects'],
+}
+```
+
+No `type` slot (always "Status Template" — implied by the caller, not user-pickable). No `level` / `category`. The `effects` stage opens a sub-composer similar to AdvantageBody's `bonus` stage, but without bonus-naming (templates don't push to Foundry as per-bonus items).
+
+For **ModifierEffectBody** (inline editor on character card / row):
+
+```typescript
+{
+  tabOrder: ['effects', 'tags'],
+  cardLayout: [
+    { row: 1, cols: [{ stage: 'effects', span: 'full' }] },
+    { row: 2, cols: [{ stage: 'tags', span: 'full' }] },
+  ],
+  requiredFields: ['effects'],
+}
+```
+
+**No name, no type, no level, no category, no description.** The character owns identity — the body just edits effects + tags on an existing entity. The CardComposer in this mode renders only two rows. The dialog title bar shows the entity's name (passed in by the caller); no card-preview mode (there's no "library card" for a per-character modifier — it's not a library item).
+
+This is the framework's flexibility paying off: same shell, same primitives, three bodies with three different shapes. Each body's `cardLayout.length` drives how tall the top zone is. Empty cells (Advantage's "Category n/a (merits)") render dimmed and skip in tab order.
 
 ---
 
@@ -290,11 +345,27 @@ All eight from the brainstorm, codified into shell behavior:
 
 Additional patterns confirmed during the brainstorm:
 
-9. **Scroll wheel on numbers.** Hover the value input + scroll wheel = increment/decrement. Range clamped 0-100. Only when the value input is focused (prevents accidental scroll-page modifications).
-10. **Right-click = back.** Mirror of Shift+Tab. Dialog suppresses the browser context menu with `oncontextmenu={(e) => { e.preventDefault(); goBack(); }}`. Defined behaviors:
-    - Right-click on the spotlight zone → retreat one stage
+9. **Scroll wheel on numbers.** When the value input is **focused** (not merely hovered), scroll wheel = increment/decrement. Range clamped 0-100. Focused-only avoids accidental modification when the user is scrolling the surrounding page or dialog. Focus is achieved by Tab or click — once acquired, scroll-to-step works without further clicking.
+10. **Right-click = back.** Mirror of Shift+Tab. Dialog suppresses the browser context menu via `oncontextmenu` handler, **with carve-out for editable text targets:**
+
+    ```typescript
+    function onContextMenu(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      const editable =
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable;
+      if (editable) return; // preserve native Cut/Copy/Paste menu
+      e.preventDefault();
+      goBack(target);
+    }
+    ```
+
+    Inside text inputs and textareas, the native Cut/Copy/Paste menu is preserved (users rely on it). Right-click "back" applies only to non-text targets. Defined behaviors:
+    - Right-click on the spotlight zone (non-text area) → retreat one stage
     - Right-click on a confirmed slot → re-edit that slot (same as left-click)
-    - Right-click on a chip → remove that chip (same as click ×)
+    - Right-click on a chip's body (non-input area) → remove that chip (same as click ×)
+    - Right-click inside an input value → native menu (no shell handling)
 
 11. **Tab single-press advances.** No "Tab to confirm then Tab to advance" trap. Tab on a non-empty chip-input draft commits AND advances. Tab on a value input commits AND advances.
 12. **Direct typing always works for value input.** The 1-10 blood-dot row is a mouse shortcut; the underlying value field accepts any 0-100 via keyboard.
@@ -309,7 +380,7 @@ Additional patterns confirmed during the brainstorm:
 - Max height: `calc(100vh - 4rem)` with `overflow-y: auto` on the spotlight zone only — top zone and footer stay pinned.
 - Backdrop: `rgba(0, 0, 0, 0.55)`.
 - Tokens: `--bg-raised` (panel base), `--bg-input` (controls), `--border-faint` / `--border-surface` (separators), `--text-primary` / `--text-secondary` / `--text-label` / `--text-muted` (hierarchy), per-field accent colors above.
-- No new hex outside the per-field color palette declared above. Those land as new CSS variables in `+layout.svelte`:
+- No new hex outside the per-field color palette declared above. **The per-field colors are fresh tokens (not aliases to existing accents)** so future per-field rebranding (e.g., changing the "Tags" green) doesn't affect shared accent usage elsewhere in vtmtools. Coincidentally, `--field-name` shares its current value with `--accent-amber`, but they remain semantically independent. Those land as new CSS variables in `+layout.svelte`:
 
 ```css
 :root {
@@ -349,7 +420,28 @@ Range 1-10 inline. A `…` button at the end of the row opens the **custom numpa
 
 ### Latin auto-placeholder
 
-Name field defaults to a randomly-selected entry from a curated Latin word pool. Examples: `Vinculum Sanguinis`, `Praesidium Noctis`, `Fons Aeternitatis`, `Vigil Tenebris`. The placeholder is a real default value (not just visible text) — Tab past Name without typing accepts the placeholder. Pool of ~50 entries lives in `src/lib/builder/latin-placeholders.ts`.
+Name field defaults to a randomly-selected entry from a curated Latin word pool. The placeholder is a real default value (not just visible text) — Tab past Name without typing accepts the placeholder.
+
+**v1 ships with a stub pool of 12 entries** (target ~50, but stub is enough to ship without bikeshed). Stub pool lives in `src/lib/builder/latin-placeholders.ts`:
+
+```typescript
+export const LATIN_PLACEHOLDERS = [
+  'Vinculum Sanguinis',    // Bond of Blood
+  'Praesidium Noctis',     // Bulwark of Night
+  'Fons Aeternitatis',     // Wellspring of Eternity
+  'Vigil Tenebris',        // Vigil in Darkness
+  'Memoria Aevi',          // Memory of the Age
+  'Custos Animae',         // Guardian of the Soul
+  'Tenebrarum Filia',      // Daughter of Shadow
+  'Sanguis Vetus',         // Old Blood
+  'Aetas Foederis',        // Age of the Covenant
+  'Iter Sub Luna',         // Journey Beneath the Moon
+  'Cor Tenebrosum',        // Heart of Darkness
+  'Silentium Tumuli',      // Silence of the Grave
+] as const;
+```
+
+The pool can be expanded toward the ~50-entry target in a follow-up. `pickPlaceholder()` returns a deterministic-by-existing-count entry from the pool, so it doesn't reroll on every keystroke (count = number of existing advantages — keeps placeholder stable while user types).
 
 ### Bonus naming default
 
@@ -457,25 +549,34 @@ Same shell, `ModifierEffectBody` mounted with `initialEffects`, `initialTags`, `
 
 Tasks are deliberately small and atomic so each can be a single commit with `./scripts/verify.sh` passing.
 
-1. **Land primitives.** `TagChipInput.svelte`, `ValueSelector.svelte`, `AppliesToPicker.svelte`. Visual no-op for existing editors — refactor `StatusTemplateEditor` to use `TagChipInput` as the smoke test, leave the other two for later steps.
-2. **Add Latin placeholder pool.** `src/lib/builder/latin-placeholders.ts` + utility function.
-3. **Add `auto_success` to ModifierKind.** Rust enum + TS mirror + DB read/write paths.
-4. **Add `wip` column.** Migration + Rust struct + IPC updates + TS types.
-5. **Add `bonus_name` to ModifierEffect.** Same pattern as wip.
-6. **Land `ItemBuilderShell`.** Bare dialog chrome, header/footer/body slot. Smoke-test with throwaway harness.
-7. **Land `CardComposer` skeleton.** Zone layout (top building/preview, spotlight, footer), color tokens, slot states, stage state machine. Empty body bodies for now.
-8. **Land `AdvantageBody`.** Full picker-skip path for Merit/Flaw/Background/Boon. Tab/spatial config, required-field rule.
-9. **Migrate AdvantagesManager.** Replace inline form with the new shell + AdvantageBody. Visual review: building mode looks like the synthesis mockup; preview mode renders identically to the library card.
-10. **Land `StatusTemplateBody`.** Migrate StatusPaletteDock. Delete on shell footer.
-11. **Land `ModifierEffectBody`.** Migrate CharacterCard + CharacterRow. Verify transform-ancestor case.
-12. **Land `TypePicker`.** Wire it up to the (currently-unused) generic entry point — placeholder route for testing. Discipline/Item show as preview-disabled.
-13. **Delete legacy editors.** `AdvantageForm.svelte`, `ModifierEffectEditor.svelte`, `StatusTemplateEditor.svelte`. Remove old `.editor-overlay` CSS in `StatusPaletteDock` and `CharacterCard`.
-14. **End-of-branch single code review.** Run `code-review:code-review` against the full branch diff. Address findings.
+1. **Land `TagChipInput` primitive.** Standalone chip-input. Refactor `StatusTemplateEditor` to use it as the smoke test — visual no-op for that file.
+2. **Land `ValueSelector` primitive.** Blood-dot row + custom numpad popover + scroll-wheel + typing. Standalone, with a throwaway test harness route.
+3. **Land `AppliesToPicker` primitive.** Semantic chips + advanced disclosure. Standalone, with throwaway harness.
+4. **Add Latin placeholder pool.** `src/lib/builder/latin-placeholders.ts` + `pickPlaceholder()` utility. Tests REQUIRED for rotation determinism.
+5. **Add `auto_success` to ModifierKind.** Rust enum + TS mirror + DB read/write paths.
+6. **Add `wip` + `confirmed_fields` columns.** Migration + Rust struct + IPC updates + TS types. JSON encoding/decoding for confirmed_fields.
+7. **Add `bonus_name` to ModifierEffect.** Rust struct + DB read/write + TS types.
+8. **Extract `AdvantageCard.svelte`.** Pull the inline card rendering out of `AdvantagesManager.svelte` into a standalone component. Discriminated input shape (`saved` | `preview`). AdvantagesManager continues to work with the extracted component — pure refactor, no visual change.
+9. **Extract `StatusTemplateCard.svelte`.** Same pattern, pulled from `StatusPaletteDock`'s current rendering.
+10. **Land `ItemBuilderShell` chrome.** Bare dialog: header/footer/body slot, `<dialog>` mechanics, focus management, backdrop click, Esc handling, right-click carve-out for inputs. Smoke-test with empty body content.
+11. **Land `CardComposer` zone layout + tokens.** Top zone + spotlight zone + footer skeleton, color CSS variables added to `+layout.svelte`, no slot states yet. Renders empty placeholder slots.
+12. **Land slot state styling.** Empty / active / confirmed visual treatments. Per-field color application. Pulsing active outline animation. Static — no state machine yet.
+13. **Land stage state machine.** Tab order ↔ spatial layout decoupling, `confirmedFields` Set, advance/retreat logic, `setStage()` API. Tests REQUIRED for the state machine.
+14. **Land building↔preview transition.** Cross-fade animation, completion detection (`confirmedFields.size === requiredFields.size`), preview card mounting via `AdvantageCard.svelte` / `StatusTemplateCard.svelte` in preview mode.
+15. **Land `AdvantageBody` — name/type/level stages.** First half of AdvantageBody: identity stages, latin placeholder integration, tier dot input.
+16. **Land `AdvantageBody` — bonus stage.** Sub-composer (type cards → name → value → applies-to). `bonus_name` auto-derivation with sticky-on-edit behavior. Tests REQUIRED for auto-derivation.
+17. **Land `AdvantageBody` — description / tags + integration.** Remaining stages, validity rule, body config export.
+18. **Migrate `AdvantagesManager`.** Replace inline form with shell + AdvantageBody. Visual review: building mode matches synthesis mockup; preview mode renders identically to the library list card.
+19. **Land `StatusTemplateBody` + migrate StatusPaletteDock.** 4-row layout (name, effects, description, tags). Delete on shell footer.
+20. **Land `ModifierEffectBody` + migrate CharacterCard / CharacterRow.** 2-row layout (effects, tags). No preview mode. Verify transform-ancestor safety.
+21. **Land `TypePicker` + smoke route.** 2×3 grid (Merit/Flaw/Background/Boon enabled, Discipline/Item preview-disabled). Wire to a temporary `/builder-test` route — no production entry point in v1.
+22. **Delete legacy editors.** `AdvantageForm.svelte`, `ModifierEffectEditor.svelte`, `StatusTemplateEditor.svelte`. Remove old `.editor-overlay` CSS from `StatusPaletteDock` and `CharacterCard`.
+23. **End-of-branch single code review.** Run `code-review:code-review` against the full branch diff. Address findings.
 
 **Gates:**
 - `./scripts/verify.sh` green before every commit.
-- Smoke-test in `npm run tauri dev` after each migration step (9, 10, 11).
-- No new tests required for wiring tasks. Tests REQUIRED for: Latin placeholder rotation (step 2), stage state machine logic (step 7), bonus_name auto-derivation behavior in AdvantageBody (step 8).
+- Smoke-test in `npm run tauri dev` after each migration step (18, 19, 20).
+- No new tests required for wiring tasks. Tests REQUIRED for: Latin placeholder rotation (step 4), stage state machine logic (step 13), bonus_name auto-derivation behavior in AdvantageBody (step 16).
 
 ---
 
