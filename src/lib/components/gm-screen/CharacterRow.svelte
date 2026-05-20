@@ -7,8 +7,8 @@
   } from '../../../types';
   import type { SavedCharacter } from '$lib/saved-characters/api';
   import ModifierCard from './ModifierCard.svelte';
-  import ModifierEffectEditor from './ModifierEffectEditor.svelte';
-  import CardOverlay from './CardOverlay.svelte';
+  import ItemBuilderShell from '$lib/components/builder/ItemBuilderShell.svelte';
+  import ModifierEffectBody, { type ModifierEffectBodyState } from '$lib/components/builder/bodies/ModifierEffectBody.svelte';
   import RollDispatcherPopover from './RollDispatcherPopover.svelte';
   import ActiveEffectsSummary from './ActiveEffectsSummary.svelte';
   import DropZone from '$lib/components/dnd/DropZone.svelte';
@@ -36,6 +36,8 @@
                     | { kind: 'virtual', virt: VirtualCard };
   let editorOpen = $state(false);
   let editorTarget = $state<EditorTarget | null>(null);
+  let effectsValid = $state(false);
+  let effectsBodyState = $state<ModifierEffectBodyState | undefined>();
 
   // Roll dispatcher popover state — anchored to the 🎲 button.
   let rollPopoverOpen = $state(false);
@@ -343,6 +345,7 @@
   function closeEditor(): void {
     editorOpen = false;
     editorTarget = null;
+    effectsBodyState = undefined;
   }
 
   async function saveEditor(effects: ModifierEffect[], tags: string[]): Promise<void> {
@@ -519,19 +522,24 @@
 
   {#if editorTarget}
     {@const target = editorTarget}
-    <CardOverlay
-      bind:open={editorOpen}
+    <ItemBuilderShell
+      open
       title={target.kind === 'materialized' ? target.mod.name : target.virt.name}
-      onClose={closeEditor}
+      saveLabel={effectsValid ? 'Save' : 'Save WIP'}
+      bind:valid={effectsValid}
+      onSave={() => {
+        if (effectsBodyState) saveEditor(effectsBodyState.effects, effectsBodyState.tags);
+      }}
+      onCancel={closeEditor}
     >
-      <ModifierEffectEditor
+      <ModifierEffectBody
         initialEffects={target.kind === 'materialized' ? target.mod.effects : []}
         initialTags={target.kind === 'materialized' ? target.mod.tags : []}
-        onSave={saveEditor}
-        onCancel={closeEditor}
         {character}
+        bind:valid={effectsValid}
+        bind:bodyState={effectsBodyState}
       />
-    </CardOverlay>
+    </ItemBuilderShell>
   {/if}
 </section>
 

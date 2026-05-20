@@ -67,6 +67,14 @@ pub struct ModifierEffect {
     /// push-to-Foundry command on `pool`-kind effects; ignored for other kinds.
     #[serde(default)]
     pub paths: Vec<String>,
+    /// Optional per-bonus display label. Used by the Item Builder Shell's
+    /// Bonus stage so authors can attach a short name to each effect (e.g.
+    /// "Brawl Buff" vs the parent advantage's name). `#[serde(default)]` +
+    /// `skip_serializing_if = Option::is_none` keeps legacy effects_json
+    /// (no `bonusName` key) deserializing cleanly and omits the field from
+    /// the wire when None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bonus_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -76,6 +84,7 @@ pub enum ModifierKind {
     Difficulty,
     Note,
     Stat, // NEW — render-time visual stat delta on the character card.
+    AutoSuccess, // Storage-only in v1 — V5 automatic-success bonuses; roller adds support later.
 }
 
 /// Argument shape for `add_character_modifier`.
@@ -120,6 +129,15 @@ pub struct StatusTemplate {
     pub tags: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Item Builder Shell: true = draft (saved before all required fields
+    /// were authored). `#[serde(default)]` tolerates legacy payloads.
+    #[serde(default)]
+    pub wip: bool,
+    /// Stage keys the user explicitly confirmed in the multi-stage builder.
+    /// None on legacy rows (treated as "all stages confirmed"). Stored as
+    /// JSON text in the `confirmed_fields` column; decoded in the db layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmed_fields: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -129,6 +147,17 @@ pub struct NewStatusTemplate {
     pub description: String,
     pub effects: Vec<ModifierEffect>,
     pub tags: Vec<String>,
+    /// Item Builder Shell: true = persist a draft (Save WIP) that bypasses
+    /// the empty-name guard. `#[serde(default)]` tolerates legacy payloads
+    /// that pre-date the field.
+    #[serde(default)]
+    pub wip: bool,
+    /// Stage keys the user explicitly confirmed in the multi-stage builder.
+    /// Persisted alongside `wip` so the reopen flow can restore the stage
+    /// machine. None = pre-Item-Builder payload (treated as "all stages
+    /// confirmed").
+    #[serde(default)]
+    pub confirmed_fields: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,6 +167,17 @@ pub struct StatusTemplatePatch {
     pub description: Option<String>,
     pub effects: Option<Vec<ModifierEffect>>,
     pub tags: Option<Vec<String>>,
+    /// Item Builder Shell: REPLACES the stored `wip` flag when present on the
+    /// patch. Distinct from the other Option fields (which use patch-or-skip
+    /// semantics): an absent `wip` key is a no-op, but a present `wip` value
+    /// — including `false` to promote a draft — is authoritative.
+    #[serde(default)]
+    pub wip: Option<bool>,
+    /// Same semantics as `wip`: absent = no-op; present (even Some(empty
+    /// vec)) = REPLACE. A normal "finish the draft" save sends None here
+    /// (omits the key) so the column clears to NULL.
+    #[serde(default)]
+    pub confirmed_fields: Option<Vec<String>>,
 }
 
 #[cfg(test)]
@@ -152,6 +192,7 @@ mod tests {
             delta: Some(1),
             note: None,
             paths: vec!["attributes.charisma".to_string(), "attributes.manipulation".to_string()],
+            bonus_name: None,
         };
         let json = serde_json::to_string(&original).expect("serialize");
         let round_trip: ModifierEffect = serde_json::from_str(&json).expect("deserialize");
@@ -178,10 +219,10 @@ mod tests {
     fn effects_json_blob_with_all_four_kinds_round_trips() {
         // Mirrors the actual `effects_json` TEXT column shape.
         let blob = vec![
-            ModifierEffect { kind: ModifierKind::Pool,       scope: Some("Social".into()),  delta: Some(1),  note: None,                paths: vec![] },
-            ModifierEffect { kind: ModifierKind::Difficulty, scope: None,                   delta: Some(-1), note: None,                paths: vec![] },
-            ModifierEffect { kind: ModifierKind::Note,       scope: None,                   delta: None,     note: Some("blinded".into()), paths: vec![] },
-            ModifierEffect { kind: ModifierKind::Stat,       scope: Some("Beautiful".into()), delta: Some(1),  note: None,                paths: vec!["attributes.charisma".into()] },
+            ModifierEffect { kind: ModifierKind::Pool,       scope: Some("Social".into()),  delta: Some(1),  note: None,                paths: vec![],                            bonus_name: None },
+            ModifierEffect { kind: ModifierKind::Difficulty, scope: None,                   delta: Some(-1), note: None,                paths: vec![],                            bonus_name: None },
+            ModifierEffect { kind: ModifierKind::Note,       scope: None,                   delta: None,     note: Some("blinded".into()), paths: vec![],                            bonus_name: None },
+            ModifierEffect { kind: ModifierKind::Stat,       scope: Some("Beautiful".into()), delta: Some(1),  note: None,                paths: vec!["attributes.charisma".into()], bonus_name: None },
         ];
         let json = serde_json::to_string(&blob).expect("serialize");
         let round_trip: Vec<ModifierEffect> = serde_json::from_str(&json).expect("deserialize");

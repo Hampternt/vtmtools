@@ -1,6 +1,7 @@
 use rand::seq::SliceRandom;
 use sqlx::{Row, SqlitePool};
 use crate::bridge::{BridgeConn, BridgeState, types::SourceKind};
+use crate::shared::modifier::ModifierEffect;
 use crate::shared::types::{
     Advantage, AdvantageKind, Field, FieldValue, ImportOutcome, NumberFieldValue,
 };
@@ -23,6 +24,14 @@ fn serialize_properties(props: &[Field]) -> Result<String, String> {
 
 fn deserialize_properties(s: &str) -> Result<Vec<Field>, String> {
     serde_json::from_str(s).map_err(|e| format!("db/advantage.deserialize_properties: {}", e))
+}
+
+fn serialize_effects(effects: &[ModifierEffect]) -> Result<String, String> {
+    serde_json::to_string(effects).map_err(|e| format!("db/advantage.serialize_effects: {}", e))
+}
+
+fn deserialize_effects(s: &str) -> Result<Vec<ModifierEffect>, String> {
+    serde_json::from_str(s).map_err(|e| format!("db/advantage.deserialize_effects: {}", e))
 }
 
 // --------------------------------------------------------------------------
@@ -67,6 +76,24 @@ fn row_to_advantage(r: &sqlx::sqlite::SqliteRow) -> Result<Advantage, String> {
         None => None,
     };
 
+    // Item Builder Shell columns (0010). Use try_get + ok().flatten() so this
+    // helper is also usable from test pools that pre-date the columns; on a
+    // production migrated DB both succeed.
+    let wip_int: i64 = r.try_get("wip").unwrap_or(0);
+    let confirmed_fields_text: Option<String> =
+        r.try_get("confirmed_fields").ok().flatten();
+    let confirmed_fields = confirmed_fields_text
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok());
+
+    // Item Builder Shell, Task 7: effects_json (0011). `try_get` + default to
+    // "[]" mirrors the wip/confirmed_fields pattern above so older test pools
+    // that pre-date the column still decode cleanly.
+    let effects_json: String = r
+        .try_get("effects_json")
+        .unwrap_or_else(|_| "[]".to_string());
+    let effects = deserialize_effects(&effects_json)?;
+
     Ok(Advantage {
         id: r.get("id"),
         name: r.get("name"),
@@ -76,12 +103,16 @@ fn row_to_advantage(r: &sqlx::sqlite::SqliteRow) -> Result<Advantage, String> {
         properties: deserialize_properties(&properties_json)?,
         is_custom: r.get::<bool, _>("is_custom"),
         source_attribution,
+        wip: wip_int != 0,
+        confirmed_fields,
+        effects,
     })
 }
 
 pub(crate) async fn db_list(pool: &SqlitePool) -> Result<Vec<Advantage>, String> {
     let rows = sqlx::query(
-        "SELECT id, name, description, tags_json, properties_json, is_custom, kind, source_attribution
+        "SELECT id, name, description, tags_json, properties_json, is_custom, kind,
+                source_attribution, wip, confirmed_fields, effects_json
          FROM advantages ORDER BY is_custom ASC, id ASC"
     )
     .fetch_all(pool)
@@ -100,7 +131,8 @@ async fn db_list_by_kind(
     kind: AdvantageKind,
 ) -> Result<Vec<Advantage>, String> {
     let rows = sqlx::query(
-        "SELECT id, name, description, tags_json, properties_json, is_custom, kind, source_attribution
+        "SELECT id, name, description, tags_json, properties_json, is_custom, kind,
+                source_attribution, wip, confirmed_fields, effects_json
          FROM advantages WHERE kind = ? ORDER BY is_custom ASC, id ASC"
     )
     .bind(kind_to_str(kind))
@@ -123,9 +155,13 @@ async fn db_insert(
     source_attribution: Option<&serde_json::Value>,
     tags: &[String],
     properties: &[Field],
+    effects: &[ModifierEffect],
+    wip: bool,
+    confirmed_fields: Option<&[String]>,
 ) -> Result<Advantage, String> {
     let tags_json = serialize_tags(tags)?;
     let properties_json = serialize_properties(properties)?;
+    let effects_json = serialize_effects(effects)?;
     let source_attribution_str: Option<String> = match source_attribution {
         Some(v) => Some(
             serde_json::to_string(v)
@@ -133,10 +169,23 @@ async fn db_insert(
         ),
         None => None,
     };
+    let confirmed_fields_str: Option<String> = match confirmed_fields {
+        Some(v) => Some(
+            serde_json::to_string(v)
+                .map_err(|e| format!("db/advantage.serialize_confirmed_fields: {}", e))?,
+        ),
+        None => None,
+    };
 
+    // wip + confirmed_fields are plumbed straight through from the Tauri
+    // command's payload (Item Builder Shell, Task 18). Save-WIP authoring
+    // sets wip=1 and confirmed_fields=<JSON array of stage keys>; normal
+    // saves leave them at (0, NULL).
     let result = sqlx::query(
-        "INSERT INTO advantages (name, description, tags_json, properties_json, is_custom, kind, source_attribution)
-         VALUES (?, ?, ?, ?, 1, ?, ?)"
+        "INSERT INTO advantages
+            (name, description, tags_json, properties_json, is_custom, kind,
+             source_attribution, wip, confirmed_fields, effects_json)
+         VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)"
     )
     .bind(name)
     .bind(description)
@@ -144,6 +193,9 @@ async fn db_insert(
     .bind(&properties_json)
     .bind(kind_to_str(kind))
     .bind(&source_attribution_str)
+    .bind(wip as i64)
+    .bind(&confirmed_fields_str)
+    .bind(&effects_json)
     .execute(pool)
     .await
     .map_err(|e| format!("db/advantage.insert: {}", e))?;
@@ -157,6 +209,9 @@ async fn db_insert(
         properties: properties.to_vec(),
         is_custom: true,
         source_attribution: source_attribution.cloned(),
+        wip,
+        confirmed_fields: confirmed_fields.map(|v| v.to_vec()),
+        effects: effects.to_vec(),
     })
 }
 
@@ -169,13 +224,24 @@ async fn db_update(
     source_attribution: Option<&serde_json::Value>,
     tags: &[String],
     properties: &[Field],
+    effects: &[ModifierEffect],
+    wip: bool,
+    confirmed_fields: Option<&[String]>,
 ) -> Result<(), String> {
     let tags_json = serialize_tags(tags)?;
     let properties_json = serialize_properties(properties)?;
+    let effects_json = serialize_effects(effects)?;
     let source_attribution_str: Option<String> = match source_attribution {
         Some(v) => Some(
             serde_json::to_string(v)
                 .map_err(|e| format!("db/advantage.serialize_source_attribution: {}", e))?,
+        ),
+        None => None,
+    };
+    let confirmed_fields_str: Option<String> = match confirmed_fields {
+        Some(v) => Some(
+            serde_json::to_string(v)
+                .map_err(|e| format!("db/advantage.serialize_confirmed_fields: {}", e))?,
         ),
         None => None,
     };
@@ -187,10 +253,19 @@ async fn db_update(
     // `db_upsert_imported` (the next pull would miss and INSERT a
     // duplicate row). Callers that want to overwrite attribution should
     // pass Some(value); callers that want to leave it alone pass None.
+    //
+    // `wip` + `confirmed_fields` are REPLACED on every save (no COALESCE
+    // — design intent: the latest save authoritatively describes the
+    // current draft state). When the user finishes a draft and submits
+    // a normal save, the wire payload sets wip=false and confirmed_fields
+    // is dropped (None), which clears the column to NULL.
     let result = sqlx::query(
         "UPDATE advantages
          SET name = ?, description = ?, tags_json = ?, properties_json = ?, kind = ?,
-             source_attribution = COALESCE(?, source_attribution)
+             source_attribution = COALESCE(?, source_attribution),
+             effects_json = ?,
+             wip = ?,
+             confirmed_fields = ?
          WHERE id = ? AND is_custom = 1"
     )
     .bind(name)
@@ -199,6 +274,9 @@ async fn db_update(
     .bind(&properties_json)
     .bind(kind_to_str(kind))
     .bind(&source_attribution_str)
+    .bind(&effects_json)
+    .bind(wip as i64)
+    .bind(&confirmed_fields_str)
     .bind(id)
     .execute(pool)
     .await
@@ -259,7 +337,7 @@ pub(crate) async fn db_find_by_foundry_id(
 ) -> Result<Option<Advantage>, String> {
     let row = sqlx::query(
         "SELECT id, name, description, tags_json, properties_json, is_custom,
-                kind, source_attribution
+                kind, source_attribution, wip, confirmed_fields, effects_json
          FROM advantages
          WHERE json_extract(source_attribution, '$.foundryId')  = ?
            AND json_extract(source_attribution, '$.worldTitle') = ?
@@ -520,8 +598,20 @@ pub async fn add_advantage(
     kind: AdvantageKind,
     tags: Vec<String>,
     properties: Vec<Field>,
+    effects: Vec<ModifierEffect>,
+    // Tauri 2 auto-converts camelCase JS keys to snake_case Rust params, so
+    // the frontend's `confirmedFields` arrives here as `confirmed_fields`.
+    // A missing `wip` key on the wire deserializes as false; a missing
+    // `confirmedFields` deserializes as None — matching the optional
+    // AdvantageInput TS interface contract.
+    wip: bool,
+    confirmed_fields: Option<Vec<String>>,
 ) -> Result<Advantage, String> {
-    db_insert(&pool.0, &name, &description, kind, None, &tags, &properties).await
+    db_insert(
+        &pool.0, &name, &description, kind, None, &tags, &properties, &effects,
+        wip, confirmed_fields.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -533,8 +623,15 @@ pub async fn update_advantage(
     kind: AdvantageKind,
     tags: Vec<String>,
     properties: Vec<Field>,
+    effects: Vec<ModifierEffect>,
+    wip: bool,
+    confirmed_fields: Option<Vec<String>>,
 ) -> Result<(), String> {
-    db_update(&pool.0, id, &name, &description, kind, None, &tags, &properties).await
+    db_update(
+        &pool.0, id, &name, &description, kind, None, &tags, &properties, &effects,
+        wip, confirmed_fields.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -588,7 +685,10 @@ mod tests {
                 is_custom          INTEGER NOT NULL DEFAULT 0,
                 kind               TEXT NOT NULL DEFAULT 'merit'
                     CHECK(kind IN ('merit','flaw','background','boon')),
-                source_attribution TEXT
+                source_attribution TEXT,
+                wip                INTEGER NOT NULL DEFAULT 0,
+                confirmed_fields   TEXT,
+                effects_json       TEXT NOT NULL DEFAULT '[]'
             )"
         ).execute(&pool).await.unwrap();
         pool
@@ -618,6 +718,9 @@ mod tests {
             None,
             &tags,
             &props,
+            &[],
+            false,
+            None,
         )
         .await
         .unwrap();
@@ -638,7 +741,7 @@ mod tests {
              VALUES ('Allies', '', '[]', '[]', 0, 'background')"
         ).execute(&pool).await.unwrap();
 
-        let err = db_update(&pool, 1, "X", "", AdvantageKind::Background, None, &[], &[])
+        let err = db_update(&pool, 1, "X", "", AdvantageKind::Background, None, &[], &[], &[], false, None)
             .await
             .unwrap_err();
         assert!(err.contains("not editable"));
@@ -659,10 +762,10 @@ mod tests {
     #[tokio::test]
     async fn update_succeeds_on_custom_row() {
         let pool = test_pool().await;
-        let inserted = db_insert(&pool, "Old Name", "", AdvantageKind::Merit, None, &[], &[])
+        let inserted = db_insert(&pool, "Old Name", "", AdvantageKind::Merit, None, &[], &[], &[], false, None)
             .await
             .unwrap();
-        db_update(&pool, inserted.id, "New Name", "desc", AdvantageKind::Merit, None, &[], &[])
+        db_update(&pool, inserted.id, "New Name", "desc", AdvantageKind::Merit, None, &[], &[], &[], false, None)
             .await
             .unwrap();
         let rows = db_list(&pool).await.unwrap();
@@ -672,7 +775,7 @@ mod tests {
     #[tokio::test]
     async fn delete_succeeds_on_custom_row() {
         let pool = test_pool().await;
-        let inserted = db_insert(&pool, "To Delete", "", AdvantageKind::Merit, None, &[], &[])
+        let inserted = db_insert(&pool, "To Delete", "", AdvantageKind::Merit, None, &[], &[], &[], false, None)
             .await
             .unwrap();
         db_delete(&pool, inserted.id).await.unwrap();
@@ -680,9 +783,9 @@ mod tests {
     }
 
     async fn seed_three(pool: &SqlitePool) {
-        db_insert(pool, "M1", "", AdvantageKind::Merit,      None, &vec!["Merit".to_string()],      &[]).await.unwrap();
-        db_insert(pool, "B1", "", AdvantageKind::Background, None, &vec!["Background".to_string()], &[]).await.unwrap();
-        db_insert(pool, "F1", "", AdvantageKind::Flaw,       None, &vec!["Flaw".to_string()],       &[]).await.unwrap();
+        db_insert(pool, "M1", "", AdvantageKind::Merit,      None, &vec!["Merit".to_string()],      &[], &[], false, None).await.unwrap();
+        db_insert(pool, "B1", "", AdvantageKind::Background, None, &vec!["Background".to_string()], &[], &[], false, None).await.unwrap();
+        db_insert(pool, "F1", "", AdvantageKind::Flaw,       None, &vec!["Flaw".to_string()],       &[], &[], false, None).await.unwrap();
     }
 
     #[tokio::test]
@@ -739,9 +842,9 @@ mod tests {
     #[tokio::test]
     async fn kind_round_trips_through_insert_and_list() {
         let pool = test_pool().await;
-        db_insert(&pool, "F1", "", AdvantageKind::Flaw,       None, &[], &[]).await.unwrap();
-        db_insert(&pool, "B1", "", AdvantageKind::Background, None, &[], &[]).await.unwrap();
-        db_insert(&pool, "M1", "", AdvantageKind::Merit,      None, &[], &[]).await.unwrap();
+        db_insert(&pool, "F1", "", AdvantageKind::Flaw,       None, &[], &[], &[], false, None).await.unwrap();
+        db_insert(&pool, "B1", "", AdvantageKind::Background, None, &[], &[], &[], false, None).await.unwrap();
+        db_insert(&pool, "M1", "", AdvantageKind::Merit,      None, &[], &[], &[], false, None).await.unwrap();
         let rows = db_list(&pool).await.unwrap();
         let by_name: std::collections::HashMap<_, _> =
             rows.iter().map(|r| (r.name.clone(), r.kind)).collect();
@@ -766,10 +869,13 @@ mod tests {
             Some(&attribution),
             &[],
             &[],
+            &[],
+            false,
+            None,
         )
         .await
         .unwrap();
-        db_insert(&pool, "Local Merit", "", AdvantageKind::Merit, None, &[], &[])
+        db_insert(&pool, "Local Merit", "", AdvantageKind::Merit, None, &[], &[], &[], false, None)
             .await
             .unwrap();
         let rows = db_list(&pool).await.unwrap();
@@ -787,9 +893,9 @@ mod tests {
     #[tokio::test]
     async fn list_by_kind_filters_correctly() {
         let pool = test_pool().await;
-        db_insert(&pool, "F1", "", AdvantageKind::Flaw,  None, &[], &[]).await.unwrap();
-        db_insert(&pool, "F2", "", AdvantageKind::Flaw,  None, &[], &[]).await.unwrap();
-        db_insert(&pool, "M1", "", AdvantageKind::Merit, None, &[], &[]).await.unwrap();
+        db_insert(&pool, "F1", "", AdvantageKind::Flaw,  None, &[], &[], &[], false, None).await.unwrap();
+        db_insert(&pool, "F2", "", AdvantageKind::Flaw,  None, &[], &[], &[], false, None).await.unwrap();
+        db_insert(&pool, "M1", "", AdvantageKind::Merit, None, &[], &[], &[], false, None).await.unwrap();
         let flaws = db_list_by_kind(&pool, AdvantageKind::Flaw).await.unwrap();
         assert_eq!(flaws.len(), 2);
         assert!(flaws.iter().all(|r| r.kind == AdvantageKind::Flaw));
@@ -899,7 +1005,7 @@ mod tests {
     #[tokio::test]
     async fn upsert_imported_suffixes_against_local_row() {
         let pool = test_pool().await;
-        db_insert(&pool, "Iron Gullet", "local desc", AdvantageKind::Merit, None, &[], &[])
+        db_insert(&pool, "Iron Gullet", "local desc", AdvantageKind::Merit, None, &[], &[], &[], false, None)
             .await
             .unwrap();
 
@@ -993,7 +1099,7 @@ mod tests {
     #[tokio::test]
     async fn find_by_foundry_id_returns_none_for_local_row() {
         let pool = test_pool().await;
-        db_insert(&pool, "Allies", "local", AdvantageKind::Background, None, &[], &[])
+        db_insert(&pool, "Allies", "local", AdvantageKind::Background, None, &[], &[], &[], false, None)
             .await
             .unwrap();
         let found = db_find_by_foundry_id(&pool, "any_id", "Chicago").await.unwrap();
@@ -1170,6 +1276,9 @@ mod tests {
             None,
             &[],
             &[],
+            &[],
+            false,
+            None,
         )
         .await
         .unwrap();
@@ -1216,6 +1325,86 @@ mod tests {
         assert_eq!(
             imported, 1,
             "GM edit + re-pull must leave exactly one imported row, not duplicate"
+        );
+    }
+
+    // ─── Item Builder Shell: wip + confirmed_fields round-trip ──────────
+
+    #[tokio::test]
+    async fn wip_and_confirmed_fields_round_trip_through_insert_and_list() {
+        let pool = test_pool().await;
+        let confirmed = vec!["name".to_string(), "type".to_string()];
+        let inserted = db_insert(
+            &pool,
+            "Half-Built",
+            "",
+            AdvantageKind::Merit,
+            None,
+            &[],
+            &[],
+            &[],
+            true,
+            Some(&confirmed),
+        )
+        .await
+        .unwrap();
+        assert!(inserted.wip);
+        assert_eq!(inserted.confirmed_fields.as_deref(), Some(confirmed.as_slice()));
+
+        let rows = db_list(&pool).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].wip, "wip must survive insert + list");
+        assert_eq!(
+            rows[0].confirmed_fields.as_deref(),
+            Some(confirmed.as_slice()),
+            "confirmed_fields must survive insert + list",
+        );
+    }
+
+    #[tokio::test]
+    async fn update_replaces_wip_and_confirmed_fields() {
+        // Save WIP → resume → finish: the second save (wip=false, no
+        // confirmed_fields) must overwrite the column, not preserve the
+        // draft state via COALESCE.
+        let pool = test_pool().await;
+        let confirmed = vec!["name".to_string()];
+        let inserted = db_insert(
+            &pool,
+            "Half-Built",
+            "",
+            AdvantageKind::Merit,
+            None,
+            &[],
+            &[],
+            &[],
+            true,
+            Some(&confirmed),
+        )
+        .await
+        .unwrap();
+
+        db_update(
+            &pool,
+            inserted.id,
+            "All Done",
+            "now complete",
+            AdvantageKind::Merit,
+            None,
+            &[],
+            &[],
+            &[],
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let rows = db_list(&pool).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].wip, "wip must be cleared by a complete save");
+        assert!(
+            rows[0].confirmed_fields.is_none(),
+            "confirmed_fields must be cleared by a complete save (no COALESCE preservation)",
         );
     }
 }

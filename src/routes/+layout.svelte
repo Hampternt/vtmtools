@@ -128,6 +128,28 @@
     --rule-card-dossier:        rgba(197, 205, 214, 0.08);  /* hairline */
     --rule-card-dossier-dashed: rgba(197, 205, 214, 0.12);  /* decorative */
     --shadow-card-dossier:    0 8px 32px rgba(0, 0, 0, 0.45);
+
+    --blood-1:  #2a1310;
+    --blood-2:  #3a1814;
+    --blood-3:  #4a1d18;
+    --blood-4:  #5a221c;
+    --blood-5:  #6c2920;
+    --blood-6:  #843024;
+    --blood-7:  #9c3828;
+    --blood-8:  #b04230;
+    --blood-9:  #c84c34;
+    --blood-10: #e0563a;
+
+    /* ── Per-field tokens (Item Builder) ────────────────
+       Fresh tokens (not aliases) so future per-field rebranding
+       stays isolated from shared accents. */
+    --field-name:     #d9a560;
+    --field-type:     #c46050;
+    --field-level:    #c08850;
+    --field-category: #88aabb;
+    --field-desc:     #c4b7a4;
+    --field-bonus:    #e0563a;
+    --field-tags:     #98c89f;
   }
 
   @font-face {

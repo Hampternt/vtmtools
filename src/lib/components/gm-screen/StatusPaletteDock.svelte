@@ -2,7 +2,9 @@
   import { onMount } from 'svelte';
   import { statusTemplates } from '../../../store/statusTemplates.svelte';
   import { modifiers } from '../../../store/modifiers.svelte';
-  import StatusTemplateEditor from './StatusTemplateEditor.svelte';
+  import StatusTemplateCard from './StatusTemplateCard.svelte';
+  import ItemBuilderShell from '$lib/components/builder/ItemBuilderShell.svelte';
+  import StatusTemplateBody, { type StatusTemplateBodyState } from '$lib/components/builder/bodies/StatusTemplateBody.svelte';
   import type { StatusTemplate, BridgeCharacter } from '../../../types';
 
   interface Props {
@@ -18,6 +20,8 @@
 
   let editorOpen = $state(false);
   let editorExisting = $state<StatusTemplate | null>(null);
+  let bodyValid = $state(false);
+  let templateBodyState = $state<StatusTemplateBodyState | undefined>();
   // Tagged hint so the error tone can persist (no auto-clear) while
   // success/info auto-fade. Errors stay until the user clicks again.
   let applyHint = $state<{ text: string; tone: 'info' | 'success' | 'error' } | null>(null);
@@ -65,6 +69,37 @@
     editorOpen = true;
   }
 
+  function closeEditor() {
+    editorOpen = false;
+    editorExisting = null;
+    templateBodyState = undefined;
+  }
+
+  async function handleTemplateSave() {
+    if (!templateBodyState) return;
+    const payload = {
+      name: templateBodyState.name,
+      description: templateBodyState.description,
+      tags: templateBodyState.tags,
+      effects: templateBodyState.effects,
+      wip: !bodyValid,
+      confirmedFields: bodyValid ? undefined : templateBodyState.confirmedFields,
+    };
+    if (editorExisting) {
+      await statusTemplates.update(editorExisting.id, payload);
+    } else {
+      await statusTemplates.add(payload);
+    }
+    closeEditor();
+  }
+
+  async function handleTemplateDelete() {
+    if (!editorExisting) return;
+    if (!confirm(`Delete template "${editorExisting.name}"?`)) return;
+    await statusTemplates.delete(editorExisting.id);
+    closeEditor();
+  }
+
   function summarize(t: StatusTemplate): string {
     if (t.effects.length === 0) return '(no effects)';
     return t.effects.map(e => {
@@ -90,26 +125,34 @@
   {:else}
     <div class="grid">
       {#each statusTemplates.list as t (t.id)}
-        <div class="template">
-          <button class="apply" onclick={() => applyTemplate(t)} disabled={!focusedCharacter} title={focusedCharacter ? `Apply to ${focusedCharacter.name}` : 'Pick a character first'}>
-            <span class="name">{t.name}</span>
-            <span class="summary">{summarize(t)}</span>
-            {#if t.tags.length > 0}
-              <span class="tags">
-                {#each t.tags as tag}<span class="tag">#{tag}</span>{/each}
-              </span>
-            {/if}
-          </button>
-          <button class="edit" title="Edit template" onclick={() => openEditEditor(t)}>✎</button>
-        </div>
+        <StatusTemplateCard
+          input={{ kind: 'saved', data: t }}
+          summary={summarize(t)}
+          applyDisabled={!focusedCharacter}
+          applyTitle={focusedCharacter ? `Apply to ${focusedCharacter.name}` : 'Pick a character first'}
+          onapply={() => applyTemplate(t)}
+          onedit={() => openEditEditor(t)}
+        />
       {/each}
     </div>
   {/if}
 
   {#if editorOpen}
-    <div class="editor-overlay">
-      <StatusTemplateEditor existing={editorExisting} onClose={() => { editorOpen = false; editorExisting = null; }} />
-    </div>
+    <ItemBuilderShell
+      open
+      title={editorExisting ? 'Edit template' : 'New template'}
+      saveLabel={bodyValid ? 'Save' : 'Save WIP'}
+      bind:valid={bodyValid}
+      onSave={handleTemplateSave}
+      onCancel={closeEditor}
+      onDelete={editorExisting ? handleTemplateDelete : undefined}
+    >
+      <StatusTemplateBody
+        initial={editorExisting}
+        bind:valid={bodyValid}
+        bind:bodyState={templateBodyState}
+      />
+    </ItemBuilderShell>
   {/if}
 </aside>
 
@@ -149,49 +192,4 @@
   }
   .empty { color: var(--text-muted); font-size: 0.75rem; font-style: italic; }
   .grid { display: flex; flex-direction: column; gap: 0.4rem; }
-  .template {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 0.3rem;
-    align-items: stretch;
-  }
-  .apply {
-    background: var(--bg-input);
-    color: var(--text-primary);
-    border: 1px solid var(--border-faint);
-    border-radius: 0.4rem;
-    padding: 0.45rem 0.6rem;
-    text-align: left;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    transition: border-color 120ms ease, background 120ms ease;
-  }
-  .apply:hover:not(:disabled) { border-color: var(--accent-bright); background: var(--bg-active); }
-  .apply:disabled { opacity: 0.5; cursor: not-allowed; }
-  .apply .name { font-size: 0.8rem; font-weight: 500; }
-  .apply .summary { font-size: 0.7rem; color: var(--text-secondary); }
-  .apply .tags { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-top: 0.15rem; }
-  .apply .tag { font-size: 0.6rem; color: var(--text-muted); }
-  .edit {
-    background: transparent;
-    border: 1px solid var(--border-faint);
-    color: var(--text-muted);
-    border-radius: 0.4rem;
-    padding: 0 0.4rem;
-    font-size: 0.85rem;
-    cursor: pointer;
-  }
-  .edit:hover { color: var(--text-primary); border-color: var(--border-surface); }
-
-  .editor-overlay {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0,0,0,0.45);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000;
-  }
 </style>

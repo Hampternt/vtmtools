@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::shared::modifier::ModifierEffect;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum Temperament {
@@ -154,6 +156,26 @@ pub struct Advantage {
     /// when a second source materializes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_attribution: Option<serde_json::Value>,
+    /// Item Builder Shell: true = draft (saved before all required fields
+    /// were authored; validation bypass). `#[serde(default)]` tolerates
+    /// legacy payloads / round-trip tests that predate the column.
+    #[serde(default)]
+    pub wip: bool,
+    /// Stage keys the user explicitly confirmed in the multi-stage builder.
+    /// Disambiguates "confirmed empty" from "never reached" when reopening
+    /// a draft. None on legacy rows (treated as "all stages confirmed").
+    /// Stored as JSON text in the `confirmed_fields` column; decoded here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmed_fields: Option<Vec<String>>,
+    /// Item Builder Shell, Task 7: per-advantage ModifierEffect list authored
+    /// in the Bonus stage. Stored as JSON in `effects_json` (mirrors
+    /// status_templates.effects_json). Defaults to empty so legacy payloads
+    /// without the field deserialize cleanly. NOTE: forward-compat storage —
+    /// `push_advantage_to_world` does NOT yet consume these (a follow-up
+    /// task wires the Foundry-bonus translation through, mirroring the
+    /// auto_success rollout).
+    #[serde(default)]
+    pub effects: Vec<ModifierEffect>,
 }
 
 /// Outcome of one import attempt for a single world item.

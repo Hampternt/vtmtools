@@ -1,0 +1,12 @@
+-- Item Builder Shell, Task 7: Bonus stage authoring + per-bonus naming.
+--
+-- (1) advantages now stores a JSON array of ModifierEffect — the same wire
+--     shape as status_templates.effects_json. push_advantage_to_world does
+--     NOT yet consume it (forward-compat storage; consumer wires up later,
+--     mirroring the auto_success rollout).
+--
+-- (2) ModifierEffect.bonus_name is an optional per-effect display label that
+--     rides inside effects_json via serde — no schema change needed for it
+--     since effects are JSON blobs (Case A storage). The ALTER below only
+--     handles the new advantages column.
+ALTER TABLE advantages ADD COLUMN effects_json TEXT NOT NULL DEFAULT '[]';

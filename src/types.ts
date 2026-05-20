@@ -63,6 +63,26 @@ export interface Advantage {
    * Stays as a free-form object until a second source materializes.
    */
   sourceAttribution?: Record<string, unknown>;
+  /**
+   * Item Builder Shell: true = draft saved before all required fields
+   * were authored. Defaults to false on legacy rows / payloads.
+   */
+  wip: boolean;
+  /**
+   * Stage keys the user explicitly confirmed in the multi-stage builder.
+   * undefined on legacy rows (treated as "all stages confirmed"). Rust
+   * struct uses `skip_serializing_if = Option::is_none`, so the field is
+   * omitted from JSON when None. Disambiguates "confirmed empty" from
+   * "never reached" when reopening a draft.
+   */
+  confirmedFields?: string[];
+  /**
+   * Item Builder Shell, Task 7: per-advantage ModifierEffect list authored
+   * in the Bonus stage. Always present (defaults to [] server-side via
+   * `#[serde(default)]`). Forward-compat storage — push_advantage_to_world
+   * does NOT yet consume these.
+   */
+  effects: ModifierEffect[];
 }
 
 export interface ResonanceRollResult {
@@ -277,7 +297,7 @@ export interface FoundryRaw {
 
 export type ModifierZone = 'character' | 'situational';
 
-export type ModifierKind = 'pool' | 'difficulty' | 'note' | 'stat';
+export type ModifierKind = 'pool' | 'difficulty' | 'note' | 'stat' | 'auto_success';
 
 export interface ModifierEffect {
   kind: ModifierKind;
@@ -289,6 +309,13 @@ export interface ModifierEffect {
    * Only used by the push-to-Foundry button on `pool`-kind effects.
    */
   paths: string[];
+  /**
+   * Item Builder Shell, Task 7: optional per-bonus display label authored in
+   * the Bonus stage. Rust struct uses `skip_serializing_if = Option::is_none`,
+   * so the field is omitted from JSON when None — modeled here as optional
+   * (`?`) plus `| null` to match the task spec's wire-shape literal.
+   */
+  bonusName?: string | null;
 }
 
 export type ModifierBinding =
@@ -348,6 +375,18 @@ export interface StatusTemplate {
   tags: string[];
   createdAt: string;
   updatedAt: string;
+  /**
+   * Item Builder Shell: true = draft saved before all required fields
+   * were authored. Defaults to false on legacy rows / payloads.
+   */
+  wip: boolean;
+  /**
+   * Stage keys the user explicitly confirmed in the multi-stage builder.
+   * undefined on legacy rows (treated as "all stages confirmed"). Rust
+   * struct uses `skip_serializing_if = Option::is_none`, so the field is
+   * omitted from JSON when None.
+   */
+  confirmedFields?: string[];
 }
 
 export interface NewStatusTemplateInput {
@@ -355,6 +394,14 @@ export interface NewStatusTemplateInput {
   description: string;
   effects: ModifierEffect[];
   tags: string[];
+  /**
+   * Item Builder Shell: omit (or false) for normal saves. Task 6 only adds
+   * the column — the add/update Tauri commands currently ignore this field;
+   * future tasks (18+) will plumb it through.
+   */
+  wip?: boolean;
+  /** Stage keys the user explicitly confirmed in the multi-stage builder. */
+  confirmedFields?: string[];
 }
 
 export interface StatusTemplatePatchInput {
@@ -362,6 +409,8 @@ export interface StatusTemplatePatchInput {
   description?: string;
   effects?: ModifierEffect[];
   tags?: string[];
+  wip?: boolean;
+  confirmedFields?: string[];
 }
 
 /** Per-effect skip record returned by `gm_screen_push_to_foundry`. */
