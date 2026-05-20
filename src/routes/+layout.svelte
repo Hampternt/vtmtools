@@ -139,6 +139,17 @@
     --blood-8:  #b04230;
     --blood-9:  #c84c34;
     --blood-10: #e0563a;
+
+    /* ── Per-field tokens (Item Builder) ────────────────
+       Fresh tokens (not aliases) so future per-field rebranding
+       stays isolated from shared accents. */
+    --field-name:     #d9a560;
+    --field-type:     #c46050;
+    --field-level:    #c08850;
+    --field-category: #88aabb;
+    --field-desc:     #c4b7a4;
+    --field-bonus:    #e0563a;
+    --field-tags:     #98c89f;
   }
 
   @font-face {
