@@ -23,7 +23,8 @@
   import type { FeatureType, CanonicalFieldName } from '$lib/character/api';
   import { modifiers as modifiersStore } from '../../store/modifiers.svelte';
   import { computeActiveDeltas, activeAdvantageItemIds } from '$lib/character/active-deltas';
-  import ModifierEffectEditor from './gm-screen/ModifierEffectEditor.svelte';
+  import ItemBuilderShell from '$lib/components/builder/ItemBuilderShell.svelte';
+  import ModifierEffectBody, { type ModifierEffectBodyState } from '$lib/components/builder/bodies/ModifierEffectBody.svelte';
   import type { ModifierEffect } from '../../types';
   import { onMount } from 'svelte';
   import { publishEvent } from '../../store/toolEvents';
@@ -126,6 +127,8 @@
 
   // ── Chip right-click — open editor popover ────────────────────────────
   let editorTarget = $state<{ itemId: string; name: string; description: string; effects: ModifierEffect[]; tags: string[] } | null>(null);
+  let effectsValid = $state(false);
+  let effectsBodyState = $state<ModifierEffectBodyState | undefined>();
 
   async function openChipEditor(itemId: string, name: string, description: string, ev: Event) {
     ev.preventDefault(); // suppress browser context menu
@@ -870,18 +873,25 @@
   </footer>
 </div>
 
-{#if editorTarget}
-  <div class="editor-overlay" onclick={closeChipEditor} role="presentation">
-    <div class="editor-anchor" onclick={(ev) => ev.stopPropagation()} role="presentation">
-      <ModifierEffectEditor
-        initialEffects={editorTarget.effects}
-        initialTags={editorTarget.tags}
-        onSave={saveChipEditor}
-        onCancel={closeChipEditor}
-        {character}
-      />
-    </div>
-  </div>
+{#if editorTarget !== null}
+  <ItemBuilderShell
+    open
+    title={editorTarget?.name ?? 'Edit modifier'}
+    saveLabel={effectsValid ? 'Save' : 'Save WIP'}
+    bind:valid={effectsValid}
+    onSave={() => {
+      if (effectsBodyState) saveChipEditor(effectsBodyState.effects, effectsBodyState.tags);
+    }}
+    onCancel={() => { closeChipEditor(); effectsBodyState = undefined; }}
+  >
+    <ModifierEffectBody
+      initialEffects={editorTarget?.effects ?? []}
+      initialTags={editorTarget?.tags ?? []}
+      {character}
+      bind:valid={effectsValid}
+      bind:bodyState={effectsBodyState}
+    />
+  </ItemBuilderShell>
 {/if}
 
 <style>
@@ -1573,11 +1583,4 @@
 
   .chip[role="button"] { cursor: pointer; }
   .chip[data-busy="true"] { opacity: 0.6; pointer-events: none; }
-
-  .editor-overlay {
-    position: fixed; inset: 0;
-    background: var(--shadow-strong);
-    display: grid; place-items: center;
-    z-index: 100;
-  }
 </style>
