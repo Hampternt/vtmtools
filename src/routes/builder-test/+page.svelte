@@ -4,10 +4,13 @@
   import ItemBuilderShell from '$lib/components/builder/ItemBuilderShell.svelte';
   import CardComposer from '$lib/components/builder/CardComposer.svelte';
   import CardSlot from '$lib/components/builder/CardSlot.svelte';
+  import TypePicker from '$lib/components/builder/TypePicker.svelte';
   let v = $state(3);
   let p = $state<string[]>([]);
   let shellOpen = $state(false);
   let composerOpen = $state(false);
+  let pickerOpen = $state(false);
+  let pickedType = $state<string | null>(null);
 </script>
 
 <div style="padding: 2rem; color: var(--text-primary); background: var(--bg-page); min-height: 100vh;">
@@ -72,5 +75,19 @@
       <CardSlot field="bonus" state="confirmed" keyLabel="Bonus">+5 dice when Social</CardSlot>
       <CardSlot field="tags" state="confirmed" keyLabel="Tags">loresheet, touchstone</CardSlot>
     </div>
+  </section>
+
+  <section style="margin-top: 2rem;">
+    <h2>TypePicker (inside Shell)</h2>
+    <button onclick={() => pickerOpen = true}>Open picker</button>
+    {#if pickedType}<p>Last picked: <strong>{pickedType}</strong></p>{/if}
+    <ItemBuilderShell
+      open={pickerOpen}
+      title="What are you creating?"
+      onSave={() => { pickerOpen = false; }}
+      onCancel={() => { pickerOpen = false; }}
+    >
+      <TypePicker onPick={(t) => { pickedType = t; pickerOpen = false; }} />
+    </ItemBuilderShell>
   </section>
 </div>
