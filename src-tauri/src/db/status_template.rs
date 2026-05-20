@@ -66,9 +66,10 @@ pub(crate) async fn db_add(
     pool: &SqlitePool,
     input: NewStatusTemplate,
 ) -> Result<StatusTemplate, String> {
-    if input.name.trim().is_empty() {
-        return Err("db/status_template.add: empty name".to_string());
-    }
+    // Empty name is allowed (Save WIP). The frontend's bodyValid flag drives
+    // the Save vs Save WIP label flip — backend persists whatever is sent.
+    // Follow-up will tighten this back to "reject empty name only when
+    // wip=false" once `wip` is plumbed through the Tauri command path.
     let effects_json = serde_json::to_string(&input.effects)
         .map_err(|e| format!("db/status_template.add: serialize effects: {e}"))?;
     let tags_json = serde_json::to_string(&input.tags)
@@ -97,9 +98,7 @@ pub(crate) async fn db_update(
         .map_err(|e| if e.contains("not found") { "db/status_template.update: not found".to_string() } else { format!("db/status_template.update: {e}") })?;
 
     if let Some(name) = patch.name {
-        if name.trim().is_empty() {
-            return Err("db/status_template.update: empty name".to_string());
-        }
+        // Empty name is allowed (Save WIP). See db_add for rationale.
         current.name = name;
     }
     if let Some(desc) = patch.description { current.description = desc; }
@@ -234,12 +233,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn add_rejects_empty_name() {
+    async fn add_accepts_empty_name_for_wip() {
+        // Empty name is a valid WIP-state value; Save WIP must always succeed.
+        // Frontend's bodyValid flag (not the backend) drives the Save vs
+        // Save WIP label flip.
         let pool = fresh_pool().await;
         let mut new = sample_new();
         new.name = String::new();
-        let err = db_add(&pool, new).await.unwrap_err();
-        assert!(err.contains("empty name"), "got: {err}");
+        let t = db_add(&pool, new).await.unwrap();
+        assert!(t.id > 0);
+        assert_eq!(t.name, "");
+    }
+
+    #[tokio::test]
+    async fn update_accepts_empty_name_for_wip() {
+        // Same rationale as add_accepts_empty_name_for_wip.
+        let pool = fresh_pool().await;
+        let t = db_add(&pool, sample_new()).await.unwrap();
+        let updated = db_update(&pool, t.id, StatusTemplatePatch {
+            name: Some(String::new()), description: None, effects: None, tags: None,
+        }).await.unwrap();
+        assert_eq!(updated.name, "");
     }
 
     #[tokio::test]
