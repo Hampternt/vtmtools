@@ -9,7 +9,7 @@
   import TagChipInput from '../TagChipInput.svelte';
   import AdvantageCard from '../../AdvantageCard.svelte';
   import { V5_SKILL_CATEGORIES } from '$lib/foundry/canonical-names';
-  import type { Advantage, AdvantageKind } from '../../../../types';
+  import type { Advantage, AdvantageKind, ModifierEffect } from '../../../../types';
 
   export interface AdvantageBodyBonus {
     kind: 'pool' | 'difficulty' | 'auto_success';
@@ -25,6 +25,11 @@
     tags: string[];
     description: string;
     bonus: AdvantageBodyBonus;
+    // Effects beyond the first slot — preserved on edit so the save handler
+    // can re-emit them. AdvantageBody only models a single bonus, so anything
+    // imported from Foundry / authored elsewhere with multiple effects would
+    // otherwise be silently dropped on round-trip.
+    extraEffects: ModifierEffect[];
     confirmedFields: string[];
   }
 
@@ -37,18 +42,34 @@
 
   function emptyState(init: Advantage | undefined, count: number): AdvantageBodyState {
     const initialName = init?.name ?? pickPlaceholder(count);
+    const firstEffect = init?.effects?.[0];
+    const restEffects = init?.effects?.slice(1) ?? [];
+
     return {
       name: initialName,
       kind: init?.kind ?? 'merit',
       level: Number((init?.properties.find(p => p.name === 'dot_cost_per_level' && p.type === 'number')?.value) ?? 1),
       tags: init ? [...init.tags] : [],
       description: init?.description ?? '',
-      bonus: {
-        kind: 'pool',
-        bonusName: deriveBonusName(initialName),
-        value: 1,
-        paths: [],
-      },
+      bonus: firstEffect
+        ? {
+            // Only Pool/Difficulty/AutoSuccess are bonus-stage kinds.
+            // Foreign kinds (note, stat) fall through to 'pool' so the user
+            // can correct manually — better than silent data loss.
+            kind: ['pool', 'difficulty', 'auto_success'].includes(firstEffect.kind)
+              ? (firstEffect.kind as AdvantageBodyBonus['kind'])
+              : 'pool',
+            bonusName: firstEffect.bonusName ?? deriveBonusName(initialName),
+            value: firstEffect.delta ?? 1,
+            paths: [...firstEffect.paths],
+          }
+        : {
+            kind: 'pool',
+            bonusName: deriveBonusName(initialName),
+            value: 1,
+            paths: [],
+          },
+      extraEffects: restEffects.map(e => ({ ...e })),
       confirmedFields: [],
     };
   }

@@ -206,7 +206,7 @@
         type: 'number',
         value: advantageBodyState.level,
       }],
-      effects: [bonusToEffect(advantageBodyState.bonus)],
+      effects: [bonusToEffect(advantageBodyState.bonus), ...advantageBodyState.extraEffects],
       wip: !bodyValid,
       confirmedFields: bodyValid ? undefined : advantageBodyState.confirmedFields,
     };
