@@ -1,6 +1,7 @@
 <script lang="ts">
   import { statusTemplates } from '../../../store/statusTemplates.svelte';
   import type { ModifierEffect, ModifierKind, StatusTemplate } from '../../../types';
+  import TagChipInput from '$lib/components/builder/TagChipInput.svelte';
 
   interface Props {
     /** Existing template to edit, or null to author a new one. */
@@ -16,7 +17,6 @@
     (existing?.effects ?? []).map(e => ({ ...e }))
   );
   let tags = $state<string[]>([...(existing?.tags ?? [])]);
-  let newTag = $state('');
   let saving = $state(false);
   let error = $state<string | null>(null);
 
@@ -39,14 +39,6 @@
       ? { ...effects[i], kind, delta: null }
       : { ...effects[i], kind, note: null };
   }
-  function commitTag() {
-    const t = newTag.trim();
-    if (!t || tags.includes(t)) { newTag = ''; return; }
-    tags = [...tags, t];
-    newTag = '';
-  }
-  function removeTag(t: string) { tags = tags.filter(x => x !== t); }
-
   async function save() {
     if (!name.trim()) { error = 'Name required'; return; }
     saving = true;
@@ -141,22 +133,7 @@
 
   <fieldset>
     <legend>Tags</legend>
-    <div class="tag-list">
-      {#each tags as t}
-        <span class="tag-chip">
-          {t}
-          <button onclick={() => removeTag(t)} aria-label="Remove tag {t}">×</button>
-        </span>
-      {/each}
-      <input
-        type="text"
-        placeholder="+ tag"
-        value={newTag}
-        oninput={(e) => newTag = (e.currentTarget as HTMLInputElement).value}
-        onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitTag(); } }}
-        onblur={commitTag}
-      />
-    </div>
+    <TagChipInput {tags} onChange={(next) => tags = next} />
   </fieldset>
 
   {#if error}<p class="error">{error}</p>{/if}
@@ -229,20 +206,6 @@
     width: 100%;
   }
   .stepper { display: inline-flex; gap: 0.25rem; align-items: center; color: var(--text-primary); font-variant-numeric: tabular-nums; }
-  .tag-list { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
-  .tag-chip {
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-faint);
-    border-radius: 999px;
-    padding: 0.15rem 0.5rem;
-    font-size: 0.7rem;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-  }
-  .tag-chip button { background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 0; }
-  .tag-list input { width: 7rem; }
   .error { color: var(--accent-amber); font-size: 0.75rem; margin: 0; }
   footer { display: flex; gap: 0.4rem; align-items: center; }
   .spacer { flex: 1; }
