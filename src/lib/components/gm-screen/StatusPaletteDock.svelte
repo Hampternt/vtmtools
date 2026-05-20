@@ -2,8 +2,9 @@
   import { onMount } from 'svelte';
   import { statusTemplates } from '../../../store/statusTemplates.svelte';
   import { modifiers } from '../../../store/modifiers.svelte';
-  import StatusTemplateEditor from './StatusTemplateEditor.svelte';
   import StatusTemplateCard from './StatusTemplateCard.svelte';
+  import ItemBuilderShell from '$lib/components/builder/ItemBuilderShell.svelte';
+  import StatusTemplateBody, { type StatusTemplateBodyState } from '$lib/components/builder/bodies/StatusTemplateBody.svelte';
   import type { StatusTemplate, BridgeCharacter } from '../../../types';
 
   interface Props {
@@ -19,6 +20,8 @@
 
   let editorOpen = $state(false);
   let editorExisting = $state<StatusTemplate | null>(null);
+  let bodyValid = $state(false);
+  let templateBodyState = $state<StatusTemplateBodyState | undefined>();
   // Tagged hint so the error tone can persist (no auto-clear) while
   // success/info auto-fade. Errors stay until the user clicks again.
   let applyHint = $state<{ text: string; tone: 'info' | 'success' | 'error' } | null>(null);
@@ -66,6 +69,37 @@
     editorOpen = true;
   }
 
+  function closeEditor() {
+    editorOpen = false;
+    editorExisting = null;
+    templateBodyState = undefined;
+  }
+
+  async function handleTemplateSave() {
+    if (!templateBodyState) return;
+    const payload = {
+      name: templateBodyState.name,
+      description: templateBodyState.description,
+      tags: templateBodyState.tags,
+      effects: templateBodyState.effects,
+      wip: !bodyValid,
+      confirmedFields: bodyValid ? undefined : templateBodyState.confirmedFields,
+    };
+    if (editorExisting) {
+      await statusTemplates.update(editorExisting.id, payload);
+    } else {
+      await statusTemplates.add(payload);
+    }
+    closeEditor();
+  }
+
+  async function handleTemplateDelete() {
+    if (!editorExisting) return;
+    if (!confirm(`Delete template "${editorExisting.name}"?`)) return;
+    await statusTemplates.delete(editorExisting.id);
+    closeEditor();
+  }
+
   function summarize(t: StatusTemplate): string {
     if (t.effects.length === 0) return '(no effects)';
     return t.effects.map(e => {
@@ -104,9 +138,21 @@
   {/if}
 
   {#if editorOpen}
-    <div class="editor-overlay">
-      <StatusTemplateEditor existing={editorExisting} onClose={() => { editorOpen = false; editorExisting = null; }} />
-    </div>
+    <ItemBuilderShell
+      open
+      title={editorExisting ? 'Edit template' : 'New template'}
+      saveLabel={bodyValid ? 'Save' : 'Save WIP'}
+      bind:valid={bodyValid}
+      onSave={handleTemplateSave}
+      onCancel={closeEditor}
+      onDelete={editorExisting ? handleTemplateDelete : undefined}
+    >
+      <StatusTemplateBody
+        initial={editorExisting}
+        bind:valid={bodyValid}
+        bind:bodyState={templateBodyState}
+      />
+    </ItemBuilderShell>
   {/if}
 </aside>
 
@@ -146,14 +192,4 @@
   }
   .empty { color: var(--text-muted); font-size: 0.75rem; font-style: italic; }
   .grid { display: flex; flex-direction: column; gap: 0.4rem; }
-
-  .editor-overlay {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0,0,0,0.45);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000;
-  }
 </style>
