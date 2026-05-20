@@ -3,20 +3,44 @@
   import { bridge } from '../../store/bridge.svelte';
   import { pushAdvantageToWorld } from '$lib/library/api';
 
-  const { entry, onedit, ondelete }: {
-    entry: Advantage;
+  /**
+   * Discriminated input: lets the same card render both saved library
+   * rows and unsaved builder previews. Saved rows carry a DB id plus the
+   * provenance / wip flags; previews omit id + provenance (the builder
+   * hasn't decided either yet) and pass `wip` alongside the payload.
+   */
+  type SavedInput   = { kind: 'saved';   data: Advantage };
+  type PreviewInput = {
+    kind: 'preview';
+    data: Omit<Advantage, 'id' | 'isCustom' | 'sourceAttribution'>;
+    wip?: boolean;
+  };
+
+  interface Props {
+    input: SavedInput | PreviewInput;
+    /** Preview-mode click-to-edit. Ignored in saved mode. */
+    onClick?: (target: HTMLElement) => void;
+    /** Saved-mode edit callback. Card has no IPC knowledge. */
     onedit?: () => void;
+    /** Saved-mode delete callback. Card has no IPC knowledge. */
     ondelete?: () => void;
-  } = $props();
+  }
+
+  let { input, onClick, onedit, ondelete }: Props = $props();
+
+  const data = $derived(input.data);
+  const isPreview = $derived(input.kind === 'preview');
+  const isWip = $derived(input.kind === 'saved' ? input.data.wip : (input.wip ?? false));
 
   let pushing = $state(false);
   let pushError = $state('');
 
   async function handlePush() {
+    if (input.kind !== 'saved') return;
     pushing = true;
     pushError = '';
     try {
-      await pushAdvantageToWorld(entry.id);
+      await pushAdvantageToWorld(input.data.id);
     } catch (e) {
       pushError = String(e);
     } finally {
@@ -25,7 +49,7 @@
   }
 
   function findField(name: string): Field | undefined {
-    return entry.properties.find(p => p.name === name);
+    return data.properties.find(p => p.name === name);
   }
 
   function numberValue(f: Field | undefined): number | null {
@@ -41,7 +65,7 @@
 
   // Other properties — everything except the level/min/max triple, rendered as key: value.
   const otherProps = $derived(
-    entry.properties.filter(p => !['level', 'min_level', 'max_level'].includes(p.name))
+    data.properties.filter(p => !['level', 'min_level', 'max_level'].includes(p.name))
   );
 
   function capitalize(s: string): string {
@@ -63,24 +87,29 @@
   }
 </script>
 
-<article class="card">
+<article
+  class="advantage-card"
+  class:preview={isPreview}
+  class:wip={isWip}
+  onclick={isPreview && onClick ? (e) => onClick(e.target as HTMLElement) : undefined}
+>
   <header class="head">
-    <h3 class="name">{entry.name}</h3>
+    <h3 class="name">{data.name}</h3>
     <div class="tags">
-      <span class="tag kind-chip" data-kind={entry.kind}>{capitalize(entry.kind)}</span>
-      {#if entry.sourceAttribution}
-        <span class="tag source-chip" data-source={(entry.sourceAttribution.source as string | undefined) ?? 'foundry'}>
-          FVTT · {(entry.sourceAttribution.worldTitle as string | undefined) ?? '?'}
+      <span class="tag kind-chip" data-kind={data.kind}>{capitalize(data.kind)}</span>
+      {#if input.kind === 'saved' && input.data.sourceAttribution}
+        <span class="tag source-chip" data-source={(input.data.sourceAttribution.source as string | undefined) ?? 'foundry'}>
+          FVTT · {(input.data.sourceAttribution.worldTitle as string | undefined) ?? '?'}
         </span>
       {/if}
-      {#each entry.tags as t}
+      {#each data.tags as t}
         <span class="tag">{t}</span>
       {/each}
     </div>
   </header>
 
-  {#if entry.description}
-    <p class="desc">{entry.description}</p>
+  {#if data.description}
+    <p class="desc">{data.description}</p>
   {/if}
 
   {#if level !== null || (minLevel !== null && maxLevel !== null)}
@@ -103,30 +132,32 @@
     </ul>
   {/if}
 
-  <footer class="foot">
-    {#if pushError}
-      <span class="push-error" title={pushError}>!</span>
-    {/if}
-    {#if bridge.connections.foundry}
-      <button
-        class="btn push"
-        onclick={handlePush}
-        disabled={pushing}
-        aria-label="Push to world"
-        title="Push to Foundry world"
-      >{pushing ? '…' : '⇡'}</button>
-    {/if}
-    {#if entry.isCustom}
-      <button class="btn edit"   onclick={onedit}   aria-label="Edit">✎</button>
-      <button class="btn delete" onclick={ondelete} aria-label="Delete">✕</button>
-    {:else}
-      <span class="builtin">built-in</span>
-    {/if}
-  </footer>
+  {#if input.kind === 'saved'}
+    <footer class="foot">
+      {#if pushError}
+        <span class="push-error" title={pushError}>!</span>
+      {/if}
+      {#if bridge.connections.foundry}
+        <button
+          class="btn push"
+          onclick={handlePush}
+          disabled={pushing}
+          aria-label="Push to world"
+          title="Push to Foundry world"
+        >{pushing ? '…' : '⇡'}</button>
+      {/if}
+      {#if input.data.isCustom}
+        <button class="btn edit"   onclick={onedit}   aria-label="Edit">✎</button>
+        <button class="btn delete" onclick={ondelete} aria-label="Delete">✕</button>
+      {:else}
+        <span class="builtin">built-in</span>
+      {/if}
+    </footer>
+  {/if}
 </article>
 
 <style>
-  .card {
+  .advantage-card {
     background: var(--bg-card);
     border: 1px solid var(--border-card);
     border-radius: 6px;
@@ -200,4 +231,15 @@
     cursor: help;
   }
   .builtin { color: var(--text-ghost); font-size: 0.62rem; font-style: italic; }
+
+  /* Preview-mode highlight: amber border + warm glow makes builder
+     previews visually distinct from saved library rows. */
+  .advantage-card.preview {
+    border-color: var(--accent-amber);
+    box-shadow: 0 0 16px rgba(217, 165, 96, 0.22);
+  }
+  /* WIP draft indicator — subtle dimming. */
+  .advantage-card.wip {
+    opacity: 0.92;
+  }
 </style>

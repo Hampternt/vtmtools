@@ -323,7 +323,7 @@
             </div>
           {:else}
             <AdvantageCard
-              {entry}
+              input={{ kind: 'saved', data: entry }}
               onedit={() => { editingId = entry.id; showAddForm = false; }}
               ondelete={() => handleDelete(entry.id)}
             />
