@@ -121,6 +121,15 @@ pub struct StatusTemplate {
     pub tags: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Item Builder Shell: true = draft (saved before all required fields
+    /// were authored). `#[serde(default)]` tolerates legacy payloads.
+    #[serde(default)]
+    pub wip: bool,
+    /// Stage keys the user explicitly confirmed in the multi-stage builder.
+    /// None on legacy rows (treated as "all stages confirmed"). Stored as
+    /// JSON text in the `confirmed_fields` column; decoded in the db layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmed_fields: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]

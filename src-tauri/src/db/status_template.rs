@@ -10,6 +10,14 @@ fn row_to_template(r: &sqlx::sqlite::SqliteRow) -> Result<StatusTemplate, String
     let tags_json: String = r.get("tags_json");
     let tags: Vec<String> = serde_json::from_str(&tags_json)
         .map_err(|e| format!("db/status_template.list: tags deserialize: {e}"))?;
+    // Item Builder Shell columns (0010). try_get + ok().flatten() tolerates
+    // older test schemas that pre-date the columns.
+    let wip_int: i64 = r.try_get("wip").unwrap_or(0);
+    let confirmed_fields_text: Option<String> =
+        r.try_get("confirmed_fields").ok().flatten();
+    let confirmed_fields = confirmed_fields_text
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok());
     Ok(StatusTemplate {
         id: r.get("id"),
         name: r.get("name"),
@@ -18,6 +26,8 @@ fn row_to_template(r: &sqlx::sqlite::SqliteRow) -> Result<StatusTemplate, String
         tags,
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),
+        wip: wip_int != 0,
+        confirmed_fields,
     })
 }
 

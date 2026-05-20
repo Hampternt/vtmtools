@@ -67,6 +67,16 @@ fn row_to_advantage(r: &sqlx::sqlite::SqliteRow) -> Result<Advantage, String> {
         None => None,
     };
 
+    // Item Builder Shell columns (0010). Use try_get + ok().flatten() so this
+    // helper is also usable from test pools that pre-date the columns; on a
+    // production migrated DB both succeed.
+    let wip_int: i64 = r.try_get("wip").unwrap_or(0);
+    let confirmed_fields_text: Option<String> =
+        r.try_get("confirmed_fields").ok().flatten();
+    let confirmed_fields = confirmed_fields_text
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok());
+
     Ok(Advantage {
         id: r.get("id"),
         name: r.get("name"),
@@ -76,6 +86,8 @@ fn row_to_advantage(r: &sqlx::sqlite::SqliteRow) -> Result<Advantage, String> {
         properties: deserialize_properties(&properties_json)?,
         is_custom: r.get::<bool, _>("is_custom"),
         source_attribution,
+        wip: wip_int != 0,
+        confirmed_fields,
     })
 }
 
@@ -134,9 +146,14 @@ async fn db_insert(
         None => None,
     };
 
+    // wip + confirmed_fields default to (0, NULL) here — Task 6 only adds
+    // the columns. Subsequent tasks (18+) will plumb the values through
+    // when the Item Builder Shell starts authoring drafts.
     let result = sqlx::query(
-        "INSERT INTO advantages (name, description, tags_json, properties_json, is_custom, kind, source_attribution)
-         VALUES (?, ?, ?, ?, 1, ?, ?)"
+        "INSERT INTO advantages
+            (name, description, tags_json, properties_json, is_custom, kind,
+             source_attribution, wip, confirmed_fields)
+         VALUES (?, ?, ?, ?, 1, ?, ?, 0, NULL)"
     )
     .bind(name)
     .bind(description)
@@ -157,6 +174,8 @@ async fn db_insert(
         properties: properties.to_vec(),
         is_custom: true,
         source_attribution: source_attribution.cloned(),
+        wip: false,
+        confirmed_fields: None,
     })
 }
 
@@ -588,7 +607,9 @@ mod tests {
                 is_custom          INTEGER NOT NULL DEFAULT 0,
                 kind               TEXT NOT NULL DEFAULT 'merit'
                     CHECK(kind IN ('merit','flaw','background','boon')),
-                source_attribution TEXT
+                source_attribution TEXT,
+                wip                INTEGER NOT NULL DEFAULT 0,
+                confirmed_fields   TEXT
             )"
         ).execute(&pool).await.unwrap();
         pool

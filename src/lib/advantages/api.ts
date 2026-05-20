@@ -7,6 +7,15 @@ export type AdvantageInput = {
   kind: AdvantageKind;
   tags: string[];
   properties: Field[];
+  /**
+   * Item Builder Shell: omit (or false) for normal saves. Set true to
+   * persist a draft that bypasses validation. Task 6 only adds the
+   * column — the add/update Tauri commands currently ignore this field;
+   * future tasks (18+) will plumb it through.
+   */
+  wip?: boolean;
+  /** Stage keys the user explicitly confirmed in the multi-stage builder. */
+  confirmedFields?: string[];
 };
 
 export function listAdvantages(): Promise<Advantage[]> {
