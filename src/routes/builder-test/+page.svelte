@@ -48,6 +48,7 @@
       onCancel={() => { composerOpen = false; }}
     >
       <CardComposer
+        isComplete={false}
         queueValues={['next', 'then', 'finally']}
       >
         {#snippet cardRows()}

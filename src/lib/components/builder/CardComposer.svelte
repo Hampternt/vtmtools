@@ -1,20 +1,31 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { fade } from 'svelte/transition';
 
   interface Props {
     spotlight: Snippet;
     cardRows: Snippet;
+    preview?: Snippet;
+    isComplete: boolean;
     queueLabel?: string;
     queueValues?: string[];
   }
 
-  let { spotlight, cardRows, queueLabel = 'up next', queueValues = [] }: Props = $props();
+  let { spotlight, cardRows, preview, isComplete, queueLabel = 'up next', queueValues = [] }: Props = $props();
 </script>
 
 <div class="composer">
-  <div class="card-preview">
-    <div class="card-preview-label">— card preview —</div>
-    {@render cardRows()}
+  <div class="card-preview" class:complete={isComplete && preview}>
+    <div class="card-preview-label">— {isComplete && preview ? 'preview · as it will appear' : 'card preview'} —</div>
+    {#if isComplete && preview}
+      <div class="preview-wrap" out:fade={{ duration: 90 }} in:fade={{ duration: 180 }}>
+        {@render preview()}
+      </div>
+    {:else}
+      <div out:fade={{ duration: 90 }} in:fade={{ duration: 180 }}>
+        {@render cardRows()}
+      </div>
+    {/if}
   </div>
 
   <div class="spotlight">
