@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FOUNDRY_SKILL_NAMES, FOUNDRY_ATTRIBUTE_NAMES } from '$lib/foundry/canonical-names';
+  import { FOUNDRY_SKILL_NAMES, FOUNDRY_ATTRIBUTE_NAMES, V5_SKILL_CATEGORIES } from '$lib/foundry/canonical-names';
 
   interface Props {
     paths: string[];
@@ -10,9 +10,9 @@
   let advancedOpen = $state(false);
   let pathDraft = $state('');
 
-  const PHYSICAL = ['athletics', 'brawl', 'craft', 'drive', 'firearms', 'larceny', 'melee', 'stealth', 'survival'];
-  const SOCIAL   = ['animal_ken', 'etiquette', 'insight', 'intimidation', 'leadership', 'performance', 'persuasion', 'streetwise', 'subterfuge'];
-  const MENTAL   = ['academics', 'awareness', 'finance', 'investigation', 'medicine', 'occult', 'politics', 'science', 'technology'];
+  const PHYSICAL = V5_SKILL_CATEGORIES.physical;
+  const SOCIAL   = V5_SKILL_CATEGORIES.social;
+  const MENTAL   = V5_SKILL_CATEGORIES.mental;
 
   const SOCIAL_PATHS   = SOCIAL.map(s => `skills.${s}`);
   const PHYSICAL_PATHS = PHYSICAL.map(s => `skills.${s}`);

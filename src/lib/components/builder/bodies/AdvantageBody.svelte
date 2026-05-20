@@ -8,6 +8,7 @@
   import AppliesToPicker from '../AppliesToPicker.svelte';
   import TagChipInput from '../TagChipInput.svelte';
   import AdvantageCard from '../../AdvantageCard.svelte';
+  import { V5_SKILL_CATEGORIES } from '$lib/foundry/canonical-names';
   import type { Advantage, AdvantageKind } from '../../../../types';
 
   export interface AdvantageBodyBonus {
@@ -98,13 +99,10 @@
       const all = paths.every(p => p.startsWith('skills.'));
       if (all) {
         const skills = paths.map(p => p.substring(7));
-        const PHYSICAL = ['athletics', 'brawl', 'craft', 'drive', 'firearms', 'larceny', 'melee', 'stealth', 'survival'];
-        const SOCIAL = ['animal_ken', 'etiquette', 'insight', 'intimidation', 'leadership', 'performance', 'persuasion', 'streetwise', 'subterfuge'];
-        const MENTAL = ['academics', 'awareness', 'finance', 'investigation', 'medicine', 'occult', 'politics', 'science', 'technology'];
         const set = new Set(skills);
-        if (PHYSICAL.every(s => set.has(s))) return 'Physical';
-        if (SOCIAL.every(s => set.has(s))) return 'Social';
-        if (MENTAL.every(s => set.has(s))) return 'Mental';
+        if (V5_SKILL_CATEGORIES.physical.every(s => set.has(s))) return 'Physical';
+        if (V5_SKILL_CATEGORIES.social.every(s => set.has(s))) return 'Social';
+        if (V5_SKILL_CATEGORIES.mental.every(s => set.has(s))) return 'Mental';
       }
     }
     return `${paths.length} paths`;

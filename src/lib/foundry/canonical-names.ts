@@ -109,6 +109,23 @@ export const FOUNDRY_SKILL_NAMES: readonly SkillName[] = [
 ] as const;
 
 /**
+ * V5 skill categories. Used by the builder's "Applies to" picker
+ * (and any other UI that groups skills semantically). Names match
+ * FOUNDRY_SKILL_NAMES exactly — never hardcode the list elsewhere.
+ */
+export const V5_SKILL_CATEGORIES = {
+  physical: ['athletics', 'brawl', 'craft', 'drive', 'firearms', 'larceny', 'melee', 'stealth', 'survival'] as const,
+  social:   ['animalken', 'etiquette', 'insight', 'intimidation', 'leadership', 'performance', 'persuasion', 'streetwise', 'subterfuge'] as const,
+  mental:   ['academics', 'awareness', 'finance', 'investigation', 'medicine', 'occult', 'politics', 'science', 'technology'] as const,
+} as const;
+
+// Type-level guard: every category member must be a valid SkillName.
+type _categoryMembersMustBeSkills =
+  (typeof V5_SKILL_CATEGORIES)[keyof typeof V5_SKILL_CATEGORIES][number] extends SkillName ? true : false;
+const _v5SkillCategoriesCheck: _categoryMembersMustBeSkills = true;
+void _v5SkillCategoriesCheck;
+
+/**
  * Canonical path strings for V5 vital tracks. Used by:
  *   - active-deltas.readPath (path-resolver targets)
  *   - ModifierEffectBody / AppliesToPicker path-input autocomplete
