@@ -3,6 +3,7 @@
   import { statusTemplates } from '../../../store/statusTemplates.svelte';
   import { modifiers } from '../../../store/modifiers.svelte';
   import StatusTemplateEditor from './StatusTemplateEditor.svelte';
+  import StatusTemplateCard from './StatusTemplateCard.svelte';
   import type { StatusTemplate, BridgeCharacter } from '../../../types';
 
   interface Props {
@@ -90,18 +91,14 @@
   {:else}
     <div class="grid">
       {#each statusTemplates.list as t (t.id)}
-        <div class="template">
-          <button class="apply" onclick={() => applyTemplate(t)} disabled={!focusedCharacter} title={focusedCharacter ? `Apply to ${focusedCharacter.name}` : 'Pick a character first'}>
-            <span class="name">{t.name}</span>
-            <span class="summary">{summarize(t)}</span>
-            {#if t.tags.length > 0}
-              <span class="tags">
-                {#each t.tags as tag}<span class="tag">#{tag}</span>{/each}
-              </span>
-            {/if}
-          </button>
-          <button class="edit" title="Edit template" onclick={() => openEditEditor(t)}>✎</button>
-        </div>
+        <StatusTemplateCard
+          input={{ kind: 'saved', data: t }}
+          summary={summarize(t)}
+          applyDisabled={!focusedCharacter}
+          applyTitle={focusedCharacter ? `Apply to ${focusedCharacter.name}` : 'Pick a character first'}
+          onapply={() => applyTemplate(t)}
+          onedit={() => openEditEditor(t)}
+        />
       {/each}
     </div>
   {/if}
@@ -149,41 +146,6 @@
   }
   .empty { color: var(--text-muted); font-size: 0.75rem; font-style: italic; }
   .grid { display: flex; flex-direction: column; gap: 0.4rem; }
-  .template {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 0.3rem;
-    align-items: stretch;
-  }
-  .apply {
-    background: var(--bg-input);
-    color: var(--text-primary);
-    border: 1px solid var(--border-faint);
-    border-radius: 0.4rem;
-    padding: 0.45rem 0.6rem;
-    text-align: left;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    transition: border-color 120ms ease, background 120ms ease;
-  }
-  .apply:hover:not(:disabled) { border-color: var(--accent-bright); background: var(--bg-active); }
-  .apply:disabled { opacity: 0.5; cursor: not-allowed; }
-  .apply .name { font-size: 0.8rem; font-weight: 500; }
-  .apply .summary { font-size: 0.7rem; color: var(--text-secondary); }
-  .apply .tags { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-top: 0.15rem; }
-  .apply .tag { font-size: 0.6rem; color: var(--text-muted); }
-  .edit {
-    background: transparent;
-    border: 1px solid var(--border-faint);
-    color: var(--text-muted);
-    border-radius: 0.4rem;
-    padding: 0 0.4rem;
-    font-size: 0.85rem;
-    cursor: pointer;
-  }
-  .edit:hover { color: var(--text-primary); border-color: var(--border-surface); }
 
   .editor-overlay {
     position: fixed;
