@@ -3,6 +3,7 @@
   import AppliesToPicker from '$lib/components/builder/AppliesToPicker.svelte';
   import ItemBuilderShell from '$lib/components/builder/ItemBuilderShell.svelte';
   import CardComposer from '$lib/components/builder/CardComposer.svelte';
+  import CardSlot from '$lib/components/builder/CardSlot.svelte';
   let v = $state(3);
   let p = $state<string[]>([]);
   let shellOpen = $state(false);
@@ -57,5 +58,18 @@
         {/snippet}
       </CardComposer>
     </ItemBuilderShell>
+  </section>
+
+  <section style="margin-top: 2rem; max-width: 32rem;">
+    <h2>CardSlot states</h2>
+    <div style="display: flex; flex-direction: column; gap: 0.3rem;">
+      <CardSlot field="name" state="empty" keyLabel="Name">empty placeholder</CardSlot>
+      <CardSlot field="name" state="active" keyLabel="Name">active editing</CardSlot>
+      <CardSlot field="name" state="confirmed" keyLabel="Name" onClick={() => alert('Re-edit name')}>Sanguine Tenacity</CardSlot>
+      <CardSlot field="type" state="confirmed" keyLabel="Type">Merit</CardSlot>
+      <CardSlot field="level" state="confirmed" keyLabel="Level">3 dots</CardSlot>
+      <CardSlot field="bonus" state="confirmed" keyLabel="Bonus">+5 dice when Social</CardSlot>
+      <CardSlot field="tags" state="confirmed" keyLabel="Tags">loresheet, touchstone</CardSlot>
+    </div>
   </section>
 </div>
