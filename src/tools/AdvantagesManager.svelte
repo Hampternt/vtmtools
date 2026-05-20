@@ -1,18 +1,28 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { flip } from 'svelte/animate';
-  import { scale, fade } from 'svelte/transition';
+  import { fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import AdvantageCard from '$lib/components/AdvantageCard.svelte';
-  import AdvantageForm from '$lib/components/AdvantageForm.svelte';
-  import { listAdvantages, deleteAdvantage } from '$lib/advantages/api';
+  import ItemBuilderShell from '$lib/components/builder/ItemBuilderShell.svelte';
+  import AdvantageBody, {
+    type AdvantageBodyState,
+    type AdvantageBodyBonus,
+  } from '$lib/components/builder/bodies/AdvantageBody.svelte';
+  import {
+    listAdvantages,
+    deleteAdvantage,
+    addAdvantage,
+    updateAdvantage,
+    type AdvantageInput,
+  } from '$lib/advantages/api';
   import {
     importAdvantagesFromWorld,
     subscribeToWorldItems,
   } from '$lib/library/api';
   import { summarizeImport, summaryAsToast } from '$lib/library/importer';
   import { bridge } from '../store/bridge.svelte';
-  import type { Advantage, Field } from '../types';
+  import type { Advantage, Field, ModifierEffect } from '../types';
 
   type SortKey = 'name-asc' | 'name-desc' | 'level-asc' | 'level-desc' | 'recent';
   type ProvenanceFilter = 'all' | 'corebook' | 'local' | 'imported';
@@ -28,6 +38,12 @@
   let provenanceFilter: ProvenanceFilter = $state('all');
   let showAddForm   = $state(false);
   let editingId: number | null = $state(null);
+
+  // Item Builder Shell (Task 18): shell drives Save / Save WIP via
+  // `bodyValid`; AdvantageBody owns the multi-stage state in
+  // `advantageBodyState`. Both reset on cancel / save.
+  let bodyValid = $state(false);
+  let advantageBodyState = $state<AdvantageBodyState | undefined>();
 
   // Pull-from-world transient state. Resets each invocation.
   let pulling     = $state(false);
@@ -167,10 +183,42 @@
     searchTimer = setTimeout(() => { searchQuery = rawSearch; }, 110);
   }
 
-  function handleSave() {
+  function bonusToEffect(b: AdvantageBodyBonus): ModifierEffect {
+    return {
+      kind: b.kind,
+      scope: null,
+      delta: b.value,
+      note: null,
+      paths: b.paths,
+      bonusName: b.bonusName,
+    };
+  }
+
+  async function handleBuilderSave() {
+    if (!advantageBodyState) return;
+    const input: AdvantageInput = {
+      name: advantageBodyState.name,
+      description: advantageBodyState.description,
+      kind: advantageBodyState.kind,
+      tags: advantageBodyState.tags,
+      properties: [{
+        name: 'dot_cost_per_level',
+        type: 'number',
+        value: advantageBodyState.level,
+      }],
+      effects: [bonusToEffect(advantageBodyState.bonus)],
+      wip: !bodyValid,
+      confirmedFields: bodyValid ? undefined : advantageBodyState.confirmedFields,
+    };
+    if (editingId !== null) {
+      await updateAdvantage(editingId, input);
+    } else {
+      await addAdvantage(input);
+    }
     showAddForm = false;
     editingId = null;
-    loadAll();
+    advantageBodyState = undefined;
+    await loadAll();
   }
 
   async function handleDelete(id: number) {
@@ -293,41 +341,16 @@
     <p class="error-text">{loadError}</p>
   {:else}
     <div class="grid">
-      {#if showAddForm}
-        <div
-          in:scale={{ start: 0.9, duration: 200, easing: cubicOut }}
-          out:fade={{ duration: 150 }}
-        >
-          <AdvantageForm
-            oncancel={() => { showAddForm = false; }}
-            onsave={handleSave}
-          />
-        </div>
-      {/if}
-
       {#each visible as entry (entry.id)}
         <div
           animate:flip={{ duration: 300, easing: cubicOut }}
           transition:fade={{ duration: 120 }}
         >
-          {#if editingId === entry.id}
-            <div
-              in:scale={{ start: 0.9, duration: 200, easing: cubicOut }}
-              out:fade={{ duration: 150 }}
-            >
-              <AdvantageForm
-                {entry}
-                oncancel={() => { editingId = null; }}
-                onsave={handleSave}
-              />
-            </div>
-          {:else}
-            <AdvantageCard
-              input={{ kind: 'saved', data: entry }}
-              onedit={() => { editingId = entry.id; showAddForm = false; }}
-              ondelete={() => handleDelete(entry.id)}
-            />
-          {/if}
+          <AdvantageCard
+            input={{ kind: 'saved', data: entry }}
+            onedit={() => { editingId = entry.id; showAddForm = false; }}
+            ondelete={() => handleDelete(entry.id)}
+          />
         </div>
       {/each}
 
@@ -335,6 +358,28 @@
         <p class="empty" transition:fade>No advantages match your filters.</p>
       {/if}
     </div>
+  {/if}
+
+  {#if showAddForm || editingId !== null}
+    <ItemBuilderShell
+      open
+      title={editingId === null ? 'New advantage' : 'Edit advantage'}
+      saveLabel={bodyValid ? 'Save' : 'Save WIP'}
+      bind:valid={bodyValid}
+      onSave={handleBuilderSave}
+      onCancel={() => {
+        showAddForm = false;
+        editingId = null;
+        advantageBodyState = undefined;
+      }}
+    >
+      <AdvantageBody
+        initial={editingId !== null ? allEntries.find(a => a.id === editingId) : undefined}
+        existingCount={allEntries.length}
+        bind:valid={bodyValid}
+        bind:bodyState={advantageBodyState}
+      />
+    </ItemBuilderShell>
   {/if}
 </div>
 
