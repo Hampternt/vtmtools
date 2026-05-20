@@ -78,7 +78,7 @@
       {#if onDelete}<button class="danger" onclick={onDelete} disabled={busy}>Delete</button>{/if}
       <span class="spacer"></span>
       <button class="secondary" onclick={onCancel}>Cancel</button>
-      <button class="primary" onclick={onSave} disabled={!valid || busy}>
+      <button class="primary" onclick={onSave} disabled={busy}>
         {busy ? 'Saving…' : saveLabel}
       </button>
     </footer>
