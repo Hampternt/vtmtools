@@ -6,6 +6,8 @@
   import CardSlot from '../CardSlot.svelte';
   import ValueSelector from '../ValueSelector.svelte';
   import AppliesToPicker from '../AppliesToPicker.svelte';
+  import TagChipInput from '../TagChipInput.svelte';
+  import AdvantageCard from '../../AdvantageCard.svelte';
   import type { Advantage, AdvantageKind } from '../../../../types';
 
   export interface AdvantageBodyBonus {
@@ -131,6 +133,38 @@
     return ['bonus', 'description', 'tags']
       .filter(s => s !== machine.stage && !machine.confirmed.has(s));
   }
+
+  function toAdvantageInput(s: AdvantageBodyState) {
+    // Returns a partial Advantage shape suitable for the AdvantageCard preview
+    // branch. AdvantageCard's PreviewInput type is
+    // `Omit<Advantage, 'id' | 'isCustom' | 'sourceAttribution'>`.
+    return {
+      name: s.name,
+      description: s.description,
+      kind: s.kind,
+      tags: s.tags,
+      properties: [
+        { name: 'dot_cost_per_level', type: 'number' as const, value: s.level },
+      ],
+      effects: [{
+        kind: s.bonus.kind,
+        scope: null,
+        delta: s.bonus.value,
+        note: null,
+        paths: s.bonus.paths,
+        bonusName: s.bonus.bonusName,
+      }],
+      wip: !machine.isComplete(),
+      confirmedFields: machine.isComplete() ? undefined : Array.from(machine.confirmed),
+    };
+  }
+
+  function onPreviewClick(target: HTMLElement) {
+    const slot = target.closest('[data-stage]') as HTMLElement | null;
+    if (slot && slot.dataset.stage) {
+      machine.setStage(slot.dataset.stage);
+    }
+  }
 </script>
 
 {#snippet cardRows()}
@@ -163,6 +197,18 @@
         {:else}
           —
         {/if}
+      </CardSlot>
+    </div>
+    <div class="card-row one-col">
+      <CardSlot field="desc" state={slotStateFor('description')} keyLabel="Description" onClick={() => machine.setStage('description')}>
+        {bodyState.description || '—'}
+      </CardSlot>
+    </div>
+    <div class="card-row one-col">
+      <CardSlot field="tags" state={slotStateFor('tags')} keyLabel="Tags" onClick={() => machine.setStage('tags')}>
+        {#if bodyState.tags.length > 0}
+          {#each bodyState.tags as t}<span class="mini-tag">{t}</span>{/each}
+        {:else}—{/if}
       </CardSlot>
     </div>
   {/if}
@@ -230,15 +276,43 @@
       <AppliesToPicker paths={bodyState.bonus.paths} onChange={(p) => { if (bodyState) bodyState.bonus.paths = p; }} />
       <button class="next-btn" onclick={() => machine.advance()}>Confirm bonus →</button>
     {/if}
-  {:else}
+  {:else if bodyState && machine.stage === 'description'}
     <div class="prompt-label">— SPOTLIGHT —</div>
-    <p class="hint">Stage "{machine.stage}" — UI lands in Task 17.</p>
+    <h3 class="prompt">Describe {bodyState.name}</h3>
+    <!-- svelte-ignore a11y_autofocus -->
+    <textarea
+      class="big-textarea"
+      bind:value={bodyState.description}
+      placeholder="Optional. A line or two of flavor."
+      onkeydown={(e) => { if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); machine.advance(); } }}
+      autofocus
+    ></textarea>
+    <p class="hint">Tab to confirm (empty is fine)</p>
+  {:else if bodyState && machine.stage === 'tags'}
+    <div class="prompt-label">— SPOTLIGHT —</div>
+    <h3 class="prompt">Tag this merit</h3>
+    <TagChipInput tags={bodyState.tags} onChange={(t) => { if (bodyState) bodyState.tags = t; }} autofocus />
+    <p class="hint">Tab confirms · empty is fine · type Enter to commit</p>
+    <div style="display: flex; justify-content: center; margin-top: 0.6rem;">
+      <button class="next-btn" onclick={() => machine.advance()}>Done →</button>
+    </div>
+  {:else if bodyState && machine.stage === 'review'}
+    <div class="prompt-label">— REVIEW —</div>
+    <h3 class="prompt review-prompt">{bodyState.name} is ready.</h3>
+    <p class="hint">Click any slot above to re-edit · Ctrl+Enter to save</p>
+  {/if}
+{/snippet}
+
+{#snippet preview()}
+  {#if bodyState}
+    <AdvantageCard input={{ kind: 'preview', data: toAdvantageInput(bodyState) }} onClick={onPreviewClick} />
   {/if}
 {/snippet}
 
 <CardComposer
   {cardRows}
   {spotlight}
+  {preview}
   isComplete={machine.isComplete()}
   queueValues={queueRemaining()}
 />
@@ -299,4 +373,33 @@
   .bonus-line strong { color: var(--field-bonus); font-weight: 700; }
   .bonus-line em { color: var(--accent-blue); font-style: normal; font-weight: 600; }
   .card-row.one-col { grid-template-columns: 1fr; }
+  .big-textarea {
+    background: var(--bg-input);
+    border: 1px solid var(--accent-amber);
+    border-radius: 0.3rem;
+    padding: 0.55rem 0.75rem;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    font-family: inherit;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 5rem;
+    resize: vertical;
+    outline: none;
+  }
+  .mini-tag {
+    display: inline-block;
+    background: var(--bg-card);
+    border: 1px solid var(--border-faint);
+    color: var(--text-secondary);
+    border-radius: 999px;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.62rem;
+    font-family: inherit;
+    margin-right: 0.2rem;
+    font-style: italic;
+  }
+  .review-prompt {
+    color: var(--accent-bright);
+  }
 </style>

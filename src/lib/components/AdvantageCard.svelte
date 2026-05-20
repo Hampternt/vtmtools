@@ -94,26 +94,26 @@
   onclick={isPreview && onClick ? (e) => onClick(e.target as HTMLElement) : undefined}
 >
   <header class="head">
-    <h3 class="name">{data.name}</h3>
+    <h3 class="name" data-stage="name">{data.name}</h3>
     <div class="tags">
-      <span class="tag kind-chip" data-kind={data.kind}>{capitalize(data.kind)}</span>
+      <span class="tag kind-chip" data-kind={data.kind} data-stage="type">{capitalize(data.kind)}</span>
       {#if input.kind === 'saved' && input.data.sourceAttribution}
         <span class="tag source-chip" data-source={(input.data.sourceAttribution.source as string | undefined) ?? 'foundry'}>
           FVTT · {(input.data.sourceAttribution.worldTitle as string | undefined) ?? '?'}
         </span>
       {/if}
       {#each data.tags as t}
-        <span class="tag">{t}</span>
+        <span class="tag" data-stage="tags">{t}</span>
       {/each}
     </div>
   </header>
 
   {#if data.description}
-    <p class="desc">{data.description}</p>
+    <p class="desc" data-stage="description">{data.description}</p>
   {/if}
 
   {#if level !== null || (minLevel !== null && maxLevel !== null)}
-    <div class="dots" aria-label="dot cost">
+    <div class="dots" aria-label="dot cost" data-stage="level">
       {#if level !== null}
         {#each Array(dotCeiling) as _, i}
           <span class:filled={i < level}>●</span>
