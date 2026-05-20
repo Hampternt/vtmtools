@@ -282,6 +282,7 @@ mod tests {
             delta: Some(delta),
             note: None,
             paths: paths.into_iter().map(String::from).collect(),
+            bonus_name: None,
         }
     }
 
@@ -316,6 +317,7 @@ mod tests {
             delta: Some(-1),
             note: None,
             paths: vec!["attributes.strength".into()],
+            bonus_name: None,
         };
         assert!(
             effect_to_bonus(&e, 1, "X").is_none(),
@@ -331,6 +333,7 @@ mod tests {
             delta: None,
             note: Some("careful".into()),
             paths: vec![],
+            bonus_name: None,
         };
         assert!(effect_to_bonus(&e, 1, "X").is_none(), "note must skip");
     }

@@ -76,6 +76,13 @@ export interface Advantage {
    * "never reached" when reopening a draft.
    */
   confirmedFields?: string[];
+  /**
+   * Item Builder Shell, Task 7: per-advantage ModifierEffect list authored
+   * in the Bonus stage. Always present (defaults to [] server-side via
+   * `#[serde(default)]`). Forward-compat storage — push_advantage_to_world
+   * does NOT yet consume these.
+   */
+  effects: ModifierEffect[];
 }
 
 export interface ResonanceRollResult {
@@ -302,6 +309,13 @@ export interface ModifierEffect {
    * Only used by the push-to-Foundry button on `pool`-kind effects.
    */
   paths: string[];
+  /**
+   * Item Builder Shell, Task 7: optional per-bonus display label authored in
+   * the Bonus stage. Rust struct uses `skip_serializing_if = Option::is_none`,
+   * so the field is omitted from JSON when None — modeled here as optional
+   * (`?`) plus `| null` to match the task spec's wire-shape literal.
+   */
+  bonusName?: string | null;
 }
 
 export type ModifierBinding =

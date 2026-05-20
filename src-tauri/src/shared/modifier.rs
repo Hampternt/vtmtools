@@ -67,6 +67,14 @@ pub struct ModifierEffect {
     /// push-to-Foundry command on `pool`-kind effects; ignored for other kinds.
     #[serde(default)]
     pub paths: Vec<String>,
+    /// Optional per-bonus display label. Used by the Item Builder Shell's
+    /// Bonus stage so authors can attach a short name to each effect (e.g.
+    /// "Brawl Buff" vs the parent advantage's name). `#[serde(default)]` +
+    /// `skip_serializing_if = Option::is_none` keeps legacy effects_json
+    /// (no `bonusName` key) deserializing cleanly and omits the field from
+    /// the wire when None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bonus_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -162,6 +170,7 @@ mod tests {
             delta: Some(1),
             note: None,
             paths: vec!["attributes.charisma".to_string(), "attributes.manipulation".to_string()],
+            bonus_name: None,
         };
         let json = serde_json::to_string(&original).expect("serialize");
         let round_trip: ModifierEffect = serde_json::from_str(&json).expect("deserialize");
@@ -188,10 +197,10 @@ mod tests {
     fn effects_json_blob_with_all_four_kinds_round_trips() {
         // Mirrors the actual `effects_json` TEXT column shape.
         let blob = vec![
-            ModifierEffect { kind: ModifierKind::Pool,       scope: Some("Social".into()),  delta: Some(1),  note: None,                paths: vec![] },
-            ModifierEffect { kind: ModifierKind::Difficulty, scope: None,                   delta: Some(-1), note: None,                paths: vec![] },
-            ModifierEffect { kind: ModifierKind::Note,       scope: None,                   delta: None,     note: Some("blinded".into()), paths: vec![] },
-            ModifierEffect { kind: ModifierKind::Stat,       scope: Some("Beautiful".into()), delta: Some(1),  note: None,                paths: vec!["attributes.charisma".into()] },
+            ModifierEffect { kind: ModifierKind::Pool,       scope: Some("Social".into()),  delta: Some(1),  note: None,                paths: vec![],                            bonus_name: None },
+            ModifierEffect { kind: ModifierKind::Difficulty, scope: None,                   delta: Some(-1), note: None,                paths: vec![],                            bonus_name: None },
+            ModifierEffect { kind: ModifierKind::Note,       scope: None,                   delta: None,     note: Some("blinded".into()), paths: vec![],                            bonus_name: None },
+            ModifierEffect { kind: ModifierKind::Stat,       scope: Some("Beautiful".into()), delta: Some(1),  note: None,                paths: vec!["attributes.charisma".into()], bonus_name: None },
         ];
         let json = serde_json::to_string(&blob).expect("serialize");
         let round_trip: Vec<ModifierEffect> = serde_json::from_str(&json).expect("deserialize");

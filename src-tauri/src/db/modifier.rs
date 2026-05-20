@@ -561,6 +561,7 @@ mod tests {
                 delta: Some(1),
                 note: None,
                 paths: Vec::new(),
+                bonus_name: None,
             }],
             binding: ModifierBinding::Free,
             tags: vec!["Social".to_string()],
@@ -772,6 +773,7 @@ mod tests {
                 delta: Some(2),
                 note: None,
                 paths: vec!["attributes.strength".into()],
+                bonus_name: None,
             }],
             binding: ModifierBinding::Advantage { item_id: "item-y".into() },
             tags: vec!["combat".into()],
@@ -811,6 +813,7 @@ mod tests {
             delta: Some(3),
             note: None,
             paths: vec!["attributes.strength".into(), "skills.brawl".into()],
+            bonus_name: None,
         };
         let json = serde_json::to_string(&new_shape).unwrap();
         let back: crate::shared::modifier::ModifierEffect =

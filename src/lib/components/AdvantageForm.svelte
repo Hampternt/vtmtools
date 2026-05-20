@@ -105,6 +105,11 @@
       kind,
       tags: trimmedTags,
       properties: properties.map(p => ({ ...p, name: p.name.trim() })),
+      // Item Builder Shell, Task 7: AdvantageInput.effects is required.
+      // The legacy edit form does not author bonuses — pass [] so existing
+      // call sites stay green. Bonus authoring lives in the multi-stage
+      // builder added in later tasks.
+      effects: [],
     };
     try {
       if (entry) {

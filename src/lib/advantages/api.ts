@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Advantage, AdvantageKind, Field } from '../../types';
+import type { Advantage, AdvantageKind, Field, ModifierEffect } from '../../types';
 
 export type AdvantageInput = {
   name: string;
@@ -7,6 +7,13 @@ export type AdvantageInput = {
   kind: AdvantageKind;
   tags: string[];
   properties: Field[];
+  /**
+   * Item Builder Shell, Task 7: per-advantage ModifierEffect list. Required
+   * (the Tauri `add_advantage` / `update_advantage` commands expect it on
+   * every call); pass `[]` when authoring without bonuses. Forward-compat
+   * storage — push_advantage_to_world does NOT yet consume these.
+   */
+  effects: ModifierEffect[];
   /**
    * Item Builder Shell: omit (or false) for normal saves. Set true to
    * persist a draft that bypasses validation. Task 6 only adds the

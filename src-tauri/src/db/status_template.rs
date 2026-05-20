@@ -217,6 +217,7 @@ mod tests {
                 delta: Some(2),
                 note: None,
                 paths: vec![],
+                bonus_name: None,
             }],
             tags: vec!["Combat".to_string()],
         }

@@ -1,6 +1,7 @@
 use rand::seq::SliceRandom;
 use sqlx::{Row, SqlitePool};
 use crate::bridge::{BridgeConn, BridgeState, types::SourceKind};
+use crate::shared::modifier::ModifierEffect;
 use crate::shared::types::{
     Advantage, AdvantageKind, Field, FieldValue, ImportOutcome, NumberFieldValue,
 };
@@ -23,6 +24,14 @@ fn serialize_properties(props: &[Field]) -> Result<String, String> {
 
 fn deserialize_properties(s: &str) -> Result<Vec<Field>, String> {
     serde_json::from_str(s).map_err(|e| format!("db/advantage.deserialize_properties: {}", e))
+}
+
+fn serialize_effects(effects: &[ModifierEffect]) -> Result<String, String> {
+    serde_json::to_string(effects).map_err(|e| format!("db/advantage.serialize_effects: {}", e))
+}
+
+fn deserialize_effects(s: &str) -> Result<Vec<ModifierEffect>, String> {
+    serde_json::from_str(s).map_err(|e| format!("db/advantage.deserialize_effects: {}", e))
 }
 
 // --------------------------------------------------------------------------
@@ -77,6 +86,14 @@ fn row_to_advantage(r: &sqlx::sqlite::SqliteRow) -> Result<Advantage, String> {
         .as_deref()
         .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok());
 
+    // Item Builder Shell, Task 7: effects_json (0011). `try_get` + default to
+    // "[]" mirrors the wip/confirmed_fields pattern above so older test pools
+    // that pre-date the column still decode cleanly.
+    let effects_json: String = r
+        .try_get("effects_json")
+        .unwrap_or_else(|_| "[]".to_string());
+    let effects = deserialize_effects(&effects_json)?;
+
     Ok(Advantage {
         id: r.get("id"),
         name: r.get("name"),
@@ -88,12 +105,13 @@ fn row_to_advantage(r: &sqlx::sqlite::SqliteRow) -> Result<Advantage, String> {
         source_attribution,
         wip: wip_int != 0,
         confirmed_fields,
+        effects,
     })
 }
 
 pub(crate) async fn db_list(pool: &SqlitePool) -> Result<Vec<Advantage>, String> {
     let rows = sqlx::query(
-        "SELECT id, name, description, tags_json, properties_json, is_custom, kind, source_attribution
+        "SELECT id, name, description, tags_json, properties_json, is_custom, kind, source_attribution, effects_json
          FROM advantages ORDER BY is_custom ASC, id ASC"
     )
     .fetch_all(pool)
@@ -112,7 +130,7 @@ async fn db_list_by_kind(
     kind: AdvantageKind,
 ) -> Result<Vec<Advantage>, String> {
     let rows = sqlx::query(
-        "SELECT id, name, description, tags_json, properties_json, is_custom, kind, source_attribution
+        "SELECT id, name, description, tags_json, properties_json, is_custom, kind, source_attribution, effects_json
          FROM advantages WHERE kind = ? ORDER BY is_custom ASC, id ASC"
     )
     .bind(kind_to_str(kind))
@@ -135,9 +153,11 @@ async fn db_insert(
     source_attribution: Option<&serde_json::Value>,
     tags: &[String],
     properties: &[Field],
+    effects: &[ModifierEffect],
 ) -> Result<Advantage, String> {
     let tags_json = serialize_tags(tags)?;
     let properties_json = serialize_properties(properties)?;
+    let effects_json = serialize_effects(effects)?;
     let source_attribution_str: Option<String> = match source_attribution {
         Some(v) => Some(
             serde_json::to_string(v)
@@ -152,8 +172,8 @@ async fn db_insert(
     let result = sqlx::query(
         "INSERT INTO advantages
             (name, description, tags_json, properties_json, is_custom, kind,
-             source_attribution, wip, confirmed_fields)
-         VALUES (?, ?, ?, ?, 1, ?, ?, 0, NULL)"
+             source_attribution, wip, confirmed_fields, effects_json)
+         VALUES (?, ?, ?, ?, 1, ?, ?, 0, NULL, ?)"
     )
     .bind(name)
     .bind(description)
@@ -161,6 +181,7 @@ async fn db_insert(
     .bind(&properties_json)
     .bind(kind_to_str(kind))
     .bind(&source_attribution_str)
+    .bind(&effects_json)
     .execute(pool)
     .await
     .map_err(|e| format!("db/advantage.insert: {}", e))?;
@@ -176,6 +197,7 @@ async fn db_insert(
         source_attribution: source_attribution.cloned(),
         wip: false,
         confirmed_fields: None,
+        effects: effects.to_vec(),
     })
 }
 
@@ -188,9 +210,11 @@ async fn db_update(
     source_attribution: Option<&serde_json::Value>,
     tags: &[String],
     properties: &[Field],
+    effects: &[ModifierEffect],
 ) -> Result<(), String> {
     let tags_json = serialize_tags(tags)?;
     let properties_json = serialize_properties(properties)?;
+    let effects_json = serialize_effects(effects)?;
     let source_attribution_str: Option<String> = match source_attribution {
         Some(v) => Some(
             serde_json::to_string(v)
@@ -209,7 +233,8 @@ async fn db_update(
     let result = sqlx::query(
         "UPDATE advantages
          SET name = ?, description = ?, tags_json = ?, properties_json = ?, kind = ?,
-             source_attribution = COALESCE(?, source_attribution)
+             source_attribution = COALESCE(?, source_attribution),
+             effects_json = ?
          WHERE id = ? AND is_custom = 1"
     )
     .bind(name)
@@ -218,6 +243,7 @@ async fn db_update(
     .bind(&properties_json)
     .bind(kind_to_str(kind))
     .bind(&source_attribution_str)
+    .bind(&effects_json)
     .bind(id)
     .execute(pool)
     .await
@@ -278,7 +304,7 @@ pub(crate) async fn db_find_by_foundry_id(
 ) -> Result<Option<Advantage>, String> {
     let row = sqlx::query(
         "SELECT id, name, description, tags_json, properties_json, is_custom,
-                kind, source_attribution
+                kind, source_attribution, effects_json
          FROM advantages
          WHERE json_extract(source_attribution, '$.foundryId')  = ?
            AND json_extract(source_attribution, '$.worldTitle') = ?
@@ -539,8 +565,9 @@ pub async fn add_advantage(
     kind: AdvantageKind,
     tags: Vec<String>,
     properties: Vec<Field>,
+    effects: Vec<ModifierEffect>,
 ) -> Result<Advantage, String> {
-    db_insert(&pool.0, &name, &description, kind, None, &tags, &properties).await
+    db_insert(&pool.0, &name, &description, kind, None, &tags, &properties, &effects).await
 }
 
 #[tauri::command]
@@ -552,8 +579,9 @@ pub async fn update_advantage(
     kind: AdvantageKind,
     tags: Vec<String>,
     properties: Vec<Field>,
+    effects: Vec<ModifierEffect>,
 ) -> Result<(), String> {
-    db_update(&pool.0, id, &name, &description, kind, None, &tags, &properties).await
+    db_update(&pool.0, id, &name, &description, kind, None, &tags, &properties, &effects).await
 }
 
 #[tauri::command]
@@ -609,7 +637,8 @@ mod tests {
                     CHECK(kind IN ('merit','flaw','background','boon')),
                 source_attribution TEXT,
                 wip                INTEGER NOT NULL DEFAULT 0,
-                confirmed_fields   TEXT
+                confirmed_fields   TEXT,
+                effects_json       TEXT NOT NULL DEFAULT '[]'
             )"
         ).execute(&pool).await.unwrap();
         pool
@@ -639,6 +668,7 @@ mod tests {
             None,
             &tags,
             &props,
+            &[],
         )
         .await
         .unwrap();
@@ -659,7 +689,7 @@ mod tests {
              VALUES ('Allies', '', '[]', '[]', 0, 'background')"
         ).execute(&pool).await.unwrap();
 
-        let err = db_update(&pool, 1, "X", "", AdvantageKind::Background, None, &[], &[])
+        let err = db_update(&pool, 1, "X", "", AdvantageKind::Background, None, &[], &[], &[])
             .await
             .unwrap_err();
         assert!(err.contains("not editable"));
@@ -680,10 +710,10 @@ mod tests {
     #[tokio::test]
     async fn update_succeeds_on_custom_row() {
         let pool = test_pool().await;
-        let inserted = db_insert(&pool, "Old Name", "", AdvantageKind::Merit, None, &[], &[])
+        let inserted = db_insert(&pool, "Old Name", "", AdvantageKind::Merit, None, &[], &[], &[])
             .await
             .unwrap();
-        db_update(&pool, inserted.id, "New Name", "desc", AdvantageKind::Merit, None, &[], &[])
+        db_update(&pool, inserted.id, "New Name", "desc", AdvantageKind::Merit, None, &[], &[], &[])
             .await
             .unwrap();
         let rows = db_list(&pool).await.unwrap();
@@ -693,7 +723,7 @@ mod tests {
     #[tokio::test]
     async fn delete_succeeds_on_custom_row() {
         let pool = test_pool().await;
-        let inserted = db_insert(&pool, "To Delete", "", AdvantageKind::Merit, None, &[], &[])
+        let inserted = db_insert(&pool, "To Delete", "", AdvantageKind::Merit, None, &[], &[], &[])
             .await
             .unwrap();
         db_delete(&pool, inserted.id).await.unwrap();
@@ -701,9 +731,9 @@ mod tests {
     }
 
     async fn seed_three(pool: &SqlitePool) {
-        db_insert(pool, "M1", "", AdvantageKind::Merit,      None, &vec!["Merit".to_string()],      &[]).await.unwrap();
-        db_insert(pool, "B1", "", AdvantageKind::Background, None, &vec!["Background".to_string()], &[]).await.unwrap();
-        db_insert(pool, "F1", "", AdvantageKind::Flaw,       None, &vec!["Flaw".to_string()],       &[]).await.unwrap();
+        db_insert(pool, "M1", "", AdvantageKind::Merit,      None, &vec!["Merit".to_string()],      &[], &[]).await.unwrap();
+        db_insert(pool, "B1", "", AdvantageKind::Background, None, &vec!["Background".to_string()], &[], &[]).await.unwrap();
+        db_insert(pool, "F1", "", AdvantageKind::Flaw,       None, &vec!["Flaw".to_string()],       &[], &[]).await.unwrap();
     }
 
     #[tokio::test]
@@ -760,9 +790,9 @@ mod tests {
     #[tokio::test]
     async fn kind_round_trips_through_insert_and_list() {
         let pool = test_pool().await;
-        db_insert(&pool, "F1", "", AdvantageKind::Flaw,       None, &[], &[]).await.unwrap();
-        db_insert(&pool, "B1", "", AdvantageKind::Background, None, &[], &[]).await.unwrap();
-        db_insert(&pool, "M1", "", AdvantageKind::Merit,      None, &[], &[]).await.unwrap();
+        db_insert(&pool, "F1", "", AdvantageKind::Flaw,       None, &[], &[], &[]).await.unwrap();
+        db_insert(&pool, "B1", "", AdvantageKind::Background, None, &[], &[], &[]).await.unwrap();
+        db_insert(&pool, "M1", "", AdvantageKind::Merit,      None, &[], &[], &[]).await.unwrap();
         let rows = db_list(&pool).await.unwrap();
         let by_name: std::collections::HashMap<_, _> =
             rows.iter().map(|r| (r.name.clone(), r.kind)).collect();
@@ -787,10 +817,11 @@ mod tests {
             Some(&attribution),
             &[],
             &[],
+            &[],
         )
         .await
         .unwrap();
-        db_insert(&pool, "Local Merit", "", AdvantageKind::Merit, None, &[], &[])
+        db_insert(&pool, "Local Merit", "", AdvantageKind::Merit, None, &[], &[], &[])
             .await
             .unwrap();
         let rows = db_list(&pool).await.unwrap();
@@ -808,9 +839,9 @@ mod tests {
     #[tokio::test]
     async fn list_by_kind_filters_correctly() {
         let pool = test_pool().await;
-        db_insert(&pool, "F1", "", AdvantageKind::Flaw,  None, &[], &[]).await.unwrap();
-        db_insert(&pool, "F2", "", AdvantageKind::Flaw,  None, &[], &[]).await.unwrap();
-        db_insert(&pool, "M1", "", AdvantageKind::Merit, None, &[], &[]).await.unwrap();
+        db_insert(&pool, "F1", "", AdvantageKind::Flaw,  None, &[], &[], &[]).await.unwrap();
+        db_insert(&pool, "F2", "", AdvantageKind::Flaw,  None, &[], &[], &[]).await.unwrap();
+        db_insert(&pool, "M1", "", AdvantageKind::Merit, None, &[], &[], &[]).await.unwrap();
         let flaws = db_list_by_kind(&pool, AdvantageKind::Flaw).await.unwrap();
         assert_eq!(flaws.len(), 2);
         assert!(flaws.iter().all(|r| r.kind == AdvantageKind::Flaw));
@@ -920,7 +951,7 @@ mod tests {
     #[tokio::test]
     async fn upsert_imported_suffixes_against_local_row() {
         let pool = test_pool().await;
-        db_insert(&pool, "Iron Gullet", "local desc", AdvantageKind::Merit, None, &[], &[])
+        db_insert(&pool, "Iron Gullet", "local desc", AdvantageKind::Merit, None, &[], &[], &[])
             .await
             .unwrap();
 
@@ -1014,7 +1045,7 @@ mod tests {
     #[tokio::test]
     async fn find_by_foundry_id_returns_none_for_local_row() {
         let pool = test_pool().await;
-        db_insert(&pool, "Allies", "local", AdvantageKind::Background, None, &[], &[])
+        db_insert(&pool, "Allies", "local", AdvantageKind::Background, None, &[], &[], &[])
             .await
             .unwrap();
         let found = db_find_by_foundry_id(&pool, "any_id", "Chicago").await.unwrap();
@@ -1189,6 +1220,7 @@ mod tests {
             "v1 with fixed typo",
             AdvantageKind::Merit,
             None,
+            &[],
             &[],
             &[],
         )
