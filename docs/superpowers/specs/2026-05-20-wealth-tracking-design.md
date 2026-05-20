@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-20
 **Status:** Design — pending user review
-**Phase scope:** This spec covers **V1** only. V2 capabilities (named stores, Foundry sync, time-tracker enforcement, income/job engines, asset auto-drift, Resources-advantage auto-derive) are designed-for, not built.
+**Phase scope:** This spec covers **V1** only. V2 capabilities (named stores, Foundry sync, time-tracker enforcement, income/job engines, asset auto-drift, Resources-advantage baseline-income helper) are designed-for, not built.
 
 ## Overview
 
@@ -35,6 +35,9 @@ The user explicitly approved per-character opt-in, the three-bucket data shape, 
 - **Negative balances are allowed.** `adjust_liquid(c, -1000)` succeeds even if it pushes liquid below zero. The GM may want to model debt, loans, or overspends narratively. The shop's buy form is the *only* path that gates affordability (the [Buy] button is disabled when `liquid < final_price`); every other primitive accepts any signed delta without validation. This keeps the tool layer dumb and the policy in the mechanics layer where it belongs.
 - **`transfer_funds(c, X, X, n)` is a hard error**, not a no-op. Same-bucket transfers are almost certainly bugs in calling code; failing loudly surfaces them. Returns `Err(WealthError::SameBucketTransfer)`.
 - **`transfer_funds` with `amount > balance[from]` is allowed** (consistent with negative balances above). The bucket the GM transfers from goes negative; transfers are not affordability-gated at the tool layer.
+- **`enable_wallet` on an already-enabled character is idempotent.** Implementation: `INSERT OR IGNORE` then `SELECT`. Returns the existing wallet untouched (no clobbering of balances or assets). No error.
+- **`disable_wallet` on a non-existent wallet is a no-op.** Returns `Ok(())` without doing anything. No error. Removes a foot-gun for callers that double-disable.
+- **`purchase_item_slot` initializes `current_value = price`** on the newly-created asset row (where `price` is the GM's final price after band + condition + custom modifiers). Without this, freshly-bought assets would show up worth $0 by default — the schema's `current_value REAL NOT NULL DEFAULT 0` is for *manually-added* assets where the GM may not know the value yet, not for purchases.
 
 ---
 
@@ -55,10 +58,10 @@ The user explicitly approved per-character opt-in, the three-bucket data shape, 
 ┌────────────────────────────▼─────────────────────────────────┐
 │  TOOL LAYER  (typed wrappers ↔ Tauri commands ↔ Rust DB)     │
 │  src/lib/wealth/api.ts   ←→   src-tauri/src/db/wealth/       │
-│    ├─ wallet.rs    enable/disable/get/adjust/transfer        │
-│    ├─ asset.rs     add/update/remove/list                    │
-│    ├─ catalog.rs   list_slots/add_custom_slot                │
-│    └─ purchase.rs  composed atomic purchase                  │
+│    ├─ wallet.rs       enable/disable/get/adjust/transfer     │
+│    ├─ asset.rs        add/update/remove/list                 │
+│    ├─ catalog.rs      list_slots/add_custom_slot             │
+│    └─ transactions.rs atomic purchase + atomic sell          │
 └────────────────────────────┬─────────────────────────────────┘
                              │ SQL (sqlx, sqlite)
 ┌────────────────────────────▼─────────────────────────────────┐
@@ -121,7 +124,7 @@ pub enum AssetCategory {
     Weapon,
     Vehicle,
     Property,
-    Asset,
+    Investment,
     Misc,
 }
 
@@ -197,7 +200,7 @@ export interface Wallet {
   updatedAt: string;
 }
 
-export type AssetCategory = 'weapon' | 'vehicle' | 'property' | 'asset' | 'misc';
+export type AssetCategory = 'weapon' | 'vehicle' | 'property' | 'investment' | 'misc';
 export type AssetCondition = 'new' | 'used' | 'very_used' | 'custom';
 
 export interface CustomModifier {
@@ -264,7 +267,7 @@ CREATE TABLE IF NOT EXISTS character_assets (
     character_id          INTEGER NOT NULL
                                   REFERENCES character_wallets(character_id) ON DELETE CASCADE,
     name                  TEXT    NOT NULL,
-    category              TEXT    CHECK(category IN ('weapon','vehicle','property','asset','misc')),
+    category              TEXT    CHECK(category IN ('weapon','vehicle','property','investment','misc')),
     class                 TEXT,
     purchase_price        REAL,
     current_value         REAL    NOT NULL DEFAULT 0,
@@ -281,7 +284,7 @@ CREATE INDEX IF NOT EXISTS idx_character_assets_character_id
 CREATE TABLE IF NOT EXISTS item_slots (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     category              TEXT    NOT NULL
-                                  CHECK(category IN ('weapon','vehicle','property','asset','misc')),
+                                  CHECK(category IN ('weapon','vehicle','property','investment','misc')),
     class                 TEXT    NOT NULL,
     label                 TEXT    NOT NULL,
     base_price_min        REAL    NOT NULL,
@@ -337,7 +340,7 @@ pub fn add_custom_slot(pool, payload: NewItemSlot) -> Result<ItemSlot>;
 pub fn remove_custom_slot(pool, slot_id: i64) -> Result<()>;
 ```
 
-### Composed (`src-tauri/src/db/wealth/purchase.rs`)
+### Composed (`src-tauri/src/db/wealth/transactions.rs`)
 
 ```rust
 pub struct PurchaseRequest {
@@ -350,10 +353,22 @@ pub struct PurchaseRequest {
     pub notes: Option<String>,
 }
 
-/// Atomic: adjust_liquid(-price) + add_asset(...) in one transaction.
-/// On any failure, both roll back.
+pub struct SellRequest {
+    pub asset_id: i64,
+    pub sale_price: f64,                  // GM-chosen sale price (defaults in UI to current_value)
+    pub notes: Option<String>,            // optional ledger note for the wallet adjustment
+}
+
+/// Atomic: adjust_liquid(-price) + add_asset(...) with current_value = price
+/// in one transaction. On any failure, both roll back.
 pub fn purchase_item_slot(pool, req: PurchaseRequest) -> Result<(Wallet, Asset)>;
+
+/// Atomic: adjust_liquid(+sale_price) + remove_asset(asset_id) in one transaction.
+/// On any failure, both roll back. Resolves character_id from the asset row.
+pub fn sell_asset(pool, req: SellRequest) -> Result<Wallet>;
 ```
+
+Purchase and sell are intentionally **symmetric** atomic primitives. Both live at the tool layer because cross-table mutation needs a single SQLite transaction to guarantee no half-finished state, and Tauri commands are not a transactional boundary across calls — meaning the mechanics layer cannot reliably compose `adjust_liquid` + `remove_asset` itself.
 
 ### Tauri command surface
 
@@ -364,10 +379,10 @@ wealth_set_currency_name     wealth_set_transfer_delay
 wealth_add_asset             wealth_update_asset           wealth_remove_asset
 wealth_list_assets
 wealth_list_item_slots       wealth_add_custom_slot        wealth_remove_custom_slot
-wealth_purchase_item_slot
+wealth_purchase_item_slot    wealth_sell_asset
 ```
 
-16 commands. Every command registered in `invoke_handler` in the same commit it lands in `lib.rs`. `ARCHITECTURE.md §4` IPC inventory updated in the same commit — both the module's per-file list AND the running total. (See CLAUDE.md "Claude-specific rules".)
+17 commands. Every command registered in `invoke_handler` in the same commit it lands in `lib.rs`. `ARCHITECTURE.md §4` IPC inventory updated in the same commit — both the module's per-file list AND the running total. (See CLAUDE.md "Claude-specific rules".)
 
 ### Typed TS wrappers (`src/lib/wealth/api.ts`)
 
@@ -394,6 +409,7 @@ export async function addCustomSlot(payload: NewItemSlot): Promise<ItemSlot>;
 export async function removeCustomSlot(slotId: number): Promise<void>;
 
 export async function purchaseItemSlot(req: PurchaseRequest): Promise<{ wallet: Wallet; asset: Asset }>;
+export async function sellAsset(req: SellRequest): Promise<Wallet>;
 ```
 
 No Svelte component invokes `invoke(...)` directly — every IPC goes through `src/lib/wealth/api.ts` (per CLAUDE.md "Claude-specific rules").
@@ -447,7 +463,7 @@ Click → `enableWallet(characterId)` → page re-renders with the enabled state
 - **Adjust modal** (`+` / `−` / `edit` on liquid or banked) — numeric input, signed delta, optional note (note is V2; V1 just stores the delta).
 - **Transfer modal** — amount + direction (`liquid → banked` or `banked → liquid`). Shows the `transfer_delay` hint if set, but executes instantly in V1.
 - **Add Asset modal** — name, category, class (optional), current value, condition, custom modifiers (stackable chips), notes. No slot required (manual entry path for items not in the catalog).
-- **Sell modal** — asks for sale price (defaults to `current_value`), then atomically `adjust_liquid(+price) + remove_asset(id)`.
+- **Sell modal** — asks for sale price (defaults to `current_value`), then calls `sellAsset({asset_id, sale_price})` which performs the atomic `adjust_liquid(+price) + remove_asset(id)` in a single Rust transaction.
 - **Buy form** — opens when clicking a shop row. Fields:
   - **Slot**: pre-filled (e.g., "Economy" vehicle).
   - **Final price**: slider between `base_price_min` and `base_price_max`, default midpoint. GM may type any value.
@@ -490,7 +506,7 @@ Lives in `src-tauri/src/db/seed.rs` alongside the Advantages seed. Final list wi
 | weapon    | improvised, knife, sword, cheap_handgun, military_handgun, long_gun, heavy       | ~7    |
 | vehicle   | economy, mid_range, high_end, supercar, motorcycle, utility                      | ~6    |
 | property  | rented_apt, owned_apt, house, mansion, safehouse, commercial                     | ~6    |
-| asset     | small_investment, medium_investment, business_share, art_piece                   | ~4    |
+| investment| small_investment, medium_investment, business_share, art_piece                   | ~4    |
 | misc      | small_luxury, medium_luxury, status_symbol, service_short, service_long, consumable | ~6 |
 
 Price bands are GM-tunable post-seed (V2 may surface an "edit slot" UI; V1 only allows adding/removing user-custom slots, not editing built-ins). Built-ins are seeded with `source = 'V5 default catalog'`; user-customs with `source = NULL`.
@@ -538,7 +554,7 @@ Because the V1 data model is fully relational and field-addressable, V2 will be 
 - **Inter-character money flow primitives** — `gift(a, b, amount) = adjust_liquid(a, -x) + adjust_liquid(b, +x)`; lives in mechanics layer when needed.
 - **Named per-campaign stores** — the catalog is global in V1. Per-campaign stores layer on top by adding a `stores` table + `store_inventory` join table later.
 - **Asset auto-drift / depreciation** — `current_value` is GM-edited only.
-- **Resources-advantage auto-derive** — explicitly excluded per user instruction; the systems coexist independently.
+- **Resources-advantage baseline-income helper** — deferred to V2. User explicitly wanted this layered on top of manual entry ("mix of 4 and manual" during brainstorm — option 4 = the Resources-dot helper). It will land as a mechanics-layer composition that reads the character's Resources dot rating and applies `adjust_liquid(c, dots × per_dot_baseline)`. V1 ships only the underlying primitive; no auto-derive runs yet.
 - **Foundry sync** — V2 (above).
 - **Coterie shared purse** — interesting future feature; would be a separate "coterie_wallets" table with similar shape, not part of V1.
 - **Currency conversion** — `currency_name` is a label only; no math between currencies.
