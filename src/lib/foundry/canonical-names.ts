@@ -111,7 +111,7 @@ export const FOUNDRY_SKILL_NAMES: readonly SkillName[] = [
 /**
  * Canonical path strings for V5 vital tracks. Used by:
  *   - active-deltas.readPath (path-resolver targets)
- *   - ModifierEffectEditor path-input autocomplete
+ *   - ModifierEffectBody / AppliesToPicker path-input autocomplete
  *
  * Path strings match the dot-path the resolver expects (see active-deltas.ts).
  * `health.superficial` / `health.aggravated` / `willpower.superficial` /

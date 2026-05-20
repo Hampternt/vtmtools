@@ -8,7 +8,7 @@ export type FieldPreset = {
 };
 
 /**
- * Quick-add chips surfaced in AdvantageForm's properties section.
+ * Quick-add chips surfaced in AdvantageBody's properties section.
  * Clicking one appends a new Field with this name/type/defaultValue.
  * A preset chip is disabled when a field with the same name already
  * exists on the row (name uniqueness is enforced in the form).
