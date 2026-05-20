@@ -147,6 +147,17 @@ pub struct NewStatusTemplate {
     pub description: String,
     pub effects: Vec<ModifierEffect>,
     pub tags: Vec<String>,
+    /// Item Builder Shell: true = persist a draft (Save WIP) that bypasses
+    /// the empty-name guard. `#[serde(default)]` tolerates legacy payloads
+    /// that pre-date the field.
+    #[serde(default)]
+    pub wip: bool,
+    /// Stage keys the user explicitly confirmed in the multi-stage builder.
+    /// Persisted alongside `wip` so the reopen flow can restore the stage
+    /// machine. None = pre-Item-Builder payload (treated as "all stages
+    /// confirmed").
+    #[serde(default)]
+    pub confirmed_fields: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,6 +167,17 @@ pub struct StatusTemplatePatch {
     pub description: Option<String>,
     pub effects: Option<Vec<ModifierEffect>>,
     pub tags: Option<Vec<String>>,
+    /// Item Builder Shell: REPLACES the stored `wip` flag when present on the
+    /// patch. Distinct from the other Option fields (which use patch-or-skip
+    /// semantics): an absent `wip` key is a no-op, but a present `wip` value
+    /// — including `false` to promote a draft — is authoritative.
+    #[serde(default)]
+    pub wip: Option<bool>,
+    /// Same semantics as `wip`: absent = no-op; present (even Some(empty
+    /// vec)) = REPLACE. A normal "finish the draft" save sends None here
+    /// (omits the key) so the column clears to NULL.
+    #[serde(default)]
+    pub confirmed_fields: Option<Vec<String>>,
 }
 
 #[cfg(test)]

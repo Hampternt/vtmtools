@@ -93,7 +93,16 @@
   });
 
   let bonusSubStage = $state<'type' | 'name' | 'value' | 'applies'>('type');
-  let bonusNameSticky = $state(false);
+  // Sticky-name semantics: when editing an existing advantage whose stored
+  // bonusName diverges from the derived default, treat the loaded name as
+  // user-authored so the name-syncing `$effect` below doesn't immediately
+  // overwrite it. Without this guard, opening "Iron Gullet" + a custom
+  // "Brawl Buff" bonus name re-derives to "Iron Gullet bonus" on first
+  // reactive tick.
+  let bonusNameSticky = $state(
+    initial?.effects?.[0]?.bonusName != null &&
+    initial.effects[0].bonusName !== deriveBonusName(initial.name)
+  );
 
   $effect(() => {
     if (bodyState && !bonusNameSticky) {

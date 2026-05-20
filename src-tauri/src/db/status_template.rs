@@ -33,7 +33,8 @@ fn row_to_template(r: &sqlx::sqlite::SqliteRow) -> Result<StatusTemplate, String
 
 pub(crate) async fn db_list(pool: &SqlitePool) -> Result<Vec<StatusTemplate>, String> {
     let rows = sqlx::query(
-        "SELECT id, name, description, effects_json, tags_json, created_at, updated_at
+        "SELECT id, name, description, effects_json, tags_json, created_at, updated_at,
+                wip, confirmed_fields
          FROM status_templates ORDER BY id ASC"
     )
     .fetch_all(pool)
@@ -44,7 +45,8 @@ pub(crate) async fn db_list(pool: &SqlitePool) -> Result<Vec<StatusTemplate>, St
 
 pub(crate) async fn db_get(pool: &SqlitePool, id: i64) -> Result<StatusTemplate, String> {
     let row = sqlx::query(
-        "SELECT id, name, description, effects_json, tags_json, created_at, updated_at
+        "SELECT id, name, description, effects_json, tags_json, created_at, updated_at,
+                wip, confirmed_fields
          FROM status_templates WHERE id = ?"
     )
     .bind(id)
@@ -66,23 +68,36 @@ pub(crate) async fn db_add(
     pool: &SqlitePool,
     input: NewStatusTemplate,
 ) -> Result<StatusTemplate, String> {
-    // Empty name is allowed (Save WIP). The frontend's bodyValid flag drives
-    // the Save vs Save WIP label flip — backend persists whatever is sent.
-    // Follow-up will tighten this back to "reject empty name only when
-    // wip=false" once `wip` is plumbed through the Tauri command path.
+    // Empty name is rejected for non-WIP saves. Save WIP (wip=true) bypasses
+    // this guard so an in-progress draft can be persisted before the name
+    // stage has been filled in. The frontend's bodyValid flag drives the
+    // Save vs Save WIP label flip and sets `wip` accordingly.
+    if !input.wip && input.name.is_empty() {
+        return Err("db/status_template.add: empty name".to_string());
+    }
     let effects_json = serde_json::to_string(&input.effects)
         .map_err(|e| format!("db/status_template.add: serialize effects: {e}"))?;
     let tags_json = serde_json::to_string(&input.tags)
         .map_err(|e| format!("db/status_template.add: serialize tags: {e}"))?;
+    let confirmed_fields_str: Option<String> = match input.confirmed_fields.as_ref() {
+        Some(v) => Some(
+            serde_json::to_string(v)
+                .map_err(|e| format!("db/status_template.add: serialize confirmed_fields: {e}"))?,
+        ),
+        None => None,
+    };
 
     let result = sqlx::query(
-        "INSERT INTO status_templates (name, description, effects_json, tags_json)
-         VALUES (?, ?, ?, ?)"
+        "INSERT INTO status_templates
+            (name, description, effects_json, tags_json, wip, confirmed_fields)
+         VALUES (?, ?, ?, ?, ?, ?)"
     )
     .bind(&input.name)
     .bind(&input.description)
     .bind(&effects_json)
     .bind(&tags_json)
+    .bind(input.wip as i64)
+    .bind(&confirmed_fields_str)
     .execute(pool)
     .await
     .map_err(|e| format!("db/status_template.add: {e}"))?;
@@ -97,22 +112,48 @@ pub(crate) async fn db_update(
     let mut current = db_get(pool, id).await
         .map_err(|e| if e.contains("not found") { "db/status_template.update: not found".to_string() } else { format!("db/status_template.update: {e}") })?;
 
-    if let Some(name) = patch.name {
-        // Empty name is allowed (Save WIP). See db_add for rationale.
-        current.name = name;
+    if let Some(name) = patch.name             { current.name = name; }
+    if let Some(desc) = patch.description      { current.description = desc; }
+    if let Some(effects) = patch.effects       { current.effects = effects; }
+    if let Some(tags) = patch.tags             { current.tags = tags; }
+
+    // Item Builder Shell: `wip` and `confirmed_fields` are REPLACED on every
+    // IBS save (no patch-or-skip semantics). When `patch.wip` is None the
+    // caller is a legacy non-IBS path; leave both columns alone.
+    //
+    // When `patch.wip` is Some, the IBS authoritatively describes the
+    // current draft state — `wip` is overwritten with the new value and
+    // `confirmed_fields` is overwritten with the patch's value (which may
+    // be None to clear the column on a "finish the draft" save).
+    if let Some(wip) = patch.wip {
+        current.wip = wip;
+        current.confirmed_fields = patch.confirmed_fields.clone();
     }
-    if let Some(desc) = patch.description { current.description = desc; }
-    if let Some(effects) = patch.effects   { current.effects = effects; }
-    if let Some(tags) = patch.tags         { current.tags = tags; }
+
+    // Guard against promoting a draft to a completed save when the name is
+    // still empty. Apply on the MERGED state so a `wip: false`-only patch
+    // against an empty-named draft is rejected here (not on the original
+    // pre-patch name).
+    if !current.wip && current.name.is_empty() {
+        return Err("db/status_template.update: empty name".to_string());
+    }
 
     let effects_json = serde_json::to_string(&current.effects)
         .map_err(|e| format!("db/status_template.update: serialize effects: {e}"))?;
     let tags_json = serde_json::to_string(&current.tags)
         .map_err(|e| format!("db/status_template.update: serialize tags: {e}"))?;
+    let confirmed_fields_str: Option<String> = match current.confirmed_fields.as_ref() {
+        Some(v) => Some(
+            serde_json::to_string(v)
+                .map_err(|e| format!("db/status_template.update: serialize confirmed_fields: {e}"))?,
+        ),
+        None => None,
+    };
 
     let result = sqlx::query(
         "UPDATE status_templates
          SET name = ?, description = ?, effects_json = ?, tags_json = ?,
+             wip = ?, confirmed_fields = ?,
              updated_at = datetime('now')
          WHERE id = ?"
     )
@@ -120,6 +161,8 @@ pub(crate) async fn db_update(
     .bind(&current.description)
     .bind(&effects_json)
     .bind(&tags_json)
+    .bind(current.wip as i64)
+    .bind(&confirmed_fields_str)
     .bind(id)
     .execute(pool)
     .await
@@ -219,6 +262,8 @@ mod tests {
                 bonus_name: None,
             }],
             tags: vec!["Combat".to_string()],
+            wip: false,
+            confirmed_fields: None,
         }
     }
 
@@ -236,24 +281,118 @@ mod tests {
     async fn add_accepts_empty_name_for_wip() {
         // Empty name is a valid WIP-state value; Save WIP must always succeed.
         // Frontend's bodyValid flag (not the backend) drives the Save vs
-        // Save WIP label flip.
+        // Save WIP label flip, and now sends wip=true explicitly.
         let pool = fresh_pool().await;
         let mut new = sample_new();
         new.name = String::new();
+        new.wip = true;
+        new.confirmed_fields = Some(vec!["effects".to_string()]);
         let t = db_add(&pool, new).await.unwrap();
         assert!(t.id > 0);
         assert_eq!(t.name, "");
+        assert!(t.wip);
+        assert_eq!(t.confirmed_fields.as_deref(), Some(["effects".to_string()].as_slice()));
+    }
+
+    #[tokio::test]
+    async fn add_rejects_empty_name_when_not_wip() {
+        // Complement to add_accepts_empty_name_for_wip: a non-WIP save with
+        // an empty name is a developer bug — bodyValid would prevent it on
+        // the frontend, but the backend must guard regardless.
+        let pool = fresh_pool().await;
+        let mut new = sample_new();
+        new.name = String::new();
+        // new.wip defaults to false.
+        let err = db_add(&pool, new).await.unwrap_err();
+        assert!(err.contains("empty name"), "got: {err}");
     }
 
     #[tokio::test]
     async fn update_accepts_empty_name_for_wip() {
-        // Same rationale as add_accepts_empty_name_for_wip.
+        // Save WIP path through update: explicit wip=true patch keeps the
+        // empty-name guard quiet.
         let pool = fresh_pool().await;
         let t = db_add(&pool, sample_new()).await.unwrap();
         let updated = db_update(&pool, t.id, StatusTemplatePatch {
-            name: Some(String::new()), description: None, effects: None, tags: None,
+            name: Some(String::new()),
+            description: None,
+            effects: None,
+            tags: None,
+            wip: Some(true),
+            confirmed_fields: Some(vec!["effects".to_string()]),
         }).await.unwrap();
         assert_eq!(updated.name, "");
+        assert!(updated.wip);
+        assert_eq!(updated.confirmed_fields.as_deref(), Some(["effects".to_string()].as_slice()));
+    }
+
+    #[tokio::test]
+    async fn update_rejects_promoting_draft_to_complete_with_empty_name() {
+        // Save WIP an empty-name draft, then attempt to "finish" it by
+        // sending wip=false without supplying a name — the merged-state
+        // guard must reject so we never end up with a non-WIP empty-name
+        // row.
+        let pool = fresh_pool().await;
+        let mut new = sample_new();
+        new.name = String::new();
+        new.wip = true;
+        let t = db_add(&pool, new).await.unwrap();
+        let err = db_update(&pool, t.id, StatusTemplatePatch {
+            name: None,
+            description: None,
+            effects: None,
+            tags: None,
+            wip: Some(false),
+            confirmed_fields: None,
+        }).await.unwrap_err();
+        assert!(err.contains("empty name"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn update_clears_wip_and_confirmed_fields_on_finish_save() {
+        // Promote a WIP draft to a finished row: confirmed_fields must
+        // clear to NULL (REPLACE, not COALESCE).
+        let pool = fresh_pool().await;
+        let mut new = sample_new();
+        new.wip = true;
+        new.confirmed_fields = Some(vec!["effects".to_string()]);
+        let t = db_add(&pool, new).await.unwrap();
+        assert!(t.wip);
+
+        let updated = db_update(&pool, t.id, StatusTemplatePatch {
+            name: None, description: None, effects: None, tags: None,
+            wip: Some(false),
+            confirmed_fields: None,
+        }).await.unwrap();
+        assert!(!updated.wip);
+        assert!(updated.confirmed_fields.is_none(),
+            "finish save with confirmedFields omitted must clear the column");
+    }
+
+    #[tokio::test]
+    async fn legacy_update_without_wip_field_leaves_columns_alone() {
+        // A non-IBS caller (or unit-test partial patch) that omits `wip`
+        // must NOT clobber the stored wip / confirmed_fields columns.
+        let pool = fresh_pool().await;
+        let mut new = sample_new();
+        new.wip = true;
+        new.confirmed_fields = Some(vec!["effects".to_string()]);
+        let t = db_add(&pool, new).await.unwrap();
+
+        let updated = db_update(&pool, t.id, StatusTemplatePatch {
+            name: None,
+            description: Some("only changing description".to_string()),
+            effects: None, tags: None,
+            wip: None,
+            confirmed_fields: None,
+        }).await.unwrap();
+        assert!(updated.wip, "wip must survive a wip-less patch");
+        assert_eq!(
+            updated.confirmed_fields.as_deref(),
+            Some(["effects".to_string()].as_slice()),
+            "confirmed_fields must survive a wip-less patch",
+        );
+        assert_eq!(updated.description, "only changing description");
     }
 
     #[tokio::test]
@@ -262,6 +401,7 @@ mod tests {
         let t = db_add(&pool, sample_new()).await.unwrap();
         let updated = db_update(&pool, t.id, StatusTemplatePatch {
             name: Some("Renamed".into()), description: None, effects: None, tags: None,
+            wip: None, confirmed_fields: None,
         }).await.unwrap();
         assert_eq!(updated.name, "Renamed");
         assert_eq!(updated.effects.len(), 1); // untouched
@@ -272,6 +412,7 @@ mod tests {
         let pool = fresh_pool().await;
         let err = db_update(&pool, 9999, StatusTemplatePatch {
             name: Some("X".into()), description: None, effects: None, tags: None,
+            wip: None, confirmed_fields: None,
         }).await.unwrap_err();
         assert!(err.contains("not found"), "got: {err}");
     }
