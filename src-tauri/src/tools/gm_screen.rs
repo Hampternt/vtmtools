@@ -181,6 +181,7 @@ pub(crate) async fn do_push_to_foundry(
                     ModifierKind::Difficulty => "difficulty: no Foundry bonus equivalent",
                     ModifierKind::Note => "note: descriptive only",
                     ModifierKind::Stat => "stat: render-time card delta only, no Foundry bonus",
+                    ModifierKind::AutoSuccess => "auto_success: storage-only, roller adds support later",
                     ModifierKind::Pool => unreachable!("Pool always translates"),
                 };
                 skipped.push(SkippedEffect {

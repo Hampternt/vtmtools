@@ -277,7 +277,7 @@ export interface FoundryRaw {
 
 export type ModifierZone = 'character' | 'situational';
 
-export type ModifierKind = 'pool' | 'difficulty' | 'note' | 'stat';
+export type ModifierKind = 'pool' | 'difficulty' | 'note' | 'stat' | 'auto_success';
 
 export interface ModifierEffect {
   kind: ModifierKind;

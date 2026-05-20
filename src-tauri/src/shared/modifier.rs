@@ -76,6 +76,7 @@ pub enum ModifierKind {
     Difficulty,
     Note,
     Stat, // NEW — render-time visual stat delta on the character card.
+    AutoSuccess, // Storage-only in v1 — V5 automatic-success bonuses; roller adds support later.
 }
 
 /// Argument shape for `add_character_modifier`.
