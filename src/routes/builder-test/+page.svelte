@@ -1,8 +1,10 @@
 <script lang="ts">
   import ValueSelector from '$lib/components/builder/ValueSelector.svelte';
   import AppliesToPicker from '$lib/components/builder/AppliesToPicker.svelte';
+  import ItemBuilderShell from '$lib/components/builder/ItemBuilderShell.svelte';
   let v = $state(3);
   let p = $state<string[]>([]);
+  let shellOpen = $state(false);
 </script>
 
 <div style="padding: 2rem; color: var(--text-primary); background: var(--bg-page); min-height: 100vh;">
@@ -18,5 +20,18 @@
     <h2>AppliesToPicker</h2>
     <AppliesToPicker paths={p} onChange={(next) => p = next} />
     <p>Paths: {JSON.stringify(p)}</p>
+  </section>
+
+  <section style="margin-top: 2rem;">
+    <h2>ItemBuilderShell</h2>
+    <button onclick={() => shellOpen = true}>Open shell</button>
+    <ItemBuilderShell
+      open={shellOpen}
+      title="Smoke test"
+      onSave={() => { alert('Save'); shellOpen = false; }}
+      onCancel={() => { shellOpen = false; }}
+    >
+      <div style="padding: 1rem;">Hello from inside the shell. Ctrl+Enter saves. Esc cancels.</div>
+    </ItemBuilderShell>
   </section>
 </div>
