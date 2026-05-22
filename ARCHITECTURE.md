@@ -995,6 +995,20 @@ inventing a new hook.
     to the bridge store ([ADR 0006](docs/adr/0006-bridge-source-generalization.md))
     moved all `listen()` calls into `src/store/bridge.svelte.ts`.
 
+### Wealth tracking V1 — manual smoke (one pass before claim-of-done)
+
+1. Open the Wealth tool, pick a character → expect "not using the wealth system" with Enable button.
+2. Click Enable → expect three panels (wallet zero-state / empty assets / shop with vehicle tab default).
+3. Open shop → Vehicles → "Economy vehicle" → buy at default mid-band price, condition=used, no custom mods → expect:
+   - Liquid debited by the displayed final price.
+   - New asset row appears in Assets with `current_value == purchase price`.
+4. Click Adjust on Liquid → +1000 → expect liquid balance bumps by 1000.
+5. Click Transfer → 500 from Liquid to Banked → expect both totals update and conserve.
+6. Sell the asset at 80% of current value → expect asset row gone, liquid credited.
+7. Disable wealth tracking (with confirm) → expect return to Enable state, asset count and wallet wiped.
+8. Re-enable → expect zero balances, empty assets (cascade was clean).
+9. Reload the app → expect the catalog still populated (seed survived) and any custom slots from V2 still present (none in V1).
+
 ## §11 Plan & execution conventions
 
 Plans produced against this architecture are structured for parallel
