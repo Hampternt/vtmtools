@@ -1,3 +1,5 @@
+import { SvelteSet } from 'svelte/reactivity';
+
 export type Stage = string;
 
 export interface StageMachineConfig {
@@ -18,24 +20,25 @@ export interface StageMachine {
 export function createStageMachine(cfg: StageMachineConfig): StageMachine {
   const tabOrder = cfg.tabOrder;
   const required = new Set(cfg.required);
-  const confirmed = new Set<Stage>(cfg.initialConfirmed ?? []);
+  const confirmed = new SvelteSet<Stage>(cfg.initialConfirmed ?? []);
 
   function firstUnconfirmed(): Stage {
     for (const s of tabOrder) if (!confirmed.has(s)) return s;
     return 'review';
   }
 
-  let stage: Stage =
+  let stage = $state<Stage>(
     [...required].every(r => confirmed.has(r))
       ? (cfg.initialConfirmed && cfg.initialConfirmed.length === tabOrder.length ? 'review' : firstUnconfirmed())
-      : firstUnconfirmed();
+      : firstUnconfirmed()
+  );
 
   if ([...tabOrder].every(s => confirmed.has(s))) stage = 'review';
 
   const machine: StageMachine = {
     get stage() { return stage; },
     set stage(s: Stage) { stage = s; },
-    confirmed,
+    get confirmed() { return confirmed; },
 
     advance() {
       if (stage !== 'review') confirmed.add(stage);

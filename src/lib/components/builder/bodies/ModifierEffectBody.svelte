@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createStageMachine } from '$lib/builder/stage-machine';
+  import { createStageMachine } from '$lib/builder/stage-machine.svelte';
   import CardComposer from '../CardComposer.svelte';
   import CardSlot from '../CardSlot.svelte';
   import TagChipInput from '../TagChipInput.svelte';

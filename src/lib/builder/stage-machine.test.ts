@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createStageMachine, type StageMachine } from './stage-machine';
+import { createStageMachine, type StageMachine } from './stage-machine.svelte';
 
 const tabOrder = ['name', 'type', 'level', 'bonus', 'description', 'tags'] as const;
 const required = ['name', 'bonus'] as const;

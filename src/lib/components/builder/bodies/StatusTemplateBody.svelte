@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createStageMachine } from '$lib/builder/stage-machine';
+  import { createStageMachine } from '$lib/builder/stage-machine.svelte';
   import CardComposer from '../CardComposer.svelte';
   import CardSlot from '../CardSlot.svelte';
   import TagChipInput from '../TagChipInput.svelte';
@@ -151,6 +151,9 @@
       onkeydown={(e) => { if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); machine.advance(); } }}
       autofocus />
     <p class="hint">e.g. "Frenzy", "Hunting Successful", "Stunned"</p>
+    <div style="display: flex; justify-content: center; margin-top: 0.6rem;">
+      <button class="next-btn" onclick={() => machine.advance()}>Next →</button>
+    </div>
   {:else if bodyState && machine.stage === 'effects'}
     <div class="prompt-label">— SPOTLIGHT —</div>
     <h3 class="prompt">Define effects</h3>
@@ -192,6 +195,9 @@
       onkeydown={(e) => { if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); machine.advance(); } }}
       autofocus></textarea>
     <p class="hint">Tab to confirm (empty is fine)</p>
+    <div style="display: flex; justify-content: center; margin-top: 0.6rem;">
+      <button class="next-btn" onclick={() => machine.advance()}>Next →</button>
+    </div>
   {:else if bodyState && machine.stage === 'tags'}
     <div class="prompt-label">— SPOTLIGHT —</div>
     <h3 class="prompt">Tag this template</h3>

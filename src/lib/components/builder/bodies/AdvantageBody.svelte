@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createStageMachine } from '$lib/builder/stage-machine';
+  import { createStageMachine } from '$lib/builder/stage-machine.svelte';
   import { pickPlaceholder } from '$lib/builder/latin-placeholders';
   import { deriveBonusName } from '$lib/builder/bonus-name';
   import CardComposer from '../CardComposer.svelte';
@@ -255,6 +255,7 @@
       autofocus
     />
     <p class="hint">Tab or Enter accepts placeholder · Shift+Tab goes back</p>
+    <button class="next-btn" onclick={() => machine.advance()}>Next →</button>
   {:else if bodyState && machine.stage === 'type'}
     <div class="prompt-label">— SPOTLIGHT —</div>
     <h3 class="prompt">What kind?</h3>
@@ -293,6 +294,7 @@
       <!-- svelte-ignore a11y_autofocus -->
       <input class="big-input" type="text" value={bodyState.bonus.bonusName} oninput={(e) => onBonusNameInput((e.currentTarget as HTMLInputElement).value)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); bonusSubStage = 'value'; } }} autofocus />
       <p class="hint">Default: "{deriveBonusName(bodyState.name)}" · Tab accepts</p>
+      <button class="next-btn" onclick={() => bonusSubStage = 'value'}>Next →</button>
     {:else if bonusSubStage === 'value'}
       <div class="prompt-label">— SPOTLIGHT —</div>
       <h3 class="prompt">How many {bodyState.bonus.kind === 'difficulty' ? 'difficulty steps' : bodyState.bonus.kind === 'auto_success' ? 'auto successes' : 'dice'}?</h3>
@@ -316,6 +318,7 @@
       autofocus
     ></textarea>
     <p class="hint">Tab to confirm (empty is fine)</p>
+    <button class="next-btn" onclick={() => machine.advance()}>Next →</button>
   {:else if bodyState && machine.stage === 'tags'}
     <div class="prompt-label">— SPOTLIGHT —</div>
     <h3 class="prompt">Tag this merit</h3>
