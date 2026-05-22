@@ -509,6 +509,104 @@ registered into `bridge.js::handleInbound`'s handler-map dispatch.
 See `docs/superpowers/specs/2026-04-26-foundry-helper-library-roadmap.md`
 for the umbrella conventions.
 
+### Wealth domain
+
+Opt-in per-character wealth tracking. Two numeric buckets (liquid /
+banked) plus a list of owned assets per character; shops are a
+category-filtered view over an abstract item-slot catalog priced by
+`class × condition × Π(custom_modifiers)`.
+
+```rust
+/// The two numeric buckets. Used by `transfer_funds`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Bucket { Liquid, Banked }
+
+/// Per-character wallet. Row presence in `character_wallets`
+/// IS the opt-in flag — there is no `wealth_enabled` boolean.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Wallet {
+    pub character_id: i64,
+    pub liquid: f64,
+    pub banked: f64,
+    pub currency_name: String,
+    pub transfer_delay: Option<TransferDelay>,  // forward-compat hint, not enforced V1
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// One owned asset. The "non-liquid" third bucket from the spec
+/// IS the *list* of these per character.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Asset {
+    pub id: i64,
+    pub character_id: i64,
+    pub name: String,
+    pub category: Option<AssetCategory>,
+    pub class: Option<String>,
+    pub purchase_price: Option<f64>,
+    pub current_value: f64,
+    pub condition: Option<AssetCondition>,
+    pub custom_modifiers: Vec<CustomModifier>,
+    pub notes: Option<String>,
+    pub created_at: String,
+}
+
+/// One abstract catalog row. Pricing is computed in
+/// `src/lib/wealth/pricing.ts` from `pickInBand × condition_multiplier
+/// × Π(custom_modifiers[i].mult)` at purchase time; `ItemSlot` only
+/// carries the band.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemSlot {
+    pub id: i64,
+    pub category: AssetCategory,
+    pub class: String,
+    pub label: String,
+    pub base_price_min: f64,
+    pub base_price_max: f64,
+    pub examples: Option<String>,    // GM-facing flavor text
+    pub is_custom: bool,
+    pub source: Option<String>,
+}
+```
+
+Five categories: `Weapon | Vehicle | Property | Investment | Misc`.
+Four conditions: `New | Used | VeryUsed | Custom` (the last is
+GM-supplied at purchase time). Condition multipliers are hardcoded
+constants in `src-tauri/src/shared/wealth.rs` — `new` 1.0, `used`
+0.6, `very_used` 0.3.
+
+```sql
+-- Per-character wallet. Row presence == opted in.
+CREATE TABLE character_wallets (
+    character_id PRIMARY KEY → saved_characters(id) ON DELETE CASCADE,
+    liquid, banked,
+    currency_name DEFAULT '$',
+    transfer_delay_json NULL,
+    created_at, updated_at
+);
+
+-- Owned assets (the "non-liquid" third bucket as a list of objects).
+CREATE TABLE character_assets (
+    id, character_id → character_wallets ON DELETE CASCADE,
+    name, category, class, purchase_price, current_value, condition,
+    custom_modifier_json NULL, notes, created_at
+);
+
+-- Abstract catalog. ~30 seeded rows + user-extensible.
+CREATE TABLE item_slots (
+    id, category, class, label, base_price_min, base_price_max,
+    examples, is_custom, source,
+    UNIQUE(category, class)
+);
+```
+
+Full spec:
+[`docs/superpowers/specs/2026-05-20-wealth-tracking-design.md`](docs/superpowers/specs/2026-05-20-wealth-tracking-design.md).
+
 ### Mirror layer
 
 The frontend `src/types.ts` mirrors these shapes in TypeScript.
@@ -522,15 +620,29 @@ Roll20.
 
 - **SQLite** at `app.path().app_data_dir()` (file `vtmtools.db`).
   All durable application state lives here: `dyscrasias`,
-  `chronicles`, `nodes`, `edges`.
+  `chronicles`, `nodes`, `edges`, `advantages`, `modifiers`,
+  `status_templates`, `saved_characters`, `character_wallets`,
+  `character_assets`, `item_slots`.
 - **Migrations** in `src-tauri/migrations/NNNN_*.sql`, applied on
   every startup via `sqlx::migrate!`. `PRAGMA foreign_keys = ON` is
   enabled on the pool via `SqliteConnectOptions` so `ON DELETE
   CASCADE` actually fires.
 - **Seed policy:** `src-tauri/src/db/seed.rs` deletes all
-  `is_custom = 0` rows in `dyscrasias` and reinserts the canonical
-  set on every start. Intentional; see
-  [ADR 0002](docs/adr/0002-destructive-reseed.md).
+  `is_custom = 0` rows in `dyscrasias`, `advantages`, and
+  `item_slots`, then reinserts the canonical set on every start.
+  Intentional; see [ADR 0002](docs/adr/0002-destructive-reseed.md).
+  `item_slots` carries a `UNIQUE(category, class)` constraint that
+  applies to **all** rows including customs — so the reseed uses
+  `INSERT OR IGNORE` to let a user-custom row whose `(category,
+  class)` matches a current or future built-in survive the cycle
+  intact (customs always win). Adding new built-in classes is safe.
+- **Wealth cascade chain:** `saved_characters` → `character_wallets`
+  (via `ON DELETE CASCADE` on `character_wallets.character_id`) →
+  `character_assets` (via `ON DELETE CASCADE` on
+  `character_assets.character_id` referencing
+  `character_wallets`). Disabling wealth tracking on a character
+  (`disable_wallet`) deletes the wallet row, cascade-dropping all
+  asset rows in one transaction.
 - **Ephemeral state:**
   - Svelte runes stores in `src/store/*` (e.g.
     `domains.svelte.ts` for chronicle UI state, `toolEvents.ts` for
@@ -821,6 +933,28 @@ Properties that must hold across all features.
   produced ghost-character bugs.
 - Dark-only. No theme toggle exists or will be added
   ([ADR 0004](docs/adr/0004-dark-only-theming.md)).
+- **Wealth subsystem opt-in semantics.** Row presence in
+  `character_wallets` IS the opt-in flag. There is no
+  `wealth_enabled` boolean. `enable_wallet` is idempotent
+  (`INSERT OR IGNORE` + SELECT — preserves balances if the row
+  already exists); `disable_wallet` is a no-op when absent (no
+  error) and cascade-deletes assets when present.
+- **Wealth tool-layer permissiveness.** `adjust_liquid` /
+  `adjust_banked` / `transfer_funds` accept any signed delta. The
+  resulting balance may go negative (so GMs can model debt
+  narratively). Affordability gating exists in exactly one place:
+  the Buy button in `BuyFormModal.svelte` is disabled when
+  `liquid < final_price`. The tool layer never refuses on
+  affordability grounds; the policy lives in the mechanics layer.
+- **Wealth transactional invariants.** `transfer_funds` with
+  `from == to` is a hard error (returns
+  `"wealth/transfer_funds: same bucket"`); cross-bucket transfers
+  conserve total balance. `purchase_item_slot` and `sell_asset`
+  are wrapped in single `sqlx` transactions — a mid-flight error
+  rolls back both the wallet mutation and the asset insert/delete.
+  `purchase_item_slot` sets the new asset's `current_value` equal
+  to its `purchase_price` (the GM's final price after band ×
+  condition × custom modifiers).
 
 ## §7 Error handling
 

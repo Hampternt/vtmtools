@@ -615,3 +615,70 @@ Per user emphasis: the V1 must be a *foundation* future capabilities slot into c
 ## Open questions for review
 
 None blocking. The agent-default decisions section above lists items the user did not explicitly approve; flag any during review.
+
+---
+
+## Implementation divergences (post-execution)
+
+This section records changes between the spec-as-designed and the spec-as-implemented. The branch `worktree-wealth-tracking-v1` (11 implementation commits + 2 cleanup commits) implemented this spec. During execution, the spec's assumptions about repo conventions turned out to be wrong in several places. The implementers correctly adapted to actual repo state. Future readers should treat these corrections as authoritative over the spec's earlier wording.
+
+### 1. Foreign-key target: `characters` → `saved_characters`
+
+The spec consistently references a `characters(id)` table that does not exist in this repo. The actual table holding per-character rows is `saved_characters`, defined by migration `0004_saved_characters.sql`. All FK references in the wealth migration target `saved_characters(id)`. The migration shipped with the wrong FK target in Task 1's commit (`645a40d`) and was corrected within Task 2 (`6b0b17b`) before any INSERT exercised it — SQLite accepts FKs to nonexistent tables at DDL time and only errors on the first row that needs them.
+
+### 2. Error type: `WealthError` enum → `Result<T, String>`
+
+The spec proposes a `WealthError` enum with variants (`WalletNotFound`, `SlotNotFound`, etc.). This repo has no `thiserror` or `anyhow` in `Cargo.toml` — every other `src-tauri/src/db/*.rs` returns `Result<T, String>` with a `format!("module/fn: …")` prefix. The wealth module matches that convention. Error variants are documented through the format strings:
+
+- `"wealth/enable_wallet: wallet not found for character {id}"` etc. for each function
+- `"wealth/transfer_funds: same bucket"` for the same-bucket guard
+- `"wealth/remove_custom_slot: slot not found or is built-in: {id}"`
+
+### 3. Tauri state type: `crate::AppState` → `crate::DbState`
+
+The spec referenced a `crate::AppState` struct with a `pool` field. The actual repo type is `crate::DbState`, a tuple struct holding the `SqlitePool`. Tauri commands access it via `tauri::State<'_, crate::DbState>` and `&state.0`. All 17 wealth command handlers use this pattern.
+
+### 4. DB migration filename: `0010_add_wealth.sql` → `0012_add_wealth.sql`
+
+Between this spec's commit (`dba4154`) and the start of plan execution, the `templates-impl` branch merged into master and brought in two migrations (`0010_add_wip_columns.sql`, `0011_add_bonus_name_and_effects.sql`). The wealth migration was bumped to `0012` to avoid collision. No callers reference the filename so the change had no downstream impact.
+
+### 5. CSS token names
+
+The spec referred to theme tokens such as `--color-bg`, `--color-surface`, `--color-text-muted`, `--space-*`, `--radius-*`, `--text-*` (font-size). **None of these exist in this repo.** The actual token namespace lives in `:global(:root)` in `src/routes/+layout.svelte` and uses a different naming scheme. Applied substitution table (used uniformly across all wealth Svelte components):
+
+| Spec token | Actual repo token |
+|---|---|
+| `--color-bg` | `--bg-base` |
+| `--color-surface` | `--bg-card` |
+| `--color-surface-alt` | `--bg-active` |
+| `--color-text` | `--text-primary` |
+| `--color-text-muted` | `--text-muted` |
+| `--color-border` | `--border-card` |
+| `--color-accent`, `--color-on-accent` | `--accent`, `--text-primary` |
+| `--color-danger`, `--color-warning` | `--accent` (no dedicated danger token in this repo) |
+| `--color-overlay` | `rgba(0, 0, 0, 0.6)` (no overlay token; structural rgba is fine, not a hex theme color) |
+| `--space-1`..`--space-5` | rem literals: `0.25rem` / `0.5rem` / `0.75rem` / `1rem` / `1.5rem` |
+| `--radius-sm` / `--radius-md` | `0.2rem` / `0.3rem` |
+| `--text-xs/sm/md/lg/2xl` | `0.75rem` / `0.82rem` / `1rem` / `1.125rem` / `1.5rem` |
+
+Button styling adopts the existing tool button convention (`background: var(--bg-active)`, `border: 1px solid var(--accent)`, `color: var(--accent)`) rather than the saturated `--color-accent`-fill the spec implied — matches the look of `AdvantagesManager.svelte` etc.
+
+### 6. DB module layout: nested module → single file
+
+The spec proposed `src-tauri/src/db/wealth/{wallet,asset,catalog,transactions}.rs` as a nested module. The plan overruled this in favor of a single `src-tauri/src/db/wealth.rs` file to match the existing repo convention — every other DB module is a single file (`advantage.rs` 1221 lines, `modifier.rs` 946, `saved_character.rs` 1046, etc.). The wealth module lands at ~1500 lines including inline tests.
+
+### 7. UI tool placement: SvelteKit route → tools registry
+
+The spec proposed `src/routes/wealth/[characterId]/+page.svelte` as a SvelteKit dynamic route. The actual repo convention is `src/tools/*.svelte` files registered in `src/tools.ts` — the sidebar renders from that registry. There are NO per-feature dynamic routes in this repo for tool surfaces. The wealth UI lives at `src/tools/WealthManager.svelte` and uses an in-tool character selector (sourced from the `savedCharacters` runes store) rather than a URL param.
+
+### 8. Hardening fix from end-of-branch review
+
+The spec describes the `seed_item_slots` reseed as `DELETE WHERE is_custom = 0` followed by plain `INSERT`. The combination of that pattern with `UNIQUE(category, class)` is reachable as a startup panic when a user-custom row's `(category, class)` matches a (current or future) built-in seed entry: the DELETE leaves the custom in place, the INSERT collides, and the seed function's `.expect` propagates the panic. The branch ships `INSERT OR IGNORE` instead (`45cc983`) — built-ins silently skip when a slot is already occupied; user customizations always win. This is a hardening change with no behavior change on a fresh database; it only matters when a custom collides with a built-in.
+
+### 9. Test naming clarification
+
+The spec's Task 5 proposed a test named `purchase_rolls_back_on_failure` that uses `slot_id = 999_999` to force an error. The actual code path checks the slot ID **before** the wallet debit — so the test exercises the early-error path, not the post-debit rollback path. The rollback is still correct (sqlx `tx` auto-drops on early return) but the test name was misleading. Renamed to `purchase_errors_before_mutation_when_slot_missing` in `45cc983` with an inline comment that the real post-debit rollback path is implicit in sqlx transaction semantics.
+
+---
+
+The current branch HEAD (after the two cleanup commits) is the source of truth for "what was actually shipped." The corresponding ARCHITECTURE.md sections — §2 Wealth domain, §3 storage notes, §6 invariants — describe the implemented behavior, not the spec's original wording.
