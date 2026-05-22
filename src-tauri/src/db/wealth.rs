@@ -699,6 +699,194 @@ pub async fn remove_custom_slot(pool: &SqlitePool, slot_id: i64) -> Result<(), S
 }
 
 // -------------------------------------------------------------------------
+// Composed transactions (purchase + sell)
+// -------------------------------------------------------------------------
+
+/// Atomically debit the wallet's `liquid` bucket and insert a new asset
+/// derived from an `item_slots` catalog row. The asset's `current_value`
+/// initializes to `req.price` per spec. Wrapped in a single `tx`: any
+/// error before `commit` rolls back both the wallet debit and the
+/// (would-be) insert, so callers can't observe a half-applied purchase.
+pub async fn purchase_item_slot(
+    pool: &SqlitePool,
+    req: PurchaseRequest,
+) -> Result<(Wallet, Asset), String> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| format!("db/wealth.purchase_item_slot.begin: {}", e))?;
+
+    // 1. Verify the wallet exists (opt-in gate).
+    let wallet_exists: Option<i64> = sqlx::query_scalar(
+        "SELECT character_id FROM character_wallets WHERE character_id = ?",
+    )
+    .bind(req.character_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| format!("db/wealth.purchase_item_slot.wallet_lookup: {}", e))?;
+    if wallet_exists.is_none() {
+        return Err(format!(
+            "db/wealth.purchase_item_slot: wallet not found for character {}",
+            req.character_id
+        ));
+    }
+
+    // 2. Look up the slot to derive category/class/label and validate
+    //    existence. (Done *before* the debit so a bad slot id never
+    //    touches the wallet — but the tx rollback still covers the
+    //    case where the lookup succeeds and the insert later fails.)
+    let slot_row: Option<(String, String, String)> = sqlx::query_as(
+        "SELECT category, class, label FROM item_slots WHERE id = ?",
+    )
+    .bind(req.slot_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| format!("db/wealth.purchase_item_slot.slot_lookup: {}", e))?;
+    let (cat_s, class_s, label) = slot_row.ok_or_else(|| {
+        format!(
+            "db/wealth.purchase_item_slot: item slot not found: {}",
+            req.slot_id
+        )
+    })?;
+    let category = AssetCategory::from_str(&cat_s);
+
+    // 3. Debit liquid.
+    let upd = sqlx::query(
+        "UPDATE character_wallets
+            SET liquid = liquid - ?, updated_at = CURRENT_TIMESTAMP
+          WHERE character_id = ?",
+    )
+    .bind(req.price)
+    .bind(req.character_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("db/wealth.purchase_item_slot.debit: {}", e))?;
+    if upd.rows_affected() == 0 {
+        return Err(format!(
+            "db/wealth.purchase_item_slot: wallet not found for character {}",
+            req.character_id
+        ));
+    }
+
+    // 4. Insert the asset row. `current_value` = purchase price per spec.
+    let asset_name = req.name_override.unwrap_or(label);
+    let cm_json = if req.custom_modifiers.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::to_string(&req.custom_modifiers)
+                .map_err(|e| format!("db/wealth.purchase_item_slot.custom_modifiers: {}", e))?,
+        )
+    };
+
+    let asset_id: i64 = sqlx::query_scalar(
+        "INSERT INTO character_assets
+            (character_id, name, category, class,
+             purchase_price, current_value, condition, custom_modifier_json, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         RETURNING id",
+    )
+    .bind(req.character_id)
+    .bind(&asset_name)
+    .bind(category.map(|c| c.as_str()))
+    .bind(&class_s)
+    .bind(req.price)
+    .bind(req.price)
+    .bind(req.condition.as_str())
+    .bind(cm_json)
+    .bind(req.notes.as_deref())
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| format!("db/wealth.purchase_item_slot.insert: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("db/wealth.purchase_item_slot.commit: {}", e))?;
+
+    let wallet = get_wallet(pool, req.character_id)
+        .await?
+        .ok_or_else(|| {
+            format!(
+                "db/wealth.purchase_item_slot: wallet not found for character {}",
+                req.character_id
+            )
+        })?;
+    let asset = fetch_asset(pool, asset_id).await?;
+
+    Ok((wallet, asset))
+}
+
+/// Atomically credit the asset's owning wallet and delete the asset.
+/// The character_id is resolved from the asset row so callers only need
+/// the asset id + sale price. Wrapped in a single `tx`: any error before
+/// `commit` rolls back both the credit and the (would-be) delete.
+pub async fn sell_asset(pool: &SqlitePool, req: SellRequest) -> Result<Wallet, String> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| format!("db/wealth.sell_asset.begin: {}", e))?;
+
+    // 1. Resolve character_id from the asset row.
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT character_id FROM character_assets WHERE id = ?",
+    )
+    .bind(req.asset_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| format!("db/wealth.sell_asset.lookup: {}", e))?;
+    let (character_id,) = row.ok_or_else(|| {
+        format!(
+            "db/wealth.sell_asset: asset not found: {}",
+            req.asset_id
+        )
+    })?;
+
+    // 2. Credit liquid.
+    let upd = sqlx::query(
+        "UPDATE character_wallets
+            SET liquid = liquid + ?, updated_at = CURRENT_TIMESTAMP
+          WHERE character_id = ?",
+    )
+    .bind(req.sale_price)
+    .bind(character_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("db/wealth.sell_asset.credit: {}", e))?;
+    if upd.rows_affected() == 0 {
+        return Err(format!(
+            "db/wealth.sell_asset: wallet not found for character {}",
+            character_id
+        ));
+    }
+
+    // 3. Delete the asset.
+    let del = sqlx::query("DELETE FROM character_assets WHERE id = ?")
+        .bind(req.asset_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("db/wealth.sell_asset.delete: {}", e))?;
+    if del.rows_affected() == 0 {
+        return Err(format!(
+            "db/wealth.sell_asset: asset not found: {}",
+            req.asset_id
+        ));
+    }
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("db/wealth.sell_asset.commit: {}", e))?;
+
+    get_wallet(pool, character_id)
+        .await?
+        .ok_or_else(|| {
+            format!(
+                "db/wealth.sell_asset: wallet not found for character {}",
+                character_id
+            )
+        })
+}
+
+// -------------------------------------------------------------------------
 // Tauri commands
 // -------------------------------------------------------------------------
 
@@ -831,6 +1019,22 @@ pub async fn wealth_remove_custom_slot(
     remove_custom_slot(&pool.0, slot_id).await
 }
 
+#[tauri::command]
+pub async fn wealth_purchase_item_slot(
+    pool: tauri::State<'_, crate::DbState>,
+    req: PurchaseRequest,
+) -> Result<(Wallet, Asset), String> {
+    purchase_item_slot(&pool.0, req).await
+}
+
+#[tauri::command]
+pub async fn wealth_sell_asset(
+    pool: tauri::State<'_, crate::DbState>,
+    req: SellRequest,
+) -> Result<Wallet, String> {
+    sell_asset(&pool.0, req).await
+}
+
 // -------------------------------------------------------------------------
 // Tests
 // -------------------------------------------------------------------------
@@ -845,13 +1049,16 @@ mod tests {
     /// In-memory pool with full migrations applied and `foreign_keys=ON`.
     /// FK enforcement is required so the `disable_wallet` cascade test is
     /// meaningful, and so `enable_wallet` correctly resolves the wallet's
-    /// FK to `saved_characters(id)`.
+    /// FK to `saved_characters(id)`. Also seeds the built-in item_slots
+    /// catalog so composed-transaction tests (`purchase_item_slot`) can
+    /// resolve seeded slot ids.
     async fn test_pool() -> SqlitePool {
         let opts = SqliteConnectOptions::from_str("sqlite::memory:")
             .unwrap()
             .foreign_keys(true);
         let pool = SqlitePool::connect_with(opts).await.unwrap();
         sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        crate::db::seed::seed_item_slots(&pool).await.unwrap();
         pool
     }
 
@@ -1033,5 +1240,138 @@ mod tests {
         disable_wallet(&pool, char_id)
             .await
             .expect("second disable must be no-op, not error");
+    }
+
+    // ---- Composed transactions (purchase + sell) ------------------------
+
+    #[tokio::test]
+    async fn purchase_inserts_asset_and_debits_liquid_atomically() {
+        let (pool, char_id) = fresh_pool_with_character("Ivy").await;
+        enable_wallet(&pool, char_id).await.unwrap();
+        adjust_liquid(&pool, char_id, 100_000.0).await.unwrap();
+
+        // Find a vehicle slot from the seed.
+        let slot: (i64,) = sqlx::query_as(
+            "SELECT id FROM item_slots WHERE category = 'vehicle' AND class = 'economy'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let (wallet, asset) = purchase_item_slot(
+            &pool,
+            PurchaseRequest {
+                character_id: char_id,
+                slot_id: slot.0,
+                price: 8_000.0,
+                condition: AssetCondition::Used,
+                custom_modifiers: vec![],
+                name_override: Some("'08 Honda Civic".to_string()),
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(wallet.liquid, 92_000.0);
+        assert_eq!(asset.name, "'08 Honda Civic");
+        assert_eq!(asset.purchase_price, Some(8_000.0));
+        assert_eq!(
+            asset.current_value, 8_000.0,
+            "spec: current_value initializes to purchase price"
+        );
+        assert_eq!(asset.condition, Some(AssetCondition::Used));
+        assert_eq!(asset.character_id, char_id);
+    }
+
+    #[tokio::test]
+    async fn purchase_rolls_back_on_failure() {
+        let (pool, char_id) = fresh_pool_with_character("Jack").await;
+        enable_wallet(&pool, char_id).await.unwrap();
+        adjust_liquid(&pool, char_id, 1_000.0).await.unwrap();
+
+        // Use a non-existent slot id to force a SlotNotFound error mid-
+        // transaction (the wallet has already been debited at that point
+        // in the function body, so this exercises the rollback path).
+        let result = purchase_item_slot(
+            &pool,
+            PurchaseRequest {
+                character_id: char_id,
+                slot_id: 999_999,
+                price: 500.0,
+                condition: AssetCondition::New,
+                custom_modifiers: vec![],
+                name_override: None,
+                notes: None,
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
+        // Wallet must be unchanged after failed purchase.
+        let w = get_wallet(&pool, char_id).await.unwrap().unwrap();
+        assert_eq!(
+            w.liquid, 1_000.0,
+            "wallet must roll back on purchase failure"
+        );
+        // No asset must have been inserted.
+        let assets = list_assets(&pool, char_id).await.unwrap();
+        assert!(assets.is_empty(), "no asset must persist after rollback");
+    }
+
+    #[tokio::test]
+    async fn sell_credits_liquid_and_removes_asset() {
+        let (pool, char_id) = fresh_pool_with_character("Kate").await;
+        enable_wallet(&pool, char_id).await.unwrap();
+        adjust_liquid(&pool, char_id, 50_000.0).await.unwrap();
+
+        let asset = add_asset(
+            &pool,
+            char_id,
+            NewAsset {
+                name: "Vintage watch".into(),
+                category: Some(AssetCategory::Misc),
+                class: None,
+                purchase_price: Some(3_000.0),
+                current_value: 3_500.0,
+                condition: Some(AssetCondition::New),
+                custom_modifiers: vec![],
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let wallet = sell_asset(
+            &pool,
+            SellRequest {
+                asset_id: asset.id,
+                sale_price: 3_200.0,
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(wallet.liquid, 53_200.0);
+        let assets = list_assets(&pool, char_id).await.unwrap();
+        assert!(assets.is_empty(), "sold asset must be removed");
+    }
+
+    #[tokio::test]
+    async fn sell_rolls_back_on_failure() {
+        let (pool, _char_id) = fresh_pool_with_character("Leo").await;
+        // No wallet enabled and asset_id is invalid — sell must error and
+        // leave the DB pristine.
+        let result = sell_asset(
+            &pool,
+            SellRequest {
+                asset_id: 999_999,
+                sale_price: 100.0,
+                notes: None,
+            },
+        )
+        .await;
+        assert!(result.is_err());
     }
 }

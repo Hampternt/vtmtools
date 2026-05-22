@@ -588,23 +588,27 @@ Rust signature + the types it references in §2) is the stable contract.
   `save_character`, `list_saved_characters`,
   `update_saved_character`, `delete_saved_character`,
   `patch_saved_field`.
-- **`src-tauri/src/db/wealth.rs`** (15):
+- **`src-tauri/src/db/wealth.rs`** (17):
   `wealth_enable_wallet`, `wealth_disable_wallet`, `wealth_get_wallet`,
   `wealth_adjust_liquid`, `wealth_adjust_banked`, `wealth_transfer_funds`,
   `wealth_set_currency_name`, `wealth_set_transfer_delay`,
   `wealth_add_asset`, `wealth_update_asset`, `wealth_remove_asset`,
   `wealth_list_assets`, `wealth_list_item_slots`,
-  `wealth_add_custom_slot`, `wealth_remove_custom_slot`.
-  V1 wallet primitives + asset CRUD + item-slot catalog. Row presence
-  in `character_wallets` == opted in. `disable_wallet` cascades to
-  `character_assets`. `add_asset` requires an opted-in wallet for
-  the character. `update_asset` builds a dynamic UPDATE so callers
-  can distinguish "no change" (`undefined`) from "set NULL".
-  `item_slots` holds the abstract purchase catalog: built-ins
-  (`is_custom = 0`, seeded on startup per ADR 0002) plus
-  user-authored rows (`is_custom = 1`, durable across reseeds).
-  `remove_custom_slot` refuses built-ins. Composed transactions
-  (purchase / sell) land in a later wealth task.
+  `wealth_add_custom_slot`, `wealth_remove_custom_slot`,
+  `wealth_purchase_item_slot`, `wealth_sell_asset`.
+  V1 wallet primitives + asset CRUD + item-slot catalog + composed
+  atomic transactions. Row presence in `character_wallets` == opted
+  in. `disable_wallet` cascades to `character_assets`. `add_asset`
+  requires an opted-in wallet for the character. `update_asset`
+  builds a dynamic UPDATE so callers can distinguish "no change"
+  (`undefined`) from "set NULL". `item_slots` holds the abstract
+  purchase catalog: built-ins (`is_custom = 0`, seeded on startup
+  per ADR 0002) plus user-authored rows (`is_custom = 1`, durable
+  across reseeds). `remove_custom_slot` refuses built-ins.
+  `purchase_item_slot` and `sell_asset` are wrapped in single sqlx
+  transactions: a mid-flight error rolls back both the wallet
+  mutation and the asset insert/delete. `purchase_item_slot` sets
+  the new asset's `current_value` to the purchase price per spec.
 - **`src-tauri/src/tools/resonance.rs`** (1): `roll_resonance`.
 - **`src-tauri/src/tools/skill_check.rs`** (1): `roll_skill_check`.
 - **`src-tauri/src/tools/export.rs`** (1): `export_result_to_md`.
@@ -630,7 +634,7 @@ Rust signature + the types it references in §2) is the stable contract.
   snapshots the per-source world-level item caches (Foundry only in
   v1); paired live event is `bridge://foundry/items-updated`.
 
-Total: 83 commands. New commands are registered in
+Total: 85 commands. New commands are registered in
 `src-tauri/src/lib.rs` (`invoke_handler(tauri::generate_handler![...])`).
 See §8 for the Tauri capability / ACL surface.
 

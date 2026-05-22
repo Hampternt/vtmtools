@@ -15,6 +15,8 @@ import type {
   ItemSlot,
   NewAsset,
   NewItemSlot,
+  PurchaseRequest,
+  SellRequest,
   TransferDelay,
   Wallet,
 } from '../../types';
@@ -117,4 +119,20 @@ export function addCustomSlot(payload: NewItemSlot): Promise<ItemSlot> {
  *  same "not found" error). */
 export function removeCustomSlot(slotId: number): Promise<void> {
   return invoke<void>('wealth_remove_custom_slot', { slotId });
+}
+
+// ─── Composed transactions ────────────────────────────────────────────────
+
+/** Atomic purchase: debit `liquid` by `req.price` and insert an asset
+ *  derived from the catalog slot. `current_value` initializes to the
+ *  purchase price per spec. Either both mutations land or neither does. */
+export function purchaseItemSlot(req: PurchaseRequest): Promise<[Wallet, Asset]> {
+  return invoke<[Wallet, Asset]>('wealth_purchase_item_slot', { req });
+}
+
+/** Atomic sale: credit the owning character's `liquid` by `req.salePrice`
+ *  and delete the asset row. The character_id is resolved server-side
+ *  from the asset row. */
+export function sellAsset(req: SellRequest): Promise<Wallet> {
+  return invoke<Wallet>('wealth_sell_asset', { req });
 }

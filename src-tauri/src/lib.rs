@@ -149,6 +149,8 @@ pub fn run() {
             db::wealth::wealth_list_item_slots,
             db::wealth::wealth_add_custom_slot,
             db::wealth::wealth_remove_custom_slot,
+            db::wealth::wealth_purchase_item_slot,
+            db::wealth::wealth_sell_asset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
