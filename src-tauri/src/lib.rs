@@ -140,6 +140,10 @@ pub fn run() {
             db::wealth::wealth_transfer_funds,
             db::wealth::wealth_set_currency_name,
             db::wealth::wealth_set_transfer_delay,
+            db::wealth::wealth_add_asset,
+            db::wealth::wealth_update_asset,
+            db::wealth::wealth_remove_asset,
+            db::wealth::wealth_list_assets,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

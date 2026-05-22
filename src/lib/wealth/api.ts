@@ -7,7 +7,7 @@
 // Returned shapes match the Rust types in src-tauri/src/shared/wealth.rs.
 
 import { invoke } from '@tauri-apps/api/core';
-import type { Bucket, TransferDelay, Wallet } from '../../types';
+import type { Asset, AssetPatch, Bucket, NewAsset, TransferDelay, Wallet } from '../../types';
 
 // ─── Wallet ────────────────────────────────────────────────────────────────
 
@@ -61,4 +61,29 @@ export function setTransferDelay(
   delay: TransferDelay | null,
 ): Promise<Wallet> {
   return invoke<Wallet>('wealth_set_transfer_delay', { characterId, delay });
+}
+
+// ─── Assets ────────────────────────────────────────────────────────────────
+
+/** Insert a new asset for an opted-in character. Rejects when the
+ *  character has no wallet row (must call `enableWallet` first). */
+export function addAsset(characterId: number, payload: NewAsset): Promise<Asset> {
+  return invoke<Asset>('wealth_add_asset', { characterId, payload });
+}
+
+/** Patch arbitrary fields on an existing asset. `AssetPatch` uses
+ *  `field: undefined` to mean "no change" and `field: null` to mean
+ *  "clear" (for nullable fields). */
+export function updateAsset(assetId: number, patch: AssetPatch): Promise<Asset> {
+  return invoke<Asset>('wealth_update_asset', { assetId, patch });
+}
+
+/** Delete a single asset row. */
+export function removeAsset(assetId: number): Promise<void> {
+  return invoke<void>('wealth_remove_asset', { assetId });
+}
+
+/** All assets owned by `characterId`, oldest-first by creation. */
+export function listAssets(characterId: number): Promise<Asset[]> {
+  return invoke<Asset[]>('wealth_list_assets', { characterId });
 }

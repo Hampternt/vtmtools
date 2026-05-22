@@ -295,6 +295,263 @@ pub async fn set_transfer_delay(
 }
 
 // -------------------------------------------------------------------------
+// Asset CRUD
+// -------------------------------------------------------------------------
+
+fn parse_custom_modifiers(json: Option<&str>) -> Result<Vec<CustomModifier>, String> {
+    match json {
+        Some(s) if !s.is_empty() => serde_json::from_str(s)
+            .map_err(|e| format!("db/wealth.parse_custom_modifiers: {}", e)),
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn category_from_str_opt(s: Option<&str>) -> Option<AssetCategory> {
+    s.and_then(AssetCategory::from_str)
+}
+
+fn condition_from_str_opt(s: Option<&str>) -> Option<AssetCondition> {
+    s.and_then(AssetCondition::from_str)
+}
+
+type AssetRow = (
+    i64,
+    i64,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<f64>,
+    f64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    String,
+);
+
+fn build_asset(row: AssetRow) -> Result<Asset, String> {
+    let (id, char_id, name, cat_s, class_s, pp, cv, cond_s, cm_json, notes, created) = row;
+    Ok(Asset {
+        id,
+        character_id: char_id,
+        name,
+        category: category_from_str_opt(cat_s.as_deref()),
+        class: class_s,
+        purchase_price: pp,
+        current_value: cv,
+        condition: condition_from_str_opt(cond_s.as_deref()),
+        custom_modifiers: parse_custom_modifiers(cm_json.as_deref())?,
+        notes,
+        created_at: created,
+    })
+}
+
+async fn fetch_asset(pool: &SqlitePool, asset_id: i64) -> Result<Asset, String> {
+    let row: Option<AssetRow> = sqlx::query_as(
+        "SELECT id, character_id, name, category, class,
+                purchase_price, current_value, condition, custom_modifier_json,
+                notes, created_at
+           FROM character_assets
+          WHERE id = ?",
+    )
+    .bind(asset_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("db/wealth.fetch_asset: {}", e))?;
+
+    let row = row.ok_or_else(|| format!("db/wealth.fetch_asset: asset not found: {}", asset_id))?;
+    build_asset(row)
+}
+
+/// Insert a new asset for `character_id`. Per spec, only opted-in
+/// characters (those with a `character_wallets` row) can own assets;
+/// fails fast when the wallet is absent so the FK-violation error
+/// surface stays out of the API.
+pub async fn add_asset(
+    pool: &SqlitePool,
+    character_id: i64,
+    payload: NewAsset,
+) -> Result<Asset, String> {
+    // Verify the character has an opted-in wallet first.
+    if get_wallet(pool, character_id).await?.is_none() {
+        return Err(format!(
+            "db/wealth.add_asset: wallet not found for character {}",
+            character_id
+        ));
+    }
+
+    let cm_json = if payload.custom_modifiers.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::to_string(&payload.custom_modifiers)
+                .map_err(|e| format!("db/wealth.add_asset.custom_modifiers: {}", e))?,
+        )
+    };
+
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO character_assets
+            (character_id, name, category, class,
+             purchase_price, current_value, condition, custom_modifier_json, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         RETURNING id",
+    )
+    .bind(character_id)
+    .bind(&payload.name)
+    .bind(payload.category.map(|c| c.as_str()))
+    .bind(payload.class.as_deref())
+    .bind(payload.purchase_price)
+    .bind(payload.current_value)
+    .bind(payload.condition.map(|c| c.as_str()))
+    .bind(cm_json)
+    .bind(payload.notes.as_deref())
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("db/wealth.add_asset.insert: {}", e))?;
+
+    fetch_asset(pool, id).await
+}
+
+/// Return all assets owned by `character_id`, oldest-first by creation.
+pub async fn list_assets(pool: &SqlitePool, character_id: i64) -> Result<Vec<Asset>, String> {
+    let rows: Vec<AssetRow> = sqlx::query_as(
+        "SELECT id, character_id, name, category, class,
+                purchase_price, current_value, condition, custom_modifier_json,
+                notes, created_at
+           FROM character_assets
+          WHERE character_id = ?
+          ORDER BY created_at ASC, id ASC",
+    )
+    .bind(character_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("db/wealth.list_assets: {}", e))?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        out.push(build_asset(row)?);
+    }
+    Ok(out)
+}
+
+/// Patch an existing asset. `AssetPatch` uses `Option<T>` for non-nullable
+/// fields and `Option<Option<T>>` for nullable fields so that callers can
+/// distinguish "no change" from "set NULL". Builds a dynamic UPDATE so
+/// COALESCE-everything isn't required.
+pub async fn update_asset(
+    pool: &SqlitePool,
+    asset_id: i64,
+    patch: AssetPatch,
+) -> Result<Asset, String> {
+    // Verify the asset exists first so we return a clean error rather than
+    // silently no-op on a bad id.
+    let _ = fetch_asset(pool, asset_id).await?;
+
+    let mut sets: Vec<&'static str> = Vec::new();
+    macro_rules! set {
+        ($field:literal) => {
+            sets.push(concat!($field, " = ?"));
+        };
+    }
+
+    if patch.name.is_some() {
+        set!("name");
+    }
+    if patch.category.is_some() {
+        set!("category");
+    }
+    if patch.class.is_some() {
+        set!("class");
+    }
+    if patch.purchase_price.is_some() {
+        set!("purchase_price");
+    }
+    if patch.current_value.is_some() {
+        set!("current_value");
+    }
+    if patch.condition.is_some() {
+        set!("condition");
+    }
+    if patch.custom_modifiers.is_some() {
+        set!("custom_modifier_json");
+    }
+    if patch.notes.is_some() {
+        set!("notes");
+    }
+
+    if sets.is_empty() {
+        return fetch_asset(pool, asset_id).await;
+    }
+
+    let sql = format!(
+        "UPDATE character_assets SET {} WHERE id = ?",
+        sets.join(", ")
+    );
+
+    let mut q = sqlx::query(&sql);
+    if let Some(v) = &patch.name {
+        q = q.bind(v);
+    }
+    if let Some(v) = &patch.category {
+        q = q.bind(v.map(|c| c.as_str()));
+    }
+    if let Some(v) = &patch.class {
+        q = q.bind(v.as_deref());
+    }
+    if let Some(v) = &patch.purchase_price {
+        q = q.bind(*v);
+    }
+    if let Some(v) = &patch.current_value {
+        q = q.bind(*v);
+    }
+    if let Some(v) = &patch.condition {
+        q = q.bind(v.map(|c| c.as_str()));
+    }
+    let cm_json_buf;
+    if let Some(v) = &patch.custom_modifiers {
+        cm_json_buf = if v.is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::to_string(v)
+                    .map_err(|e| format!("db/wealth.update_asset.custom_modifiers: {}", e))?,
+            )
+        };
+        q = q.bind(&cm_json_buf);
+    }
+    if let Some(v) = &patch.notes {
+        q = q.bind(v.as_deref());
+    }
+    q = q.bind(asset_id);
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| format!("db/wealth.update_asset.begin: {}", e))?;
+    q.execute(&mut *tx)
+        .await
+        .map_err(|e| format!("db/wealth.update_asset.exec: {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("db/wealth.update_asset.commit: {}", e))?;
+
+    fetch_asset(pool, asset_id).await
+}
+
+/// Delete a single asset row by id.
+pub async fn remove_asset(pool: &SqlitePool, asset_id: i64) -> Result<(), String> {
+    let res = sqlx::query("DELETE FROM character_assets WHERE id = ?")
+        .bind(asset_id)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("db/wealth.remove_asset: {}", e))?;
+
+    if res.rows_affected() == 0 {
+        return Err(format!("db/wealth.remove_asset: asset not found: {}", asset_id));
+    }
+    Ok(())
+}
+
+// -------------------------------------------------------------------------
 // Tauri commands
 // -------------------------------------------------------------------------
 
@@ -367,6 +624,40 @@ pub async fn wealth_set_transfer_delay(
     delay: Option<TransferDelay>,
 ) -> Result<Wallet, String> {
     set_transfer_delay(&pool.0, character_id, delay).await
+}
+
+#[tauri::command]
+pub async fn wealth_add_asset(
+    pool: tauri::State<'_, crate::DbState>,
+    character_id: i64,
+    payload: NewAsset,
+) -> Result<Asset, String> {
+    add_asset(&pool.0, character_id, payload).await
+}
+
+#[tauri::command]
+pub async fn wealth_update_asset(
+    pool: tauri::State<'_, crate::DbState>,
+    asset_id: i64,
+    patch: AssetPatch,
+) -> Result<Asset, String> {
+    update_asset(&pool.0, asset_id, patch).await
+}
+
+#[tauri::command]
+pub async fn wealth_remove_asset(
+    pool: tauri::State<'_, crate::DbState>,
+    asset_id: i64,
+) -> Result<(), String> {
+    remove_asset(&pool.0, asset_id).await
+}
+
+#[tauri::command]
+pub async fn wealth_list_assets(
+    pool: tauri::State<'_, crate::DbState>,
+    character_id: i64,
+) -> Result<Vec<Asset>, String> {
+    list_assets(&pool.0, character_id).await
 }
 
 // -------------------------------------------------------------------------
