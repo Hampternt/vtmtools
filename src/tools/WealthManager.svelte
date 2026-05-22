@@ -15,18 +15,31 @@
   import { onMount } from 'svelte';
   import { savedCharacters } from '../store/savedCharacters.svelte';
   import type { SavedCharacter } from '$lib/saved-characters/api';
-  import type { Wallet } from '../types';
+  import type { Wallet, Asset, Bucket } from '../types';
   import {
     getWallet,
     enableWallet,
     disableWallet,
+    adjustLiquid,
+    adjustBanked,
+    transferFunds,
+    listAssets,
   } from '$lib/wealth/api';
+  import WalletPanel from '$lib/components/wealth/WalletPanel.svelte';
+  import AdjustModal from '$lib/components/wealth/AdjustModal.svelte';
+  import TransferModal from '$lib/components/wealth/TransferModal.svelte';
 
   // -------- state
   let selectedId: number | null = $state(null);
   let wallet: Wallet | null = $state(null);
+  let assets: Asset[] = $state([]);
   let loadingWallet = $state(false);
   let error: string | null = $state(null);
+
+  // -------- modal state
+  let adjustOpen = $state(false);
+  let adjustBucket: Bucket = $state('liquid');
+  let transferOpen = $state(false);
 
   // Derive character list from the store. Keeps in sync with bridge
   // updates / new saves automatically (the store re-fetches on
@@ -51,16 +64,34 @@
   async function refreshWallet() {
     if (selectedId == null) {
       wallet = null;
+      assets = [];
       return;
     }
     loadingWallet = true;
     error = null;
     try {
       wallet = await getWallet(selectedId);
+      if (wallet != null) {
+        await refreshAssets();
+      } else {
+        assets = [];
+      }
     } catch (e) {
       error = String(e);
     } finally {
       loadingWallet = false;
+    }
+  }
+
+  async function refreshAssets() {
+    if (selectedId == null) {
+      assets = [];
+      return;
+    }
+    try {
+      assets = await listAssets(selectedId);
+    } catch (e) {
+      error = String(e);
     }
   }
 
@@ -75,6 +106,7 @@
     error = null;
     try {
       wallet = await enableWallet(selectedId);
+      await refreshAssets();
     } catch (e) {
       error = String(e);
     }
@@ -89,6 +121,37 @@
     try {
       await disableWallet(selectedId);
       wallet = null;
+      assets = [];
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  // -------- adjust + transfer handlers
+  function openAdjust(b: Bucket) {
+    adjustBucket = b;
+    adjustOpen = true;
+  }
+
+  function openTransfer() {
+    transferOpen = true;
+  }
+
+  async function applyAdjust(delta: number) {
+    if (selectedId == null) return;
+    try {
+      wallet = adjustBucket === 'liquid'
+        ? await adjustLiquid(selectedId, delta)
+        : await adjustBanked(selectedId, delta);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function applyTransfer(from: Bucket, to: Bucket, amount: number) {
+    if (selectedId == null) return;
+    try {
+      wallet = await transferFunds(selectedId, from, to, amount);
     } catch (e) {
       error = String(e);
     }
@@ -127,13 +190,30 @@
     </div>
   {:else}
     <div class="enabled-state">
-      <!-- Tasks 8/9/10 fill these panels. -->
-      <div class="panel-placeholder">Wallet panel — Task 8</div>
+      <WalletPanel
+        wallet={wallet!}
+        {assets}
+        onOpenAdjust={openAdjust}
+        onOpenTransfer={openTransfer}
+      />
+      <!-- Tasks 9/10 fill these panels. -->
       <div class="panel-placeholder">Assets panel — Task 9</div>
       <div class="panel-placeholder">Shop panel — Task 10</div>
       <button type="button" class="disable-btn" onclick={onDisable}>
         Disable wealth tracking
       </button>
+
+      <AdjustModal
+        bind:open={adjustOpen}
+        bucket={adjustBucket}
+        wallet={wallet!}
+        onApply={applyAdjust}
+      />
+      <TransferModal
+        bind:open={transferOpen}
+        wallet={wallet!}
+        onApply={applyTransfer}
+      />
     </div>
   {/if}
 </section>
