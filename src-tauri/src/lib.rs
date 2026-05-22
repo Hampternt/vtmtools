@@ -132,6 +132,14 @@ pub fn run() {
             db::advantage::roll_random_advantage,
             db::advantage::import_advantages_from_world,
             tools::library_push::push_advantage_to_world,
+            db::wealth::wealth_enable_wallet,
+            db::wealth::wealth_disable_wallet,
+            db::wealth::wealth_get_wallet,
+            db::wealth::wealth_adjust_liquid,
+            db::wealth::wealth_adjust_banked,
+            db::wealth::wealth_transfer_funds,
+            db::wealth::wealth_set_currency_name,
+            db::wealth::wealth_set_transfer_delay,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

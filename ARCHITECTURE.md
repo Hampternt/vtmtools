@@ -588,6 +588,13 @@ Rust signature + the types it references in §2) is the stable contract.
   `save_character`, `list_saved_characters`,
   `update_saved_character`, `delete_saved_character`,
   `patch_saved_field`.
+- **`src-tauri/src/db/wealth.rs`** (8):
+  `wealth_enable_wallet`, `wealth_disable_wallet`, `wealth_get_wallet`,
+  `wealth_adjust_liquid`, `wealth_adjust_banked`, `wealth_transfer_funds`,
+  `wealth_set_currency_name`, `wealth_set_transfer_delay`.
+  V1 wallet primitives. Row presence in `character_wallets` ==
+  opted in. `disable_wallet` cascades to `character_assets`. Asset
+  CRUD, catalog, and composed transactions land in later wealth tasks.
 - **`src-tauri/src/tools/resonance.rs`** (1): `roll_resonance`.
 - **`src-tauri/src/tools/skill_check.rs`** (1): `roll_skill_check`.
 - **`src-tauri/src/tools/export.rs`** (1): `export_result_to_md`.
@@ -613,7 +620,7 @@ Rust signature + the types it references in §2) is the stable contract.
   snapshots the per-source world-level item caches (Foundry only in
   v1); paired live event is `bridge://foundry/items-updated`.
 
-Total: 68 commands. New commands are registered in
+Total: 76 commands. New commands are registered in
 `src-tauri/src/lib.rs` (`invoke_handler(tauri::generate_handler![...])`).
 See §8 for the Tauri capability / ACL surface.
 
