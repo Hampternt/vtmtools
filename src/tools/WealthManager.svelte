@@ -15,7 +15,7 @@
   import { onMount } from 'svelte';
   import { savedCharacters } from '../store/savedCharacters.svelte';
   import type { SavedCharacter } from '$lib/saved-characters/api';
-  import type { Wallet, Asset, Bucket, NewAsset, SellRequest } from '../types';
+  import type { Wallet, Asset, Bucket, NewAsset, SellRequest, ItemSlot, PurchaseRequest } from '../types';
   import {
     getWallet,
     enableWallet,
@@ -27,6 +27,7 @@
     addAsset,
     removeAsset,
     sellAsset,
+    purchaseItemSlot,
   } from '$lib/wealth/api';
   import WalletPanel from '$lib/components/wealth/WalletPanel.svelte';
   import AdjustModal from '$lib/components/wealth/AdjustModal.svelte';
@@ -34,6 +35,8 @@
   import AssetList from '$lib/components/wealth/AssetList.svelte';
   import AddAssetModal from '$lib/components/wealth/AddAssetModal.svelte';
   import SellModal from '$lib/components/wealth/SellModal.svelte';
+  import ShopPanel from '$lib/components/wealth/ShopPanel.svelte';
+  import BuyFormModal from '$lib/components/wealth/BuyFormModal.svelte';
 
   // -------- state
   let selectedId: number | null = $state(null);
@@ -49,6 +52,8 @@
   let addAssetOpen = $state(false);
   let sellOpen = $state(false);
   let sellTarget: Asset | null = $state(null);
+  let buyOpen = $state(false);
+  let buyTarget: ItemSlot | null = $state(null);
 
   // Derive character list from the store. Keeps in sync with bridge
   // updates / new saves automatically (the store re-fetches on
@@ -197,6 +202,18 @@
       error = String(e);
     }
   }
+
+  // -------- purchase handler
+  async function applyPurchase(req: PurchaseRequest) {
+    try {
+      const [w, _] = await purchaseItemSlot(req);
+      wallet = w;
+      await refreshAssets();
+      buyTarget = null;
+    } catch (e) {
+      error = String(e);
+    }
+  }
 </script>
 
 <section class="wealth-manager">
@@ -237,7 +254,6 @@
         onOpenAdjust={openAdjust}
         onOpenTransfer={openTransfer}
       />
-      <!-- Task 10 still fills the shop panel below. -->
       <AssetList
         {assets}
         currencyName={wallet.currencyName}
@@ -245,7 +261,16 @@
         onSell={(a) => { sellTarget = a; sellOpen = true; }}
         onRemove={applyRemove}
       />
-      <div class="panel-placeholder">Shop panel — Task 10</div>
+      <ShopPanel
+        wallet={wallet!}
+        onBuy={(s) => { buyTarget = s; buyOpen = true; }}
+      />
+      <BuyFormModal
+        bind:open={buyOpen}
+        slot={buyTarget}
+        wallet={wallet!}
+        onApply={applyPurchase}
+      />
       <button type="button" class="disable-btn" onclick={onDisable}>
         Disable wealth tracking
       </button>
@@ -374,16 +399,6 @@
     display: grid;
     gap: 1rem;
     align-items: start;
-  }
-
-  .panel-placeholder {
-    padding: 1rem;
-    border: 1px dashed var(--border-card);
-    border-radius: 0.4rem;
-    color: var(--text-muted);
-    text-align: center;
-    background: var(--bg-card);
-    font-size: 0.82rem;
   }
 
   .disable-btn {
