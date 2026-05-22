@@ -92,6 +92,12 @@
     border-radius: 0.5rem;
     padding: 0;
     width: min(36rem, calc(100vw - 2rem));
+    /* `<dialog>` UA stylesheet defaults height to `fit-content`. Combined
+       with `flex-direction: column` + `.body { flex: 1; }` (basis: 0),
+       the dialog would collapse: body resolves to 0 height because the
+       parent has no extra space to distribute. Pin height to a concrete
+       size so `flex: 1` on the body has room to grow into. */
+    height: min(40rem, calc(100vh - 4rem));
     max-height: calc(100vh - 4rem);
     color: var(--text-primary);
     box-shadow: 0 0.75rem 2rem -0.25rem rgba(0,0,0,0.7);
