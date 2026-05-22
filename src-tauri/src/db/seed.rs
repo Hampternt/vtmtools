@@ -310,7 +310,7 @@ pub async fn seed_item_slots(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     for (cat, class, label, bmin, bmax, examples) in rows {
         sqlx::query(
-            "INSERT INTO item_slots
+            "INSERT OR IGNORE INTO item_slots
                 (category, class, label, base_price_min, base_price_max,
                  examples, is_custom, source)
              VALUES (?, ?, ?, ?, ?, ?, 0, 'V5 default catalog')",

@@ -1285,7 +1285,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn purchase_rolls_back_on_failure() {
+    // Real post-debit-rollback is implicit in sqlx transaction semantics:
+    // if the insert step fails after the debit succeeds, tx drops without
+    // commit and the debit is rolled back. This test exercises the EARLIER
+    // path (slot lookup fails before any mutation) — it does not exercise
+    // the post-debit failure path. Both paths are protected by the same
+    // tx.commit() being the sole persist point.
+    async fn purchase_errors_before_mutation_when_slot_missing() {
         let (pool, char_id) = fresh_pool_with_character("Jack").await;
         enable_wallet(&pool, char_id).await.unwrap();
         adjust_liquid(&pool, char_id, 1_000.0).await.unwrap();
@@ -1373,5 +1379,72 @@ mod tests {
         )
         .await;
         assert!(result.is_err());
+    }
+
+    // ---- Seed re-run hardening ------------------------------------------
+
+    /// Regression test for the UNIQUE(category, class) collision bug:
+    /// if a GM customizes a built-in slot (toggles is_custom = 1 and tweaks
+    /// the price band), a re-run of `seed_item_slots` must NOT panic on
+    /// UNIQUE violation and must NOT overwrite the GM's edits. `INSERT OR
+    /// IGNORE` makes the built-in re-insert silently skip when the slot is
+    /// already occupied — customs win.
+    #[tokio::test]
+    async fn seed_item_slots_preserves_custom_row_that_collides_with_builtin() {
+        // test_pool() already ran migrations + seed_item_slots once, so the
+        // (weapon, knife) built-in row exists.
+        let pool = test_pool().await;
+
+        // Simulate a GM customizing the (weapon, knife) slot: flip
+        // is_custom to 1 and bump the price band. This row now both
+        // (a) survives the `DELETE WHERE is_custom = 0` step and
+        // (b) occupies the (weapon, knife) UNIQUE key — the exact
+        // collision shape that would panic the plain INSERT.
+        let updated = sqlx::query(
+            "UPDATE item_slots
+                SET is_custom = 1,
+                    base_price_min = 42.0,
+                    base_price_max = 9999.0
+              WHERE category = 'weapon' AND class = 'knife'",
+        )
+        .execute(&pool)
+        .await
+        .expect("update knife row");
+        assert_eq!(
+            updated.rows_affected(),
+            1,
+            "must have updated exactly one knife row"
+        );
+
+        // Re-run the seeder. With INSERT OR IGNORE this is Ok; with the
+        // old plain INSERT this would error on UNIQUE(category, class).
+        crate::db::seed::seed_item_slots(&pool)
+            .await
+            .expect("seed_item_slots must not error on custom-collision");
+
+        // The user's customization must be intact: still is_custom = 1
+        // with the GM-edited price band, NOT overwritten by the built-in.
+        let row: (i64, f64, f64) = sqlx::query_as(
+            "SELECT is_custom, base_price_min, base_price_max
+               FROM item_slots
+              WHERE category = 'weapon' AND class = 'knife'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("knife row must still exist after re-seed");
+        assert_eq!(row.0, 1, "is_custom must remain 1 — customs win");
+        assert_eq!(row.1, 42.0, "GM-edited min price must be preserved");
+        assert_eq!(row.2, 9_999.0, "GM-edited max price must be preserved");
+
+        // Sanity: exactly one row for (weapon, knife) — no duplicate
+        // built-in insert sneaked through.
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM item_slots
+              WHERE category = 'weapon' AND class = 'knife'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("count knife rows");
+        assert_eq!(count, 1, "UNIQUE(category, class) must still hold");
     }
 }
