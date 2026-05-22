@@ -552,6 +552,153 @@ pub async fn remove_asset(pool: &SqlitePool, asset_id: i64) -> Result<(), String
 }
 
 // -------------------------------------------------------------------------
+// Item catalog (item_slots)
+// -------------------------------------------------------------------------
+
+/// Hydrate an `ItemSlot` from a raw row tuple, validating the stored
+/// `category` against the closed enum. An unknown category is a DB-shape
+/// violation (would mean the CHECK constraint was bypassed or the enum
+/// drifted) and surfaces as a string error.
+fn slot_row_to_struct(
+    id: i64,
+    cat: String,
+    class: String,
+    label: String,
+    bmin: f64,
+    bmax: f64,
+    examples: Option<String>,
+    is_custom_i: i64,
+    source: Option<String>,
+) -> Result<ItemSlot, String> {
+    let category = AssetCategory::from_str(&cat)
+        .ok_or_else(|| format!("db/wealth.list_item_slots: invalid category in db: {cat}"))?;
+    Ok(ItemSlot {
+        id,
+        category,
+        class,
+        label,
+        base_price_min: bmin,
+        base_price_max: bmax,
+        examples,
+        is_custom: is_custom_i != 0,
+        source,
+    })
+}
+
+type ItemSlotRow = (
+    i64,
+    String,
+    String,
+    String,
+    f64,
+    f64,
+    Option<String>,
+    i64,
+    Option<String>,
+);
+
+/// List item-slot catalog rows. With `category = None`, returns the whole
+/// catalog ordered by `(category, base_price_min, label)`. With a specific
+/// category, ordered by `(base_price_min, label)`.
+pub async fn list_item_slots(
+    pool: &SqlitePool,
+    category: Option<AssetCategory>,
+) -> Result<Vec<ItemSlot>, String> {
+    let rows: Vec<ItemSlotRow> = match category {
+        Some(c) => sqlx::query_as(
+            "SELECT id, category, class, label, base_price_min, base_price_max,
+                    examples, is_custom, source
+               FROM item_slots
+              WHERE category = ?
+              ORDER BY base_price_min ASC, label ASC",
+        )
+        .bind(c.as_str())
+        .fetch_all(pool)
+        .await
+        .map_err(|e| format!("db/wealth.list_item_slots: {}", e))?,
+        None => sqlx::query_as(
+            "SELECT id, category, class, label, base_price_min, base_price_max,
+                    examples, is_custom, source
+               FROM item_slots
+              ORDER BY category ASC, base_price_min ASC, label ASC",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| format!("db/wealth.list_item_slots: {}", e))?,
+    };
+
+    let mut out = Vec::with_capacity(rows.len());
+    for (id, cat, class, label, bmin, bmax, examples, is_custom_i, source) in rows {
+        out.push(slot_row_to_struct(
+            id, cat, class, label, bmin, bmax, examples, is_custom_i, source,
+        )?);
+    }
+    Ok(out)
+}
+
+/// Insert a user-authored catalog row (`is_custom = 1`). Built-ins
+/// (`is_custom = 0`) are seeded separately and rewritten on each app start
+/// per ADR 0002 — custom rows survive across reseeds.
+pub async fn add_custom_slot(
+    pool: &SqlitePool,
+    payload: NewItemSlot,
+) -> Result<ItemSlot, String> {
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO item_slots
+            (category, class, label, base_price_min, base_price_max,
+             examples, is_custom, source)
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+         RETURNING id",
+    )
+    .bind(payload.category.as_str())
+    .bind(&payload.class)
+    .bind(&payload.label)
+    .bind(payload.base_price_min)
+    .bind(payload.base_price_max)
+    .bind(payload.examples.as_deref())
+    .bind(payload.source.as_deref())
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("db/wealth.add_custom_slot: {}", e))?;
+
+    // Re-read so the returned struct is the canonical row (e.g. picks up
+    // any default expressions and surfaces the assigned id).
+    let row: ItemSlotRow = sqlx::query_as(
+        "SELECT id, category, class, label, base_price_min, base_price_max,
+                examples, is_custom, source
+           FROM item_slots WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("db/wealth.add_custom_slot.refetch: {}", e))?;
+
+    slot_row_to_struct(
+        row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8,
+    )
+}
+
+/// Delete a custom catalog row. Refuses to delete built-ins (the
+/// `is_custom = 1` clause in the WHERE is the fence): targeting a
+/// built-in surfaces the same "not found" error as targeting a
+/// nonexistent id, by design.
+pub async fn remove_custom_slot(pool: &SqlitePool, slot_id: i64) -> Result<(), String> {
+    let res = sqlx::query("DELETE FROM item_slots WHERE id = ? AND is_custom = 1")
+        .bind(slot_id)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("db/wealth.remove_custom_slot: {}", e))?;
+
+    if res.rows_affected() == 0 {
+        return Err(format!(
+            "db/wealth.remove_custom_slot: slot not found or is built-in: {}",
+            slot_id
+        ));
+    }
+    Ok(())
+}
+
+// -------------------------------------------------------------------------
 // Tauri commands
 // -------------------------------------------------------------------------
 
@@ -658,6 +805,30 @@ pub async fn wealth_list_assets(
     character_id: i64,
 ) -> Result<Vec<Asset>, String> {
     list_assets(&pool.0, character_id).await
+}
+
+#[tauri::command]
+pub async fn wealth_list_item_slots(
+    pool: tauri::State<'_, crate::DbState>,
+    category: Option<AssetCategory>,
+) -> Result<Vec<ItemSlot>, String> {
+    list_item_slots(&pool.0, category).await
+}
+
+#[tauri::command]
+pub async fn wealth_add_custom_slot(
+    pool: tauri::State<'_, crate::DbState>,
+    payload: NewItemSlot,
+) -> Result<ItemSlot, String> {
+    add_custom_slot(&pool.0, payload).await
+}
+
+#[tauri::command]
+pub async fn wealth_remove_custom_slot(
+    pool: tauri::State<'_, crate::DbState>,
+    slot_id: i64,
+) -> Result<(), String> {
+    remove_custom_slot(&pool.0, slot_id).await
 }
 
 // -------------------------------------------------------------------------

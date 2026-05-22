@@ -7,7 +7,17 @@
 // Returned shapes match the Rust types in src-tauri/src/shared/wealth.rs.
 
 import { invoke } from '@tauri-apps/api/core';
-import type { Asset, AssetPatch, Bucket, NewAsset, TransferDelay, Wallet } from '../../types';
+import type {
+  Asset,
+  AssetCategory,
+  AssetPatch,
+  Bucket,
+  ItemSlot,
+  NewAsset,
+  NewItemSlot,
+  TransferDelay,
+  Wallet,
+} from '../../types';
 
 // ─── Wallet ────────────────────────────────────────────────────────────────
 
@@ -86,4 +96,25 @@ export function removeAsset(assetId: number): Promise<void> {
 /** All assets owned by `characterId`, oldest-first by creation. */
 export function listAssets(characterId: number): Promise<Asset[]> {
   return invoke<Asset[]>('wealth_list_assets', { characterId });
+}
+
+// ─── Catalog ───────────────────────────────────────────────────────────────
+
+/** List item-slot catalog rows. With no `category` argument, returns the
+ *  whole catalog. Filtered list is ordered by `(base_price_min, label)`. */
+export function listItemSlots(category?: AssetCategory): Promise<ItemSlot[]> {
+  return invoke<ItemSlot[]>('wealth_list_item_slots', { category: category ?? null });
+}
+
+/** Insert a user-authored catalog row (`is_custom = 1`). Built-ins seeded
+ *  on startup survive in the same table; custom rows persist across
+ *  reseeds per ADR 0002. */
+export function addCustomSlot(payload: NewItemSlot): Promise<ItemSlot> {
+  return invoke<ItemSlot>('wealth_add_custom_slot', { payload });
+}
+
+/** Delete a custom catalog row. Refuses to delete built-ins (surfaces the
+ *  same "not found" error). */
+export function removeCustomSlot(slotId: number): Promise<void> {
+  return invoke<void>('wealth_remove_custom_slot', { slotId });
 }

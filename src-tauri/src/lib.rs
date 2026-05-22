@@ -38,6 +38,8 @@ pub fn run() {
                     .expect("Failed to seed dyscrasias");
                 db::seed::seed_advantages(&pool).await
                     .expect("Failed to seed advantages");
+                db::seed::seed_item_slots(&pool).await
+                    .expect("Failed to seed item_slots");
                 handle.manage(DbState(Arc::new(pool)));
 
                 // Bridge layer — sources registered here, accept loops spawned.
@@ -144,6 +146,9 @@ pub fn run() {
             db::wealth::wealth_update_asset,
             db::wealth::wealth_remove_asset,
             db::wealth::wealth_list_assets,
+            db::wealth::wealth_list_item_slots,
+            db::wealth::wealth_add_custom_slot,
+            db::wealth::wealth_remove_custom_slot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

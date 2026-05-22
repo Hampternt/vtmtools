@@ -258,6 +258,76 @@ fn row_to_properties(row: &SeedRow) -> Vec<Field> {
     props
 }
 
+/// Replaces all built-in item_slots entries with the V5 default catalog.
+/// Custom rows (is_custom = 1) survive across reseeds, per ADR 0002.
+pub async fn seed_item_slots(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM item_slots WHERE is_custom = 0")
+        .execute(pool)
+        .await?;
+
+    // (category, class, label, base_price_min, base_price_max, examples)
+    // Source = 'V5 default catalog' on all built-ins.
+    let rows: &[(&str, &str, &str, f64, f64, &str)] = &[
+        // ── Weapons ─────────────────────────────────────────────────────
+        ("weapon", "improvised",       "Improvised weapon",            5.0,           50.0, "broken bottle, chair leg, brick"),
+        ("weapon", "knife",            "Knife / shiv",                10.0,          150.0, "kitchen knife, switchblade, ka-bar"),
+        ("weapon", "sword",            "Bladed weapon",              150.0,        2_500.0, "longsword, machete, katana, rapier"),
+        ("weapon", "cheap_handgun",    "Cheap handgun",              150.0,          500.0, "saturday-night-special revolver, surplus pistol"),
+        ("weapon", "military_handgun", "Military-grade handgun",     600.0,        2_500.0, "Glock 19, Beretta M9, SIG P226"),
+        ("weapon", "long_gun",         "Long gun",                   500.0,        5_000.0, "hunting rifle, shotgun, SMG, AR-platform"),
+        ("weapon", "heavy",            "Heavy weapon",             3_000.0,       25_000.0, "belt-fed MG, anti-materiel rifle, RPG"),
+
+        // ── Vehicles ────────────────────────────────────────────────────
+        ("vehicle", "economy",         "Economy vehicle",          3_000.0,       18_000.0, "compact car, used sedan, scooter"),
+        ("vehicle", "mid_range",       "Mid-range vehicle",       18_000.0,       60_000.0, "new sedan, SUV, pickup"),
+        ("vehicle", "high_end",        "High-end vehicle",        60_000.0,      200_000.0, "luxury sedan, sports car, premium SUV"),
+        ("vehicle", "supercar",        "Supercar / exotic",      200_000.0,    2_000_000.0, "Ferrari, McLaren, Bugatti, race build"),
+        ("vehicle", "motorcycle",      "Motorcycle",               2_000.0,       40_000.0, "scooter to superbike to custom chopper"),
+        ("vehicle", "utility",         "Utility / commercial vehicle", 10_000.0,  150_000.0, "van, truck, mobile workshop"),
+
+        // ── Property ────────────────────────────────────────────────────
+        ("property", "rented_apt",     "Rented apartment (monthly)",    500.0,     8_000.0, "studio rental to luxury penthouse lease"),
+        ("property", "owned_apt",      "Owned apartment / condo",    50_000.0, 2_000_000.0, "starter condo to upscale unit"),
+        ("property", "house",          "House",                     150_000.0, 3_000_000.0, "suburban single-family, townhouse"),
+        ("property", "mansion",        "Mansion / estate",        2_000_000.0, 50_000_000.0, "gated estate, country manor"),
+        ("property", "safehouse",      "Safehouse / haven",          20_000.0,   500_000.0, "off-grid cabin, lightproof basement, ghoul-staffed retreat"),
+        ("property", "commercial",     "Commercial property",       100_000.0, 10_000_000.0, "nightclub, office building, warehouse"),
+
+        // ── Investments ────────────────────────────────────────────────
+        ("investment", "small_investment",  "Small investment",         500.0,    10_000.0, "individual stock, bond, savings instrument"),
+        ("investment", "medium_investment", "Medium investment",     10_000.0,   200_000.0, "diversified portfolio, real-estate share"),
+        ("investment", "business_share",    "Business share / stake", 50_000.0, 5_000_000.0, "minority stake, silent partnership, franchise"),
+        ("investment", "art_piece",         "Art / collectible",      2_000.0, 20_000_000.0, "painting, sculpture, vintage car, watch collection"),
+
+        // ── Misc ───────────────────────────────────────────────────────
+        ("misc", "small_luxury",       "Small luxury item",             50.0,       500.0, "cigar, perfume, tie pin, espresso machine"),
+        ("misc", "medium_luxury",      "Medium luxury item",           500.0,     5_000.0, "designer suit, watch, smartphone, gaming rig"),
+        ("misc", "status_symbol",      "Status symbol",              5_000.0,   100_000.0, "Rolex, designer bag, custom tailoring, jewelry"),
+        ("misc", "service_short",      "Service (one-off)",            100.0,     5_000.0, "private chef night, escort, consultation, courier job"),
+        ("misc", "service_long",       "Service (retainer)",         2_000.0,    50_000.0, "monthly retainer for lawyer, fixer, security, doctor"),
+        ("misc", "consumable",         "Consumable / supply",           20.0,     2_000.0, "drugs, alcohol case, ammo crate, medical supplies"),
+    ];
+
+    for (cat, class, label, bmin, bmax, examples) in rows {
+        sqlx::query(
+            "INSERT INTO item_slots
+                (category, class, label, base_price_min, base_price_max,
+                 examples, is_custom, source)
+             VALUES (?, ?, ?, ?, ?, ?, 0, 'V5 default catalog')",
+        )
+        .bind(cat)
+        .bind(class)
+        .bind(label)
+        .bind(bmin)
+        .bind(bmax)
+        .bind(examples)
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
 /// Replaces all built-in Advantage entries with the canonical VTM 5e corebook set.
 /// Custom entries (is_custom = 1) are never touched.
 pub async fn seed_advantages(pool: &SqlitePool) -> Result<(), sqlx::Error> {
