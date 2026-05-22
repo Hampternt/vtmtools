@@ -474,3 +474,108 @@ export interface ChronicleEdge {
 }
 
 export type EdgeDirection = 'in' | 'out' | 'both';
+
+// ───────────────────────────────────────────────────────────────────────────
+// Wealth tracking (V1) — mirrors src-tauri/src/shared/wealth.rs
+// See docs/superpowers/specs/2026-05-20-wealth-tracking-design.md
+// ───────────────────────────────────────────────────────────────────────────
+
+export type Bucket = 'liquid' | 'banked';
+export type TimeUnit = 'minutes' | 'hours' | 'days' | 'weeks';
+
+export interface TransferDelay {
+  value: number;
+  unit: TimeUnit;
+}
+
+export interface Wallet {
+  characterId: number;
+  liquid: number;
+  banked: number;
+  currencyName: string;
+  transferDelay: TransferDelay | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AssetCategory = 'weapon' | 'vehicle' | 'property' | 'investment' | 'misc';
+export type AssetCondition = 'new' | 'used' | 'very_used' | 'custom';
+
+export interface CustomModifier {
+  label: string;
+  mult: number;
+}
+
+export interface Asset {
+  id: number;
+  characterId: number;
+  name: string;
+  category: AssetCategory | null;
+  class: string | null;
+  purchasePrice: number | null;
+  currentValue: number;
+  condition: AssetCondition | null;
+  customModifiers: CustomModifier[];
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface NewAsset {
+  name: string;
+  category: AssetCategory | null;
+  class: string | null;
+  purchasePrice: number | null;
+  currentValue: number;
+  condition: AssetCondition | null;
+  customModifiers: CustomModifier[];
+  notes: string | null;
+}
+
+export interface AssetPatch {
+  name?: string;
+  category?: AssetCategory | null;
+  class?: string | null;
+  purchasePrice?: number | null;
+  currentValue?: number;
+  condition?: AssetCondition | null;
+  customModifiers?: CustomModifier[];
+  notes?: string | null;
+}
+
+export interface ItemSlot {
+  id: number;
+  category: AssetCategory;
+  class: string;
+  label: string;
+  basePriceMin: number;
+  basePriceMax: number;
+  examples: string | null;
+  isCustom: boolean;
+  source: string | null;
+}
+
+export interface NewItemSlot {
+  category: AssetCategory;
+  class: string;
+  label: string;
+  basePriceMin: number;
+  basePriceMax: number;
+  examples: string | null;
+  source: string | null;
+}
+
+export interface PurchaseRequest {
+  characterId: number;
+  slotId: number;
+  price: number;
+  condition: AssetCondition;
+  customModifiers: CustomModifier[];
+  nameOverride: string | null;
+  notes: string | null;
+}
+
+export interface SellRequest {
+  assetId: number;
+  salePrice: number;
+  notes: string | null;
+}
