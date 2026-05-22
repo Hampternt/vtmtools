@@ -15,7 +15,7 @@
   import { onMount } from 'svelte';
   import { savedCharacters } from '../store/savedCharacters.svelte';
   import type { SavedCharacter } from '$lib/saved-characters/api';
-  import type { Wallet, Asset, Bucket } from '../types';
+  import type { Wallet, Asset, Bucket, NewAsset, SellRequest } from '../types';
   import {
     getWallet,
     enableWallet,
@@ -24,10 +24,16 @@
     adjustBanked,
     transferFunds,
     listAssets,
+    addAsset,
+    removeAsset,
+    sellAsset,
   } from '$lib/wealth/api';
   import WalletPanel from '$lib/components/wealth/WalletPanel.svelte';
   import AdjustModal from '$lib/components/wealth/AdjustModal.svelte';
   import TransferModal from '$lib/components/wealth/TransferModal.svelte';
+  import AssetList from '$lib/components/wealth/AssetList.svelte';
+  import AddAssetModal from '$lib/components/wealth/AddAssetModal.svelte';
+  import SellModal from '$lib/components/wealth/SellModal.svelte';
 
   // -------- state
   let selectedId: number | null = $state(null);
@@ -40,6 +46,9 @@
   let adjustOpen = $state(false);
   let adjustBucket: Bucket = $state('liquid');
   let transferOpen = $state(false);
+  let addAssetOpen = $state(false);
+  let sellOpen = $state(false);
+  let sellTarget: Asset | null = $state(null);
 
   // Derive character list from the store. Keeps in sync with bridge
   // updates / new saves automatically (the store re-fetches on
@@ -156,6 +165,38 @@
       error = String(e);
     }
   }
+
+  // -------- asset handlers
+  async function applyAddAsset(payload: NewAsset) {
+    if (selectedId == null) return;
+    try {
+      await addAsset(selectedId, payload);
+      await refreshAssets();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function applySell(req: SellRequest) {
+    try {
+      wallet = await sellAsset(req);
+      await refreshAssets();
+      sellTarget = null;
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function applyRemove(a: Asset) {
+    // confirm() per project pattern — destructive, no money credited (use Sell).
+    if (!confirm(`Remove "${a.name}"? This does not credit any money — use Sell for that.`)) return;
+    try {
+      await removeAsset(a.id);
+      await refreshAssets();
+    } catch (e) {
+      error = String(e);
+    }
+  }
 </script>
 
 <section class="wealth-manager">
@@ -196,8 +237,14 @@
         onOpenAdjust={openAdjust}
         onOpenTransfer={openTransfer}
       />
-      <!-- Tasks 9/10 fill these panels. -->
-      <div class="panel-placeholder">Assets panel — Task 9</div>
+      <!-- Task 10 still fills the shop panel below. -->
+      <AssetList
+        {assets}
+        currencyName={wallet.currencyName}
+        onAdd={() => (addAssetOpen = true)}
+        onSell={(a) => { sellTarget = a; sellOpen = true; }}
+        onRemove={applyRemove}
+      />
       <div class="panel-placeholder">Shop panel — Task 10</div>
       <button type="button" class="disable-btn" onclick={onDisable}>
         Disable wealth tracking
@@ -213,6 +260,16 @@
         bind:open={transferOpen}
         wallet={wallet!}
         onApply={applyTransfer}
+      />
+      <AddAssetModal
+        bind:open={addAssetOpen}
+        onApply={applyAddAsset}
+      />
+      <SellModal
+        bind:open={sellOpen}
+        asset={sellTarget}
+        currencyName={wallet.currencyName}
+        onApply={applySell}
       />
     </div>
   {/if}
