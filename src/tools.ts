@@ -41,6 +41,12 @@ export const tools: Tool[] = [
     component: () => import('./tools/AdvantagesManager.svelte'),
   },
   {
+    id: 'wealth',
+    label: 'Wealth',
+    icon: '💰',
+    component: () => import('./tools/WealthManager.svelte'),
+  },
+  {
     id: 'foundry-test',
     label: 'Foundry Test',
     icon: '🧪',

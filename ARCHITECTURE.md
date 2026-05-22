@@ -509,6 +509,104 @@ registered into `bridge.js::handleInbound`'s handler-map dispatch.
 See `docs/superpowers/specs/2026-04-26-foundry-helper-library-roadmap.md`
 for the umbrella conventions.
 
+### Wealth domain
+
+Opt-in per-character wealth tracking. Two numeric buckets (liquid /
+banked) plus a list of owned assets per character; shops are a
+category-filtered view over an abstract item-slot catalog priced by
+`class × condition × Π(custom_modifiers)`.
+
+```rust
+/// The two numeric buckets. Used by `transfer_funds`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Bucket { Liquid, Banked }
+
+/// Per-character wallet. Row presence in `character_wallets`
+/// IS the opt-in flag — there is no `wealth_enabled` boolean.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Wallet {
+    pub character_id: i64,
+    pub liquid: f64,
+    pub banked: f64,
+    pub currency_name: String,
+    pub transfer_delay: Option<TransferDelay>,  // forward-compat hint, not enforced V1
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// One owned asset. The "non-liquid" third bucket from the spec
+/// IS the *list* of these per character.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Asset {
+    pub id: i64,
+    pub character_id: i64,
+    pub name: String,
+    pub category: Option<AssetCategory>,
+    pub class: Option<String>,
+    pub purchase_price: Option<f64>,
+    pub current_value: f64,
+    pub condition: Option<AssetCondition>,
+    pub custom_modifiers: Vec<CustomModifier>,
+    pub notes: Option<String>,
+    pub created_at: String,
+}
+
+/// One abstract catalog row. Pricing is computed in
+/// `src/lib/wealth/pricing.ts` from `pickInBand × condition_multiplier
+/// × Π(custom_modifiers[i].mult)` at purchase time; `ItemSlot` only
+/// carries the band.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemSlot {
+    pub id: i64,
+    pub category: AssetCategory,
+    pub class: String,
+    pub label: String,
+    pub base_price_min: f64,
+    pub base_price_max: f64,
+    pub examples: Option<String>,    // GM-facing flavor text
+    pub is_custom: bool,
+    pub source: Option<String>,
+}
+```
+
+Five categories: `Weapon | Vehicle | Property | Investment | Misc`.
+Four conditions: `New | Used | VeryUsed | Custom` (the last is
+GM-supplied at purchase time). Condition multipliers are hardcoded
+constants in `src-tauri/src/shared/wealth.rs` — `new` 1.0, `used`
+0.6, `very_used` 0.3.
+
+```sql
+-- Per-character wallet. Row presence == opted in.
+CREATE TABLE character_wallets (
+    character_id PRIMARY KEY → saved_characters(id) ON DELETE CASCADE,
+    liquid, banked,
+    currency_name DEFAULT '$',
+    transfer_delay_json NULL,
+    created_at, updated_at
+);
+
+-- Owned assets (the "non-liquid" third bucket as a list of objects).
+CREATE TABLE character_assets (
+    id, character_id → character_wallets ON DELETE CASCADE,
+    name, category, class, purchase_price, current_value, condition,
+    custom_modifier_json NULL, notes, created_at
+);
+
+-- Abstract catalog. ~30 seeded rows + user-extensible.
+CREATE TABLE item_slots (
+    id, category, class, label, base_price_min, base_price_max,
+    examples, is_custom, source,
+    UNIQUE(category, class)
+);
+```
+
+Full spec:
+[`docs/superpowers/specs/2026-05-20-wealth-tracking-design.md`](docs/superpowers/specs/2026-05-20-wealth-tracking-design.md).
+
 ### Mirror layer
 
 The frontend `src/types.ts` mirrors these shapes in TypeScript.
@@ -522,15 +620,29 @@ Roll20.
 
 - **SQLite** at `app.path().app_data_dir()` (file `vtmtools.db`).
   All durable application state lives here: `dyscrasias`,
-  `chronicles`, `nodes`, `edges`.
+  `chronicles`, `nodes`, `edges`, `advantages`, `modifiers`,
+  `status_templates`, `saved_characters`, `character_wallets`,
+  `character_assets`, `item_slots`.
 - **Migrations** in `src-tauri/migrations/NNNN_*.sql`, applied on
   every startup via `sqlx::migrate!`. `PRAGMA foreign_keys = ON` is
   enabled on the pool via `SqliteConnectOptions` so `ON DELETE
   CASCADE` actually fires.
 - **Seed policy:** `src-tauri/src/db/seed.rs` deletes all
-  `is_custom = 0` rows in `dyscrasias` and reinserts the canonical
-  set on every start. Intentional; see
-  [ADR 0002](docs/adr/0002-destructive-reseed.md).
+  `is_custom = 0` rows in `dyscrasias`, `advantages`, and
+  `item_slots`, then reinserts the canonical set on every start.
+  Intentional; see [ADR 0002](docs/adr/0002-destructive-reseed.md).
+  `item_slots` carries a `UNIQUE(category, class)` constraint that
+  applies to **all** rows including customs — so the reseed uses
+  `INSERT OR IGNORE` to let a user-custom row whose `(category,
+  class)` matches a current or future built-in survive the cycle
+  intact (customs always win). Adding new built-in classes is safe.
+- **Wealth cascade chain:** `saved_characters` → `character_wallets`
+  (via `ON DELETE CASCADE` on `character_wallets.character_id`) →
+  `character_assets` (via `ON DELETE CASCADE` on
+  `character_assets.character_id` referencing
+  `character_wallets`). Disabling wealth tracking on a character
+  (`disable_wallet`) deletes the wallet row, cascade-dropping all
+  asset rows in one transaction.
 - **Ephemeral state:**
   - Svelte runes stores in `src/store/*` (e.g.
     `domains.svelte.ts` for chronicle UI state, `toolEvents.ts` for
@@ -588,6 +700,27 @@ Rust signature + the types it references in §2) is the stable contract.
   `save_character`, `list_saved_characters`,
   `update_saved_character`, `delete_saved_character`,
   `patch_saved_field`.
+- **`src-tauri/src/db/wealth.rs`** (17):
+  `wealth_enable_wallet`, `wealth_disable_wallet`, `wealth_get_wallet`,
+  `wealth_adjust_liquid`, `wealth_adjust_banked`, `wealth_transfer_funds`,
+  `wealth_set_currency_name`, `wealth_set_transfer_delay`,
+  `wealth_add_asset`, `wealth_update_asset`, `wealth_remove_asset`,
+  `wealth_list_assets`, `wealth_list_item_slots`,
+  `wealth_add_custom_slot`, `wealth_remove_custom_slot`,
+  `wealth_purchase_item_slot`, `wealth_sell_asset`.
+  V1 wallet primitives + asset CRUD + item-slot catalog + composed
+  atomic transactions. Row presence in `character_wallets` == opted
+  in. `disable_wallet` cascades to `character_assets`. `add_asset`
+  requires an opted-in wallet for the character. `update_asset`
+  builds a dynamic UPDATE so callers can distinguish "no change"
+  (`undefined`) from "set NULL". `item_slots` holds the abstract
+  purchase catalog: built-ins (`is_custom = 0`, seeded on startup
+  per ADR 0002) plus user-authored rows (`is_custom = 1`, durable
+  across reseeds). `remove_custom_slot` refuses built-ins.
+  `purchase_item_slot` and `sell_asset` are wrapped in single sqlx
+  transactions: a mid-flight error rolls back both the wallet
+  mutation and the asset insert/delete. `purchase_item_slot` sets
+  the new asset's `current_value` to the purchase price per spec.
 - **`src-tauri/src/tools/resonance.rs`** (1): `roll_resonance`.
 - **`src-tauri/src/tools/skill_check.rs`** (1): `roll_skill_check`.
 - **`src-tauri/src/tools/export.rs`** (1): `export_result_to_md`.
@@ -613,7 +746,7 @@ Rust signature + the types it references in §2) is the stable contract.
   snapshots the per-source world-level item caches (Foundry only in
   v1); paired live event is `bridge://foundry/items-updated`.
 
-Total: 68 commands. New commands are registered in
+Total: 85 commands. New commands are registered in
 `src-tauri/src/lib.rs` (`invoke_handler(tauri::generate_handler![...])`).
 See §8 for the Tauri capability / ACL surface.
 
@@ -800,6 +933,28 @@ Properties that must hold across all features.
   produced ghost-character bugs.
 - Dark-only. No theme toggle exists or will be added
   ([ADR 0004](docs/adr/0004-dark-only-theming.md)).
+- **Wealth subsystem opt-in semantics.** Row presence in
+  `character_wallets` IS the opt-in flag. There is no
+  `wealth_enabled` boolean. `enable_wallet` is idempotent
+  (`INSERT OR IGNORE` + SELECT — preserves balances if the row
+  already exists); `disable_wallet` is a no-op when absent (no
+  error) and cascade-deletes assets when present.
+- **Wealth tool-layer permissiveness.** `adjust_liquid` /
+  `adjust_banked` / `transfer_funds` accept any signed delta. The
+  resulting balance may go negative (so GMs can model debt
+  narratively). Affordability gating exists in exactly one place:
+  the Buy button in `BuyFormModal.svelte` is disabled when
+  `liquid < final_price`. The tool layer never refuses on
+  affordability grounds; the policy lives in the mechanics layer.
+- **Wealth transactional invariants.** `transfer_funds` with
+  `from == to` is a hard error (returns
+  `"wealth/transfer_funds: same bucket"`); cross-bucket transfers
+  conserve total balance. `purchase_item_slot` and `sell_asset`
+  are wrapped in single `sqlx` transactions — a mid-flight error
+  rolls back both the wallet mutation and the asset insert/delete.
+  `purchase_item_slot` sets the new asset's `current_value` equal
+  to its `purchase_price` (the GM's final price after band ×
+  condition × custom modifiers).
 
 ## §7 Error handling
 
@@ -973,6 +1128,20 @@ inventing a new hook.
     Resonance.svelte" entry is no longer applicable — the cutover
     to the bridge store ([ADR 0006](docs/adr/0006-bridge-source-generalization.md))
     moved all `listen()` calls into `src/store/bridge.svelte.ts`.
+
+### Wealth tracking V1 — manual smoke (one pass before claim-of-done)
+
+1. Open the Wealth tool, pick a character → expect "not using the wealth system" with Enable button.
+2. Click Enable → expect three panels (wallet zero-state / empty assets / shop with vehicle tab default).
+3. Open shop → Vehicles → "Economy vehicle" → buy at default mid-band price, condition=used, no custom mods → expect:
+   - Liquid debited by the displayed final price.
+   - New asset row appears in Assets with `current_value == purchase price`.
+4. Click Adjust on Liquid → +1000 → expect liquid balance bumps by 1000.
+5. Click Transfer → 500 from Liquid to Banked → expect both totals update and conserve.
+6. Sell the asset at 80% of current value → expect asset row gone, liquid credited.
+7. Disable wealth tracking (with confirm) → expect return to Enable state, asset count and wallet wiped.
+8. Re-enable → expect zero balances, empty assets (cascade was clean).
+9. Reload the app → expect the catalog still populated (seed survived) and any custom slots from V2 still present (none in V1).
 
 ## §11 Plan & execution conventions
 

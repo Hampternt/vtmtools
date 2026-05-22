@@ -38,6 +38,8 @@ pub fn run() {
                     .expect("Failed to seed dyscrasias");
                 db::seed::seed_advantages(&pool).await
                     .expect("Failed to seed advantages");
+                db::seed::seed_item_slots(&pool).await
+                    .expect("Failed to seed item_slots");
                 handle.manage(DbState(Arc::new(pool)));
 
                 // Bridge layer — sources registered here, accept loops spawned.
@@ -132,6 +134,23 @@ pub fn run() {
             db::advantage::roll_random_advantage,
             db::advantage::import_advantages_from_world,
             tools::library_push::push_advantage_to_world,
+            db::wealth::wealth_enable_wallet,
+            db::wealth::wealth_disable_wallet,
+            db::wealth::wealth_get_wallet,
+            db::wealth::wealth_adjust_liquid,
+            db::wealth::wealth_adjust_banked,
+            db::wealth::wealth_transfer_funds,
+            db::wealth::wealth_set_currency_name,
+            db::wealth::wealth_set_transfer_delay,
+            db::wealth::wealth_add_asset,
+            db::wealth::wealth_update_asset,
+            db::wealth::wealth_remove_asset,
+            db::wealth::wealth_list_assets,
+            db::wealth::wealth_list_item_slots,
+            db::wealth::wealth_add_custom_slot,
+            db::wealth::wealth_remove_custom_slot,
+            db::wealth::wealth_purchase_item_slot,
+            db::wealth::wealth_sell_asset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
