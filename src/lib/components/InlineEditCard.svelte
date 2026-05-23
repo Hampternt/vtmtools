@@ -2,6 +2,7 @@
   import AdvantageCard from './AdvantageCard.svelte';
   import TagChipInput from './builder/TagChipInput.svelte';
   import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
   import { updateAdvantage, type AdvantageInput } from '$lib/advantages/api';
   import type { Advantage, AdvantageKind } from '../../types';
 
@@ -122,6 +123,22 @@
       e.preventDefault();
     }
   }
+
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (!editing) return;
+    if (e.key === 'Escape') {
+      cancel();
+      e.preventDefault();
+    } else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+      void save();
+      e.preventDefault();
+    }
+  }
+
+  onMount(() => {
+    window.addEventListener('keydown', onWindowKeydown);
+    return () => window.removeEventListener('keydown', onWindowKeydown);
+  });
 </script>
 
 {#if !editing}
@@ -262,6 +279,10 @@
     color: inherit;
     padding: 0.2rem 0.5rem;
   }
+  .name-input:focus-visible {
+    outline: 1px solid var(--accent-amber);
+    outline-offset: 2px;
+  }
   .description-input {
     width: 100%;
     min-height: 3.5rem;
@@ -273,6 +294,10 @@
     letter-spacing: 0.4px;
     color: inherit;
     resize: vertical;
+  }
+  .description-input:focus-visible {
+    outline: 1px solid var(--accent-amber);
+    outline-offset: 2px;
   }
   .validation-warn {
     color: var(--validation-warn);
@@ -311,6 +336,10 @@
     font-family: 'Oswald', sans-serif;
     font-size: 0.8rem;
   }
+  .kind-select:focus-visible {
+    outline: 1px solid var(--accent-amber);
+    outline-offset: 2px;
+  }
 
   .bonus-edit {
     background: transparent;
@@ -322,6 +351,10 @@
     padding: 0.15rem 0.4rem;
   }
   .bonus-edit:hover { background: rgba(217, 165, 96, 0.08); }
+  .bonus-edit:focus-visible {
+    outline: 1px solid var(--accent-amber);
+    outline-offset: 2px;
+  }
 
   .tier-dots {
     display: inline-flex;
@@ -378,6 +411,10 @@
     text-transform: uppercase;
     padding: 0.3rem 0.7rem;
     cursor: pointer;
+  }
+  .actions button:focus-visible {
+    outline: 1px solid var(--accent-amber);
+    outline-offset: 2px;
   }
   .actions .save {
     background: var(--accent-red);
