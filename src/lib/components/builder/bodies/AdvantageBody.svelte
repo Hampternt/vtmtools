@@ -128,6 +128,29 @@
     }
   }
 
+  function onLevelKeydown(e: KeyboardEvent) {
+    if (!bodyState) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      bodyState.level = Math.max(0, bodyState.level - 1);
+      e.preventDefault();
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      bodyState.level = Math.min(5, bodyState.level + 1);
+      e.preventDefault();
+    } else if (e.key === 'Home') {
+      bodyState.level = 0;
+      e.preventDefault();
+    } else if (e.key === 'End') {
+      bodyState.level = 5;
+      e.preventDefault();
+    } else if (/^[0-5]$/.test(e.key)) {
+      bodyState.level = Number(e.key);
+      e.preventDefault();
+    } else if (e.key === 'Enter') {
+      machine.advance();
+      e.preventDefault();
+    }
+  }
+
   let bonusSubStage = $state<'type' | 'name' | 'value' | 'applies'>('type');
   // Sticky-name semantics: when editing an existing advantage whose stored
   // bonusName diverges from the derived default, treat the loaded name as
@@ -322,15 +345,27 @@
   {:else if bodyState && machine.stage === 'level'}
     <div class="prompt-label">— SPOTLIGHT —</div>
     <h3 class="prompt">Tier level</h3>
-    <div class="tier-row">
+    <span
+      class="tier-row"
+      role="slider"
+      aria-label="Level"
+      aria-valuemin="0"
+      aria-valuemax="5"
+      aria-valuenow={bodyState.level}
+      tabindex="0"
+      onkeydown={onLevelKeydown}
+    >
       {#each [1,2,3,4,5] as n}
         <button
+          type="button"
+          tabindex="-1"
           class="tier-pip-button"
           class:f={bodyState.level >= n}
+          aria-label={`Set to ${n}`}
           onclick={() => { if (bodyState) bodyState.level = n; machine.advance(); }}
         ></button>
       {/each}
-    </div>
+    </span>
   {:else if bodyState && machine.stage === 'bonus'}
     {#if bonusSubStage === 'type'}
       <div class="prompt-label">— SPOTLIGHT —</div>
@@ -425,6 +460,7 @@
   }
   .hint { font-size: 0.65rem; color: var(--text-muted); text-align: center; font-style: italic; margin: 0; }
   .kind-row, .tier-row { display: flex; gap: 0.45rem; justify-content: center; }
+  .tier-row:focus-visible { outline: 1px solid var(--accent-amber); outline-offset: 2px; border-radius: 0.3rem; }
   .kind-row button {
     background: var(--bg-card); border: 1px solid var(--border-faint);
     color: var(--text-secondary); border-radius: 0.3rem;
