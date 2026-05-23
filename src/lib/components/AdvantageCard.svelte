@@ -55,9 +55,11 @@
   }
 
   // Spec footer: LEVEL renders 5 tier dots. Null level (no dot-cost
-  // mechanic on this advantage) → all empty. Number → first `level`
-  // dots filled. `?? 0` keeps the loop comparator non-nullable.
-  const level = $derived(numberValue(findField('dot_cost_per_level')) ?? 0);
+  // mechanic on this advantage) → all empty. Reads dot_cost_per_level
+  // first (the new-writer convention from AdvantageBody / routes),
+  // falls back to 'level' (seed + library_push + Foundry-pull writes).
+  // `?? 0` keeps the loop comparator non-nullable.
+  const level = $derived(numberValue(findField('dot_cost_per_level') ?? findField('level')) ?? 0);
 
   function kindLabel(k: AdvantageKind): string {
     return ({ merit: 'Merit', flaw: 'Flaw', background: 'Background', boon: 'Boon' } as const)[k] ?? 'Merit';
@@ -92,29 +94,31 @@
   data-kind={data.kind}
   onclick={isPreview && onClick ? (e) => onClick(e.target as HTMLElement) : undefined}
 >
-  <!-- v1.x backlog: surface sourceAttribution (FVTT · worldTitle) when present; spec §"Card visual design" doesn't define placement -->
-  <button
-    type="button"
-    class="affordance edit-icon"
-    aria-label={`Edit ${name}`}
-    onclick={(e) => { e.stopPropagation(); onedit?.(); }}
-  >✎</button>
-
-  <button
-    type="button"
-    class="affordance delete-icon"
-    aria-label={`Delete ${name}`}
-    onclick={onDeleteClick}
-  >🗑</button>
-
-  {#if bridge.connections.foundry && onPush}
+  {#if input.kind === 'saved'}
+    <!-- v1.x backlog: surface sourceAttribution (FVTT · worldTitle) when present; spec §"Card visual design" doesn't define placement -->
     <button
       type="button"
-      class="affordance push-icon"
-      aria-label={`Push ${name} to Foundry`}
-      onclick={(e) => { e.stopPropagation(); onPush?.(); }}
-      title="Push to Foundry"
-    >↑</button>
+      class="affordance edit-icon"
+      aria-label={`Edit ${name}`}
+      onclick={(e) => { e.stopPropagation(); onedit?.(); }}
+    >✎</button>
+
+    <button
+      type="button"
+      class="affordance delete-icon"
+      aria-label={`Delete ${name}`}
+      onclick={onDeleteClick}
+    >🗑</button>
+
+    {#if bridge.connections.foundry && onPush}
+      <button
+        type="button"
+        class="affordance push-icon"
+        aria-label={`Push ${name} to Foundry`}
+        onclick={(e) => { e.stopPropagation(); onPush?.(); }}
+        title="Push to Foundry"
+      >↑</button>
+    {/if}
   {/if}
 
   <div class="frame">
