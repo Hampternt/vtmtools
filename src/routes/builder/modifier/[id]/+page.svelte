@@ -12,6 +12,12 @@
   let wipMessage = $state('');
   let busy = $state(false);
   let loadError = $state<string | null>(null);
+  // True iff the modifier we loaded was empty on arrival. If still empty at
+  // Cancel time (no effects, no tags), we delete it on the way out —
+  // catching the virtual-card materialize-then-cancel leak path (T8 moved
+  // materialization to edit-open so the new route has an id; without this
+  // rollback, every open+cancel cycle leaks an empty CharacterModifier row).
+  let isEmptyMaterialized = $state(false);
 
   $effect(() => {
     void (async () => {
@@ -19,6 +25,7 @@
         await modifiers.ensureLoaded();
         initial = modifiers.list.find(m => m.id === id);
         if (!initial) loadError = `Modifier ${id} not found`;
+        else isEmptyMaterialized = initial.effects.length === 0 && initial.tags.length === 0;
       } catch (e) { loadError = String(e); }
     })();
   });
@@ -49,7 +56,25 @@
     } finally { busy = false; }
   }
 
-  function cancel() { void goto('/'); }
+  async function cancel() {
+    // Rollback if this looks like a just-materialized virtual card whose
+    // user added nothing. Heuristic: arrived empty AND still empty in the
+    // editor state. Doesn't catch the add-then-remove-then-cancel edge
+    // (the user briefly populated, then emptied — we conservatively
+    // delete) or close-tab-without-clicking-cancel (the row stays
+    // until manual cleanup). Acceptable for v1.
+    if (
+      isEmptyMaterialized &&
+      (!bodyState || (bodyState.effects.length === 0 && bodyState.tags.length === 0))
+    ) {
+      try {
+        await modifiers.delete(id);
+      } catch (e) {
+        console.warn('Cancel-rollback failed for modifier', id, e);
+      }
+    }
+    void goto('/');
+  }
 </script>
 
 <svelte:head><title>Edit Modifier · vtmtools</title></svelte:head>
