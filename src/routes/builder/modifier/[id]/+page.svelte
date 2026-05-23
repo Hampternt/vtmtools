@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { listAllCharacterModifiers, updateCharacterModifier, deleteCharacterModifier } from '$lib/modifiers/api';
+  import { modifiers } from '../../../../store/modifiers.svelte';
   import ModifierEffectBody, { type ModifierEffectBodyState } from '$lib/components/builder/bodies/ModifierEffectBody.svelte';
   import type { CharacterModifier, ModifierPatchInput } from '../../../../types';
 
@@ -16,8 +16,8 @@
   $effect(() => {
     void (async () => {
       try {
-        const all = await listAllCharacterModifiers();
-        initial = all.find(m => m.id === id);
+        await modifiers.ensureLoaded();
+        initial = modifiers.list.find(m => m.id === id);
         if (!initial) loadError = `Modifier ${id} not found`;
       } catch (e) { loadError = String(e); }
     })();
@@ -34,7 +34,7 @@
     if (!bodyState || !initial || busy) return;
     busy = true;
     try {
-      await updateCharacterModifier(id, toModifierPatch(bodyState));
+      await modifiers.update(id, toModifierPatch(bodyState));
       await goto('/');
     } finally { busy = false; }
   }
@@ -44,7 +44,7 @@
     if (!confirm('Delete this modifier?')) return;
     busy = true;
     try {
-      await deleteCharacterModifier(id);
+      await modifiers.delete(id);
       await goto('/');
     } finally { busy = false; }
   }
