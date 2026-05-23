@@ -150,6 +150,27 @@
     --field-desc:     #c4b7a4;
     --field-bonus:    #e0563a;
     --field-tags:     #98c89f;
+
+    /* Card outline (Witcher-inspired) */
+    --outline-color: #83868a;
+    --shadow-color: 41deg 3% 15%;
+    --shadow-medium:
+      0.3px 0.5px 0.5px hsl(var(--shadow-color) / 0.68),
+      0.6px 1.2px 1.2px -1.3px hsl(var(--shadow-color) / 0.55),
+      1.9px 3.9px 3.9px -2.7px hsl(var(--shadow-color) / 0.42),
+      5.4px 10.8px 10.8px -4.1px hsl(var(--shadow-color) / 0.29);
+
+    /* Detail box (footer three-box) */
+    --bg-detail: #302f30;
+    --border-detail: #403d3d;
+    --hairline: rgba(255, 255, 255, 0.06);
+
+    /* WIP strip */
+    --wip: #c9a064;
+
+    /* Inline blur validation */
+    --validation-warn: #d9a560;
+    --validation-error: #c46050;
   }
 
   @font-face {
