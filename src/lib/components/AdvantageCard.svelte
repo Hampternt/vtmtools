@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Advantage, Field, AdvantageKind, ModifierEffect } from '../../types';
+  import { bridge } from '../../store/bridge.svelte';
 
   /**
    * Discriminated input: lets the same card render both saved library
@@ -19,18 +20,29 @@
     /** Preview-mode click-to-edit. Ignored in saved mode. */
     onClick?: (target: HTMLElement) => void;
     /** Saved-mode edit callback. Card has no IPC knowledge.
-     *  Wired by Task 3's hover-reveal ✎ affordance; unused here. */
+     *  Wired by Task 3's hover-reveal ✎ affordance. */
     onedit?: () => void;
     /** Saved-mode delete callback. Card has no IPC knowledge.
-     *  Wired by Task 3's hover-reveal 🗑 affordance; unused here. */
+     *  Wired by Task 3's hover-reveal 🗑 affordance. */
     ondelete?: () => void;
+    /** Saved-mode push-to-Foundry callback. Card has no IPC knowledge.
+     *  Wired by Task 3's hover-reveal ↑ affordance; only rendered when
+     *  the Foundry bridge is connected. */
+    onPush?: () => void;
   }
 
-  let { input, onClick }: Props = $props();
+  let { input, onClick, onedit, ondelete, onPush }: Props = $props();
 
   const data = $derived(input.data);
+  const name = $derived(data.name);
   const isPreview = $derived(input.kind === 'preview');
   const isWip = $derived(input.kind === 'saved' ? input.data.wip : (input.wip ?? false));
+
+  function onDeleteClick(e: Event) {
+    e.stopPropagation();
+    const ok = confirm(`Delete ${name}?`);
+    if (ok) ondelete?.();
+  }
 
   function findField(name: string): Field | undefined {
     return data.properties.find(p => p.name === name);
@@ -80,6 +92,31 @@
   data-kind={data.kind}
   onclick={isPreview && onClick ? (e) => onClick(e.target as HTMLElement) : undefined}
 >
+  <!-- v1.x backlog: surface sourceAttribution (FVTT · worldTitle) when present; spec §"Card visual design" doesn't define placement -->
+  <button
+    type="button"
+    class="affordance edit-icon"
+    aria-label={`Edit ${name}`}
+    onclick={(e) => { e.stopPropagation(); onedit?.(); }}
+  >✎</button>
+
+  <button
+    type="button"
+    class="affordance delete-icon"
+    aria-label={`Delete ${name}`}
+    onclick={onDeleteClick}
+  >🗑</button>
+
+  {#if bridge.connections.foundry && onPush}
+    <button
+      type="button"
+      class="affordance push-icon"
+      aria-label={`Push ${name} to Foundry`}
+      onclick={(e) => { e.stopPropagation(); onPush?.(); }}
+      title="Push to Foundry"
+    >↑</button>
+  {/if}
+
   <div class="frame">
     <header class="zone-title">
       <h3 data-stage="name">{data.name}</h3>
@@ -273,4 +310,37 @@
   .vamp-card.wip {
     opacity: 0.92;
   }
+
+  /* Hover-reveal affordances — three distinct corners satisfy the
+     Fitts's Law mis-click defense the spec calls out for ✎/🗑 and
+     naturally extend to ↑ (push). Cards have no IPC knowledge; the
+     callbacks are wired by the caller. */
+  .affordance {
+    position: absolute;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 120ms ease-out;
+    z-index: 2;
+  }
+  .vamp-card:hover .edit-icon   { opacity: 0.7; }
+  .vamp-card:hover .delete-icon { opacity: 0.6; }
+  .vamp-card:hover .push-icon   { opacity: 0.7; }
+  .affordance:focus-visible {
+    opacity: 1;
+    outline: 1px solid var(--accent-amber);
+    outline-offset: 2px;
+  }
+
+  .edit-icon   { top: 0.5rem;    right: 0.5rem; }
+  .delete-icon { bottom: 0.5rem; right: 0.5rem; }
+  .push-icon   { top: 0.5rem;    left: 0.5rem;  }
+
+  .delete-icon:hover { color: var(--accent-bright); }
+  .push-icon:hover   { color: var(--accent-amber); }
 </style>
