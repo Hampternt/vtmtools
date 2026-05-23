@@ -1,10 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { statusTemplates } from '../../../store/statusTemplates.svelte';
   import { modifiers } from '../../../store/modifiers.svelte';
   import StatusTemplateCard from './StatusTemplateCard.svelte';
-  import ItemBuilderShell from '$lib/components/builder/ItemBuilderShell.svelte';
-  import StatusTemplateBody, { type StatusTemplateBodyState } from '$lib/components/builder/bodies/StatusTemplateBody.svelte';
   import type { StatusTemplate, BridgeCharacter } from '../../../types';
 
   interface Props {
@@ -18,10 +17,6 @@
 
   let { focusedCharacter }: Props = $props();
 
-  let editorOpen = $state(false);
-  let editorExisting = $state<StatusTemplate | null>(null);
-  let bodyValid = $state(false);
-  let templateBodyState = $state<StatusTemplateBodyState | undefined>();
   // Tagged hint so the error tone can persist (no auto-clear) while
   // success/info auto-fade. Errors stay until the user clicks again.
   let applyHint = $state<{ text: string; tone: 'info' | 'success' | 'error' } | null>(null);
@@ -59,47 +54,6 @@
     }
   }
 
-  function openNewEditor() {
-    editorExisting = null;
-    editorOpen = true;
-  }
-
-  function openEditEditor(t: StatusTemplate) {
-    editorExisting = t;
-    editorOpen = true;
-  }
-
-  function closeEditor() {
-    editorOpen = false;
-    editorExisting = null;
-    templateBodyState = undefined;
-  }
-
-  async function handleTemplateSave() {
-    if (!templateBodyState) return;
-    const payload = {
-      name: templateBodyState.name,
-      description: templateBodyState.description,
-      tags: templateBodyState.tags,
-      effects: templateBodyState.effects,
-      wip: !bodyValid,
-      confirmedFields: bodyValid ? undefined : templateBodyState.confirmedFields,
-    };
-    if (editorExisting) {
-      await statusTemplates.update(editorExisting.id, payload);
-    } else {
-      await statusTemplates.add(payload);
-    }
-    closeEditor();
-  }
-
-  async function handleTemplateDelete() {
-    if (!editorExisting) return;
-    if (!confirm(`Delete template "${editorExisting.name}"?`)) return;
-    await statusTemplates.delete(editorExisting.id);
-    closeEditor();
-  }
-
   function summarize(t: StatusTemplate): string {
     if (t.effects.length === 0) return '(no effects)';
     return t.effects.map(e => {
@@ -114,7 +68,7 @@
 <aside class="palette">
   <header>
     <h2>Status palette</h2>
-    <button class="new" onclick={openNewEditor}>+ New template</button>
+    <button class="new" onclick={() => goto('/builder/template/new')}>+ New template</button>
   </header>
 
   {#if applyHint}<p class="hint" class:error={applyHint.tone === 'error'}>{applyHint.text}</p>{/if}
@@ -131,28 +85,17 @@
           applyDisabled={!focusedCharacter}
           applyTitle={focusedCharacter ? `Apply to ${focusedCharacter.name}` : 'Pick a character first'}
           onapply={() => applyTemplate(t)}
-          onedit={() => openEditEditor(t)}
+          onedit={() => goto(`/builder/template/${t.id}`)}
+          onDelete={async () => {
+            try {
+              await statusTemplates.delete(t.id);
+            } catch (e) {
+              console.error('Delete failed', e);
+            }
+          }}
         />
       {/each}
     </div>
-  {/if}
-
-  {#if editorOpen}
-    <ItemBuilderShell
-      open
-      title={editorExisting ? 'Edit template' : 'New template'}
-      saveLabel={bodyValid ? 'Save' : 'Save WIP'}
-      bind:valid={bodyValid}
-      onSave={handleTemplateSave}
-      onCancel={closeEditor}
-      onDelete={editorExisting ? handleTemplateDelete : undefined}
-    >
-      <StatusTemplateBody
-        initial={editorExisting}
-        bind:valid={bodyValid}
-        bind:bodyState={templateBodyState}
-      />
-    </ItemBuilderShell>
   {/if}
 </aside>
 

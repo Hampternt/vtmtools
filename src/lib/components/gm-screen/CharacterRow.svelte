@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { modifiers } from '../../../store/modifiers.svelte';
   import { statusTemplates } from '../../../store/statusTemplates.svelte';
   import type {
@@ -7,8 +8,6 @@
   } from '../../../types';
   import type { SavedCharacter } from '$lib/saved-characters/api';
   import ModifierCard from './ModifierCard.svelte';
-  import ItemBuilderShell from '$lib/components/builder/ItemBuilderShell.svelte';
-  import ModifierEffectBody, { type ModifierEffectBodyState } from '$lib/components/builder/bodies/ModifierEffectBody.svelte';
   import RollDispatcherPopover from './RollDispatcherPopover.svelte';
   import ActiveEffectsSummary from './ActiveEffectsSummary.svelte';
   import DropZone from '$lib/components/dnd/DropZone.svelte';
@@ -28,16 +27,6 @@
   // target but the matrix rejects them.
   let characterTarget = $derived<DropTarget>({ kind: 'character-zone', character });
   let situationalTarget = $derived<DropTarget>({ kind: 'situational-zone', character });
-
-  // Editor popover state — anchored to the cog via getBoundingClientRect()
-  // (spec §7.3 "anchored to the cog itself, not a modal"). popoverPos uses
-  // viewport coords so the wrap is position:fixed.
-  type EditorTarget = { kind: 'materialized', mod: CharacterModifier }
-                    | { kind: 'virtual', virt: VirtualCard };
-  let editorOpen = $state(false);
-  let editorTarget = $state<EditorTarget | null>(null);
-  let effectsValid = $state(false);
-  let effectsBodyState = $state<ModifierEffectBodyState | undefined>();
 
   // Roll dispatcher popover state — anchored to the 🎲 button.
   let rollPopoverOpen = $state(false);
@@ -335,30 +324,14 @@
     await modifiers.delete(e.mod.id);
   }
 
-  function openEditor(e: CardEntry, _anchor: HTMLElement): void {
-    editorTarget = e.kind === 'materialized'
-      ? { kind: 'materialized', mod: e.mod }
-      : { kind: 'virtual', virt: e.virt };
-    editorOpen = true;
-  }
-
-  function closeEditor(): void {
-    editorOpen = false;
-    editorTarget = null;
-    effectsBodyState = undefined;
-  }
-
-  async function saveEditor(effects: ModifierEffect[], tags: string[]): Promise<void> {
-    if (!editorTarget) return;
-    let id: number;
-    if (editorTarget.kind === 'virtual') {
-      const m = await materialize(editorTarget.virt);
-      id = m.id;
-    } else {
-      id = editorTarget.mod.id;
-    }
-    await modifiers.update(id, { effects, tags });
-    closeEditor();
+  // Open the per-modifier editor by routing to /builder/modifier/[id].
+  // Virtual cards have no DB row yet — materialize first so we have an id
+  // to route to. (Mirrors CharacterCard.openChipEditor's materialize-on-open
+  // pattern; the side-effect of committing a DB row on edit-open is the same
+  // change that file made.)
+  async function openEditor(e: CardEntry, _anchor: HTMLElement): Promise<void> {
+    const id = e.kind === 'virtual' ? (await materialize(e.virt)).id : e.mod.id;
+    await goto(`/builder/modifier/${id}`);
   }
 
   async function addFreeModifier(zone: ModifierZone): Promise<void> {
@@ -518,28 +491,6 @@
     <p class="push-notice" class:ok={pushNotice.ok} class:err={!pushNotice.ok}>
       {pushNotice.text}
     </p>
-  {/if}
-
-  {#if editorTarget}
-    {@const target = editorTarget}
-    <ItemBuilderShell
-      open
-      title={target.kind === 'materialized' ? target.mod.name : target.virt.name}
-      saveLabel={effectsValid ? 'Save' : 'Save WIP'}
-      bind:valid={effectsValid}
-      onSave={() => {
-        if (effectsBodyState) saveEditor(effectsBodyState.effects, effectsBodyState.tags);
-      }}
-      onCancel={closeEditor}
-    >
-      <ModifierEffectBody
-        initialEffects={target.kind === 'materialized' ? target.mod.effects : []}
-        initialTags={target.kind === 'materialized' ? target.mod.tags : []}
-        {character}
-        bind:valid={effectsValid}
-        bind:bodyState={effectsBodyState}
-      />
-    </ItemBuilderShell>
   {/if}
 </section>
 

@@ -3,26 +3,20 @@
   import { flip } from 'svelte/animate';
   import { fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
+  import { goto } from '$app/navigation';
   import AdvantageCard from '$lib/components/AdvantageCard.svelte';
-  import ItemBuilderShell from '$lib/components/builder/ItemBuilderShell.svelte';
-  import AdvantageBody, {
-    type AdvantageBodyState,
-    type AdvantageBodyBonus,
-  } from '$lib/components/builder/bodies/AdvantageBody.svelte';
   import {
     listAdvantages,
     deleteAdvantage,
-    addAdvantage,
-    updateAdvantage,
-    type AdvantageInput,
   } from '$lib/advantages/api';
   import {
     importAdvantagesFromWorld,
     subscribeToWorldItems,
+    pushAdvantageToWorld,
   } from '$lib/library/api';
   import { summarizeImport, summaryAsToast } from '$lib/library/importer';
   import { bridge } from '../store/bridge.svelte';
-  import type { Advantage, Field, ModifierEffect } from '../types';
+  import type { Advantage, Field } from '../types';
 
   type SortKey = 'name-asc' | 'name-desc' | 'level-asc' | 'level-desc' | 'recent';
   type ProvenanceFilter = 'all' | 'corebook' | 'local' | 'imported';
@@ -36,14 +30,6 @@
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   let sortKey: SortKey = $state('name-asc');
   let provenanceFilter: ProvenanceFilter = $state('all');
-  let showAddForm   = $state(false);
-  let editingId: number | null = $state(null);
-
-  // Item Builder Shell (Task 18): shell drives Save / Save WIP via
-  // `bodyValid`; AdvantageBody owns the multi-stage state in
-  // `advantageBodyState`. Both reset on cancel / save.
-  let bodyValid = $state(false);
-  let advantageBodyState = $state<AdvantageBodyState | undefined>();
 
   // Pull-from-world transient state. Resets each invocation.
   let pulling     = $state(false);
@@ -183,44 +169,6 @@
     searchTimer = setTimeout(() => { searchQuery = rawSearch; }, 110);
   }
 
-  function bonusToEffect(b: AdvantageBodyBonus): ModifierEffect {
-    return {
-      kind: b.kind,
-      scope: null,
-      delta: b.value,
-      note: null,
-      paths: b.paths,
-      bonusName: b.bonusName,
-    };
-  }
-
-  async function handleBuilderSave() {
-    if (!advantageBodyState) return;
-    const input: AdvantageInput = {
-      name: advantageBodyState.name,
-      description: advantageBodyState.description,
-      kind: advantageBodyState.kind,
-      tags: advantageBodyState.tags,
-      properties: [{
-        name: 'dot_cost_per_level',
-        type: 'number',
-        value: advantageBodyState.level,
-      }],
-      effects: [bonusToEffect(advantageBodyState.bonus), ...advantageBodyState.extraEffects],
-      wip: !bodyValid,
-      confirmedFields: bodyValid ? undefined : advantageBodyState.confirmedFields,
-    };
-    if (editingId !== null) {
-      await updateAdvantage(editingId, input);
-    } else {
-      await addAdvantage(input);
-    }
-    showAddForm = false;
-    editingId = null;
-    advantageBodyState = undefined;
-    await loadAll();
-  }
-
   async function handleDelete(id: number) {
     try {
       await deleteAdvantage(id);
@@ -281,9 +229,7 @@
       <option value="level-desc">Level ↓</option>
       <option value="recent">Recently added</option>
     </select>
-    <button class="add-btn" onclick={() => { showAddForm = !showAddForm; editingId = null; }}>
-      {showAddForm ? '✕ Cancel' : '+ Add Custom'}
-    </button>
+    <button class="add-btn" onclick={() => goto('/builder/advantage/new')}>+ Add Custom</button>
     {#if bridge.connections.foundry}
       <button
         class="add-btn pull-btn"
@@ -348,38 +294,23 @@
         >
           <AdvantageCard
             input={{ kind: 'saved', data: entry }}
-            onedit={() => { editingId = entry.id; showAddForm = false; }}
+            onedit={() => goto(`/builder/advantage/${entry.id}`)}
             ondelete={() => handleDelete(entry.id)}
+            onPush={async () => {
+              try {
+                await pushAdvantageToWorld(entry.id);
+              } catch (e) {
+                console.error('Push failed', e);
+              }
+            }}
           />
         </div>
       {/each}
 
-      {#if visible.length === 0 && !showAddForm}
+      {#if visible.length === 0}
         <p class="empty" transition:fade>No advantages match your filters.</p>
       {/if}
     </div>
-  {/if}
-
-  {#if showAddForm || editingId !== null}
-    <ItemBuilderShell
-      open
-      title={editingId === null ? 'New advantage' : 'Edit advantage'}
-      saveLabel={bodyValid ? 'Save' : 'Save WIP'}
-      bind:valid={bodyValid}
-      onSave={handleBuilderSave}
-      onCancel={() => {
-        showAddForm = false;
-        editingId = null;
-        advantageBodyState = undefined;
-      }}
-    >
-      <AdvantageBody
-        initial={editingId !== null ? allEntries.find(a => a.id === editingId) : undefined}
-        existingCount={allEntries.length}
-        bind:valid={bodyValid}
-        bind:bodyState={advantageBodyState}
-      />
-    </ItemBuilderShell>
   {/if}
 </div>
 
