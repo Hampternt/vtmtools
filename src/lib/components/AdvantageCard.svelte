@@ -57,7 +57,7 @@
   // Spec footer: LEVEL renders 5 tier dots. Null level (no dot-cost
   // mechanic on this advantage) → all empty. Number → first `level`
   // dots filled. `?? 0` keeps the loop comparator non-nullable.
-  const level = $derived(numberValue(findField('level')) ?? 0);
+  const level = $derived(numberValue(findField('dot_cost_per_level')) ?? 0);
 
   function kindLabel(k: AdvantageKind): string {
     return ({ merit: 'Merit', flaw: 'Flaw', background: 'Background', boon: 'Boon' } as const)[k] ?? 'Merit';
