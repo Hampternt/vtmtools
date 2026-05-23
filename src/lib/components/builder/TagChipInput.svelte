@@ -19,13 +19,23 @@
 
   function remove(t: string) { onChange(tags.filter(x => x !== t)); }
 
-  function onKey(e: KeyboardEvent) {
-    if (e.key === 'Enter') {
+  function removeChipAt(i: number) {
+    const next = tags.filter((_, idx) => idx !== i);
+    onChange(next);
+  }
+
+  function onInputKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter' || e.key === ',') {
+      if (draft.trim().length > 0) {
+        commit();
+      }
       e.preventDefault();
-      commit();
     } else if (e.key === 'Backspace' && draft === '' && tags.length > 0) {
       e.preventDefault();
-      remove(tags[tags.length - 1]);
+      removeChipAt(tags.length - 1);
+    } else if (e.key === 'Escape') {
+      draft = '';
+      e.preventDefault();
     }
   }
 
@@ -34,21 +44,32 @@
   }
 </script>
 
-<div class="chips">
-  {#each tags as t}
-    <span class="chip">
-      {t}
-      <button type="button" onclick={() => remove(t)} aria-label="Remove tag {t}">×</button>
-    </span>
-  {/each}
+<div role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="chips-list" class="chips">
+  <ul role="list" id="chips-list" class="chips-list">
+    {#each tags as t, i (t)}
+      <li role="listitem" class="chip-item">
+        <span class="chip">
+          {t}
+          <button
+            type="button"
+            tabindex="0"
+            class="chip-remove"
+            aria-label={`Remove ${t}`}
+            onclick={() => removeChipAt(i)}
+          >×</button>
+        </span>
+      </li>
+    {/each}
+  </ul>
   <input
     bind:this={inputEl}
     type="text"
     {placeholder}
     {autofocus}
     bind:value={draft}
-    onkeydown={onKey}
+    onkeydown={onInputKeydown}
     onblur={onBlur}
+    aria-label="Add tag"
   />
 </div>
 
@@ -61,6 +82,12 @@
     padding: 0.3rem;
     box-sizing: border-box;
   }
+  .chips-list {
+    display: contents;
+  }
+  .chip-item {
+    display: contents;
+  }
   .chip {
     background: var(--bg-card);
     border: 1px solid var(--border-faint);
@@ -70,11 +97,11 @@
     font-size: 0.7rem;
     display: inline-flex; align-items: center; gap: 0.25rem;
   }
-  .chip button {
+  .chip-remove {
     background: transparent; border: none; color: var(--text-muted);
     cursor: pointer; padding: 0; font-size: 0.7rem;
   }
-  .chip button:hover { color: var(--accent); }
+  .chip-remove:hover { color: var(--accent); }
   input {
     flex: 1; min-width: 6rem;
     background: transparent; border: none;

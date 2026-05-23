@@ -1,6 +1,7 @@
 <script lang="ts">
   export type EnabledType = 'merit' | 'flaw' | 'background' | 'boon';
   export type PreviewType = 'discipline' | 'item';
+  type AllType = EnabledType | PreviewType;
 
   interface Props {
     available?: EnabledType[];
@@ -10,6 +11,8 @@
 
   let { available = ['merit', 'flaw', 'background', 'boon'], preview = ['discipline', 'item'], onPick }: Props = $props();
 
+  let selected: AllType | null = $state(null);
+
   const CARDS = {
     merit:      { glyph: 'M', title: 'Merit',      desc: 'A character advantage. Buys dots for an in-game bonus.' },
     flaw:       { glyph: 'F', title: 'Flaw',       desc: 'A character drawback. Awards experience.' },
@@ -18,11 +21,53 @@
     discipline: { glyph: 'D', title: 'Discipline', desc: 'Vampiric power with school + levels.' },
     item:       { glyph: 'I', title: 'Item',       desc: 'Weapon, armor, or gear.' },
   } as const;
+
+  function onKeydown(e: KeyboardEvent) {
+    const allOptions = available as AllType[];
+
+    if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      const i = allOptions.indexOf(selected ?? allOptions[0]);
+      const next = allOptions[(i - 1 + allOptions.length) % allOptions.length];
+      selected = next;
+      focusCard(next);
+      e.preventDefault();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      const i = allOptions.indexOf(selected ?? allOptions[0]);
+      const next = allOptions[(i + 1) % allOptions.length];
+      selected = next;
+      focusCard(next);
+      e.preventDefault();
+    } else if (e.key === ' ' || e.key === 'Enter') {
+      if (selected && available.includes(selected as EnabledType)) {
+        onPick(selected as EnabledType);
+      }
+      e.preventDefault();
+    }
+  }
+
+  function focusCard(t: AllType) {
+    const allOptions = available as AllType[];
+    const idx = allOptions.indexOf(t);
+    const buttons = document.querySelectorAll('.picker-card');
+    (buttons[idx] as HTMLElement)?.focus();
+  }
+
+  function handleCardClick(t: EnabledType) {
+    selected = t;
+    onPick(t);
+  }
 </script>
 
-<div class="picker-grid">
-  {#each available as t}
-    <button class="picker-card" onclick={() => onPick(t)}>
+<div class="picker-grid" role="radiogroup" aria-label="Type" tabindex="0" onkeydown={onKeydown}>
+  {#each available as t, i}
+    <button
+      type="button"
+      class="picker-card"
+      role="radio"
+      aria-checked={selected === t}
+      tabindex={(selected ? selected === t : i === 0) ? 0 : -1}
+      onclick={() => handleCardClick(t)}
+    >
       <span class="glyph">{CARDS[t].glyph}</span>
       <span class="text">
         <strong>{CARDS[t].title}</strong>
@@ -31,7 +76,12 @@
     </button>
   {/each}
   {#each preview as t}
-    <button class="picker-card preview-disabled" disabled title="coming in v1.x — body needs design">
+    <button
+      type="button"
+      class="picker-card preview-disabled"
+      disabled
+      title="coming in v1.x — body needs design"
+    >
       <span class="glyph">{CARDS[t].glyph}</span>
       <span class="text">
         <strong>{CARDS[t].title}</strong>

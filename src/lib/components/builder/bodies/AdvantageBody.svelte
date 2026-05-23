@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createStageMachine } from '$lib/builder/stage-machine.svelte';
-  import { pickPlaceholder } from '$lib/builder/latin-placeholders';
+  import { pickPlaceholder, commitPlaceholder } from '$lib/builder/latin-placeholders';
   import { deriveBonusName } from '$lib/builder/bonus-name';
   import CardComposer from '../CardComposer.svelte';
   import CardSlot from '../CardSlot.svelte';
@@ -38,17 +38,26 @@
     existingCount?: number;
     valid?: boolean;
     bodyState?: AdvantageBodyState;
+    wipMessage?: string;
+    initialStage?: 'name' | 'type' | 'level' | 'bonus' | 'description' | 'tags';
   }
 
   function emptyState(init: Advantage | undefined, count: number): AdvantageBodyState {
-    const initialName = init?.name ?? pickPlaceholder(count);
+    // For a new advantage, leave name empty so the Latin placeholder displays
+    // as HTML ghost text (spec §"Latin placeholder commit semantics"). The
+    // displayed placeholder comes from the `placeholder` top-level const
+    // computed from `existingCount`. Editing an existing advantage uses its
+    // stored name as before. `count` is intentionally unused here but kept in
+    // the signature to avoid churning callers.
+    void count;
+    const initialName = init?.name ?? '';
     const firstEffect = init?.effects?.[0];
     const restEffects = init?.effects?.slice(1) ?? [];
 
     return {
       name: initialName,
       kind: init?.kind ?? 'merit',
-      level: Number((init?.properties.find(p => p.name === 'dot_cost_per_level' && p.type === 'number')?.value) ?? 1),
+      level: Number((init?.properties.find(p => p.name === 'dot_cost_per_level' && p.type === 'number')?.value) ?? 0),
       tags: init ? [...init.tags] : [],
       description: init?.description ?? '',
       bonus: firstEffect
@@ -79,6 +88,8 @@
     existingCount = 0,
     valid = $bindable(false),
     bodyState = $bindable<AdvantageBodyState>(),
+    wipMessage = $bindable(''),
+    initialStage,
   }: Props = $props();
 
   // Initialize bodyState if not provided by parent
@@ -88,9 +99,57 @@
 
   const machine = createStageMachine({
     tabOrder: ['name', 'type', 'level', 'bonus', 'description', 'tags'],
-    required: ['name', 'bonus'],
+    required: ['name'],
     initialConfirmed: initial?.confirmedFields ?? undefined,
   });
+
+  if (initialStage) {
+    machine.setStage(initialStage);
+  }
+
+  // Latin placeholder driving the name-input ghost text. Stable for the
+  // builder session; rotation only advances when the library grows.
+  const placeholder = pickPlaceholder(existingCount);
+
+  function onNameKeydown(e: KeyboardEvent) {
+    if (!bodyState) return;
+    if (e.key === 'Tab' || e.key === 'Enter') {
+      if (bodyState.name.trim() === '') {
+        bodyState.name = commitPlaceholder(bodyState.name, placeholder);
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        machine.advance();
+      }
+      // Tab: let default focus shift happen
+    } else if (e.key === 'Escape') {
+      bodyState.name = '';
+      e.preventDefault();
+    }
+  }
+
+  function onLevelKeydown(e: KeyboardEvent) {
+    if (!bodyState) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      bodyState.level = Math.max(0, bodyState.level - 1);
+      e.preventDefault();
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      bodyState.level = Math.min(5, bodyState.level + 1);
+      e.preventDefault();
+    } else if (e.key === 'Home') {
+      bodyState.level = 0;
+      e.preventDefault();
+    } else if (e.key === 'End') {
+      bodyState.level = 5;
+      e.preventDefault();
+    } else if (/^[0-5]$/.test(e.key)) {
+      bodyState.level = Number(e.key);
+      e.preventDefault();
+    } else if (e.key === 'Enter') {
+      machine.advance();
+      e.preventDefault();
+    }
+  }
 
   let bonusSubStage = $state<'type' | 'name' | 'value' | 'applies'>('type');
   // Sticky-name semantics: when editing an existing advantage whose stored
@@ -144,6 +203,20 @@
 
   $effect(() => {
     if (bodyState) bodyState.confirmedFields = Array.from(machine.confirmed);
+  });
+
+  $effect(() => {
+    if (!bodyState) { wipMessage = ''; return; }
+    const missing: string[] = [];
+    // Required-set is ['name'] for AdvantageBody (per T5 change).
+    if (!machine.confirmed.has('name') || bodyState.name.trim() === '') {
+      missing.push('name still empty');
+    }
+    if (missing.length === 0) {
+      wipMessage = '';
+    } else {
+      wipMessage = missing.join(' · ') + ' · saveable as draft';
+    }
   });
 
   function slotStateFor(field: string): 'empty' | 'active' | 'confirmed' {
@@ -216,6 +289,11 @@
       <CardSlot field="category" state="empty" keyLabel="Category">n/a (merits)</CardSlot>
     </div>
     <div class="card-row one-col">
+      <CardSlot field="desc" state={slotStateFor('description')} keyLabel="Description" onClick={() => machine.setStage('description')}>
+        {bodyState.description || '—'}
+      </CardSlot>
+    </div>
+    <div class="card-row one-col">
       <CardSlot field="bonus" state={slotStateFor('bonus')} keyLabel="Bonus" onClick={() => { machine.setStage('bonus'); bonusSubStage = 'type'; }}>
         {#if machine.confirmed.has('bonus')}
           <span class="bonus-line">
@@ -225,11 +303,6 @@
         {:else}
           —
         {/if}
-      </CardSlot>
-    </div>
-    <div class="card-row one-col">
-      <CardSlot field="desc" state={slotStateFor('description')} keyLabel="Description" onClick={() => machine.setStage('description')}>
-        {bodyState.description || '—'}
       </CardSlot>
     </div>
     <div class="card-row one-col">
@@ -251,7 +324,9 @@
       class="big-input"
       type="text"
       bind:value={bodyState.name}
-      onkeydown={(e) => { if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); machine.advance(); } }}
+      placeholder={placeholder}
+      onkeydown={onNameKeydown}
+      aria-label="Advantage name"
       autofocus
     />
     <p class="hint">Tab or Enter accepts placeholder · Shift+Tab goes back</p>
@@ -270,15 +345,27 @@
   {:else if bodyState && machine.stage === 'level'}
     <div class="prompt-label">— SPOTLIGHT —</div>
     <h3 class="prompt">Tier level</h3>
-    <div class="tier-row">
+    <span
+      class="tier-row"
+      role="slider"
+      aria-label="Level"
+      aria-valuemin="0"
+      aria-valuemax="5"
+      aria-valuenow={bodyState.level}
+      tabindex="0"
+      onkeydown={onLevelKeydown}
+    >
       {#each [1,2,3,4,5] as n}
         <button
+          type="button"
+          tabindex="-1"
           class="tier-pip-button"
           class:f={bodyState.level >= n}
+          aria-label={`Set to ${n}`}
           onclick={() => { if (bodyState) bodyState.level = n; machine.advance(); }}
         ></button>
       {/each}
-    </div>
+    </span>
   {:else if bodyState && machine.stage === 'bonus'}
     {#if bonusSubStage === 'type'}
       <div class="prompt-label">— SPOTLIGHT —</div>
@@ -373,6 +460,7 @@
   }
   .hint { font-size: 0.65rem; color: var(--text-muted); text-align: center; font-style: italic; margin: 0; }
   .kind-row, .tier-row { display: flex; gap: 0.45rem; justify-content: center; }
+  .tier-row:focus-visible { outline: 1px solid var(--accent-amber); outline-offset: 2px; border-radius: 0.3rem; }
   .kind-row button {
     background: var(--bg-card); border: 1px solid var(--border-faint);
     color: var(--text-secondary); border-radius: 0.3rem;

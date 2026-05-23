@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { LATIN_PLACEHOLDERS, pickPlaceholder } from './latin-placeholders';
+import { LATIN_PLACEHOLDERS, pickPlaceholder, commitPlaceholder } from './latin-placeholders';
 
 describe('LATIN_PLACEHOLDERS', () => {
   it('has the 12 stub entries from the spec', () => {
@@ -27,5 +27,23 @@ describe('pickPlaceholder', () => {
   it('returns a non-empty string for negative or large counts', () => {
     expect(pickPlaceholder(-1)).toMatch(/.+/);
     expect(pickPlaceholder(99999)).toMatch(/.+/);
+  });
+});
+
+describe('commitPlaceholder', () => {
+  it('returns the placeholder when the typed value is empty', () => {
+    expect(commitPlaceholder('', 'Sanguine Tenacity')).toBe('Sanguine Tenacity');
+  });
+
+  it('returns the typed value when non-empty (placeholder displaced)', () => {
+    expect(commitPlaceholder('User Name', 'Sanguine Tenacity')).toBe('User Name');
+  });
+
+  it('treats whitespace-only typed value as empty (commit placeholder)', () => {
+    expect(commitPlaceholder('   ', 'Sanguine Tenacity')).toBe('Sanguine Tenacity');
+  });
+
+  it('returns empty string when the placeholder itself is empty (helper does not synthesize)', () => {
+    expect(commitPlaceholder('', '')).toBe('');
   });
 });

@@ -23,9 +23,7 @@
   import type { FeatureType, CanonicalFieldName } from '$lib/character/api';
   import { modifiers as modifiersStore } from '../../store/modifiers.svelte';
   import { computeActiveDeltas, activeAdvantageItemIds } from '$lib/character/active-deltas';
-  import ItemBuilderShell from '$lib/components/builder/ItemBuilderShell.svelte';
-  import ModifierEffectBody, { type ModifierEffectBodyState } from '$lib/components/builder/bodies/ModifierEffectBody.svelte';
-  import type { ModifierEffect } from '../../types';
+  import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { publishEvent } from '../../store/toolEvents';
 
@@ -125,11 +123,7 @@
     }
   }
 
-  // ── Chip right-click — open editor popover ────────────────────────────
-  let editorTarget = $state<{ itemId: string; name: string; description: string; effects: ModifierEffect[]; tags: string[] } | null>(null);
-  let effectsValid = $state(false);
-  let effectsBodyState = $state<ModifierEffectBodyState | undefined>();
-
+  // ── Chip right-click — materialize-if-needed then route to /builder/modifier/[id] ──
   async function openChipEditor(itemId: string, name: string, description: string, ev: Event) {
     ev.preventDefault(); // suppress browser context menu
     if (character.source !== 'foundry') return;
@@ -145,26 +139,8 @@
         description,
       });
     }
-    editorTarget = {
-      itemId,
-      name: modifier.name,
-      description: modifier.description,
-      effects: modifier.effects.map(e => ({ ...e })),
-      tags: [...modifier.tags],
-    };
+    await goto(`/builder/modifier/${modifier.id}`);
   }
-
-  async function saveChipEditor(effects: ModifierEffect[], tags: string[]) {
-    if (!editorTarget) return;
-    const modifier = characterModifiers.find(
-      m => m.binding.kind === 'advantage' && m.binding.item_id === editorTarget!.itemId,
-    );
-    if (!modifier) return;
-    await modifiersStore.update(modifier.id, { effects, tags });
-    editorTarget = null;
-  }
-
-  function closeChipEditor() { editorTarget = null; }
 
   const VIEW_LABELS = ['Basics', 'Stats', 'Disciplines', 'Advantages'] as const;
 
@@ -872,27 +848,6 @@
             onclick={() => flip(+1)}>›</button>
   </footer>
 </div>
-
-{#if editorTarget !== null}
-  <ItemBuilderShell
-    open
-    title={editorTarget?.name ?? 'Edit modifier'}
-    saveLabel={effectsValid ? 'Save' : 'Save WIP'}
-    bind:valid={effectsValid}
-    onSave={() => {
-      if (effectsBodyState) saveChipEditor(effectsBodyState.effects, effectsBodyState.tags);
-    }}
-    onCancel={() => { closeChipEditor(); effectsBodyState = undefined; }}
-  >
-    <ModifierEffectBody
-      initialEffects={editorTarget?.effects ?? []}
-      initialTags={editorTarget?.tags ?? []}
-      {character}
-      bind:valid={effectsValid}
-      bind:bodyState={effectsBodyState}
-    />
-  </ItemBuilderShell>
-{/if}
 
 <style>
   /* ── Card frame: 2:3 aspect, scales by --card-scale ─────────────────── */
