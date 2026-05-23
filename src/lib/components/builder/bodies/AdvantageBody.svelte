@@ -39,6 +39,7 @@
     valid?: boolean;
     bodyState?: AdvantageBodyState;
     wipMessage?: string;
+    initialStage?: 'name' | 'type' | 'level' | 'bonus' | 'description' | 'tags';
   }
 
   function emptyState(init: Advantage | undefined, count: number): AdvantageBodyState {
@@ -88,6 +89,7 @@
     valid = $bindable(false),
     bodyState = $bindable<AdvantageBodyState>(),
     wipMessage = $bindable(''),
+    initialStage,
   }: Props = $props();
 
   // Initialize bodyState if not provided by parent
@@ -100,6 +102,10 @@
     required: ['name'],
     initialConfirmed: initial?.confirmedFields ?? undefined,
   });
+
+  if (initialStage) {
+    machine.setStage(initialStage);
+  }
 
   // Latin placeholder driving the name-input ghost text. Stable for the
   // builder session; rotation only advances when the library grows.

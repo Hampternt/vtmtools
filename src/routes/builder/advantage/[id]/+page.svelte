@@ -6,6 +6,13 @@
   import type { Advantage } from '../../../../types';
 
   const id = $derived(Number(page.params.id));
+  const stageParam = $derived(page.url.searchParams.get('stage') ?? null);
+
+  const initialStage = $derived(
+    (['name', 'type', 'level', 'bonus', 'description', 'tags'] as const).includes(stageParam as 'name')
+      ? (stageParam as 'name' | 'type' | 'level' | 'bonus' | 'description' | 'tags')
+      : undefined
+  );
 
   let initial = $state<Advantage | undefined>(undefined);
   let bodyState = $state<AdvantageBodyState | undefined>(undefined);
@@ -76,7 +83,7 @@
       <span class="subtitle">· {initial.name}</span>
       <button type="button" class="close" aria-label="Close" onclick={cancel}>×</button>
     </header>
-    <AdvantageBody {initial} bind:bodyState bind:valid bind:wipMessage />
+    <AdvantageBody {initial} bind:bodyState bind:valid bind:wipMessage {initialStage} />
     <footer class="composer-footer">
       <button type="button" class="delete" onclick={onDelete}>Delete</button>
       {#if wipMessage}
