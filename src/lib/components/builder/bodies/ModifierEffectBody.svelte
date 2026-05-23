@@ -19,12 +19,14 @@
     character?: BridgeCharacter;
     valid?: boolean;
     bodyState?: ModifierEffectBodyState;
+    wipMessage?: string;
   }
 
   let {
     initialEffects, initialTags, character,
     valid = $bindable(false),
     bodyState = $bindable<ModifierEffectBodyState>(),
+    wipMessage = $bindable(''),
   }: Props = $props();
 
   if (!bodyState) {
@@ -44,6 +46,15 @@
 
   $effect(() => {
     if (bodyState) bodyState.confirmedFields = Array.from(machine.confirmed);
+  });
+
+  $effect(() => {
+    if (!bodyState) { wipMessage = ''; return; }
+    if (!machine.confirmed.has('effects') || bodyState.effects.length === 0) {
+      wipMessage = 'no effects yet · saveable as draft';
+    } else {
+      wipMessage = '';
+    }
   });
 
   function slotStateFor(field: string): 'empty' | 'active' | 'confirmed' {

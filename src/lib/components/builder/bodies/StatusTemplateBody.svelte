@@ -20,6 +20,7 @@
     initial?: StatusTemplate | null;
     valid?: boolean;
     bodyState?: StatusTemplateBodyState;
+    wipMessage?: string;
   }
 
   function emptyState(init: StatusTemplate | null | undefined): StatusTemplateBodyState {
@@ -45,6 +46,7 @@
     initial,
     valid = $bindable(false),
     bodyState = $bindable<StatusTemplateBodyState>(),
+    wipMessage = $bindable(''),
   }: Props = $props();
 
   if (!bodyState) {
@@ -63,6 +65,18 @@
 
   $effect(() => {
     if (bodyState) bodyState.confirmedFields = Array.from(machine.confirmed);
+  });
+
+  $effect(() => {
+    if (!bodyState) { wipMessage = ''; return; }
+    const missing: string[] = [];
+    if (!machine.confirmed.has('name') || bodyState.name.trim() === '') {
+      missing.push('name still empty');
+    }
+    if (!machine.confirmed.has('effects') || bodyState.effects.length === 0) {
+      missing.push('no effects yet');
+    }
+    wipMessage = missing.length === 0 ? '' : missing.join(' · ') + ' · saveable as draft';
   });
 
   function slotStateFor(field: string): 'empty' | 'active' | 'confirmed' {

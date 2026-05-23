@@ -38,6 +38,7 @@
     existingCount?: number;
     valid?: boolean;
     bodyState?: AdvantageBodyState;
+    wipMessage?: string;
   }
 
   function emptyState(init: Advantage | undefined, count: number): AdvantageBodyState {
@@ -86,6 +87,7 @@
     existingCount = 0,
     valid = $bindable(false),
     bodyState = $bindable<AdvantageBodyState>(),
+    wipMessage = $bindable(''),
   }: Props = $props();
 
   // Initialize bodyState if not provided by parent
@@ -172,6 +174,20 @@
 
   $effect(() => {
     if (bodyState) bodyState.confirmedFields = Array.from(machine.confirmed);
+  });
+
+  $effect(() => {
+    if (!bodyState) { wipMessage = ''; return; }
+    const missing: string[] = [];
+    // Required-set is ['name'] for AdvantageBody (per T5 change).
+    if (!machine.confirmed.has('name') || bodyState.name.trim() === '') {
+      missing.push('name still empty');
+    }
+    if (missing.length === 0) {
+      wipMessage = '';
+    } else {
+      wipMessage = missing.join(' · ') + ' · saveable as draft';
+    }
   });
 
   function slotStateFor(field: string): 'empty' | 'active' | 'confirmed' {
