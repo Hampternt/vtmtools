@@ -171,6 +171,9 @@
     /* Inline blur validation */
     --validation-warn: #d9a560;
     --validation-error: #c46050;
+
+    /* Alias for spec/plan references to --accent-red — same value as --accent */
+    --accent-red: #cc2222;
   }
 
   @font-face {
