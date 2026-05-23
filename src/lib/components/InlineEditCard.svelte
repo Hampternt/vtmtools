@@ -12,9 +12,10 @@
     onSaved?: (saved: Advantage) => void;
     onCancelled?: () => void;
     onDelete?: (id: number) => void;
+    onPush?: () => void;
   }
 
-  let { advantage, editing = $bindable(false), onSaved, onCancelled, onDelete }: Props = $props();
+  let { advantage, editing = $bindable(false), onSaved, onCancelled, onDelete, onPush }: Props = $props();
 
   // Local edit-mode draft state — only populated when entering edit mode.
   let draftName = $state('');
@@ -146,6 +147,7 @@
     input={{ kind: 'saved', data: advantage }}
     onedit={enterEdit}
     ondelete={() => onDelete?.(advantage.id)}
+    {onPush}
   />
 {:else}
   <article class="vamp-card editing">

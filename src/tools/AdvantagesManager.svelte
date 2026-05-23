@@ -5,6 +5,7 @@
   import { cubicOut } from 'svelte/easing';
   import { goto } from '$app/navigation';
   import AdvantageCard from '$lib/components/AdvantageCard.svelte';
+  import InlineEditCard from '$lib/components/InlineEditCard.svelte';
   import {
     listAdvantages,
     deleteAdvantage,
@@ -292,10 +293,10 @@
           animate:flip={{ duration: 300, easing: cubicOut }}
           transition:fade={{ duration: 120 }}
         >
-          <AdvantageCard
-            input={{ kind: 'saved', data: entry }}
-            onedit={() => goto(`/builder/advantage/${entry.id}`)}
-            ondelete={() => handleDelete(entry.id)}
+          <InlineEditCard
+            advantage={entry}
+            onSaved={(saved) => { allEntries = allEntries.map(x => x.id === saved.id ? saved : x); }}
+            onDelete={async (id) => { await handleDelete(id); }}
             onPush={async () => {
               try {
                 await pushAdvantageToWorld(entry.id);
