@@ -27,11 +27,11 @@
   let busy = $state(false);
 
   function levelFromAdvantage(a: Advantage): number {
-    // Reads the dot_cost_per_level property that AdvantageBody / route
-    // writers persist. AdvantageCard reads `level` instead (pre-existing
-    // divergence not addressed by this task).
-    const f = a.properties.find(p => p.name === 'dot_cost_per_level');
-    if (!f || f.type !== 'number') return 0;
+    // Reads dot_cost_per_level first (matches new writer convention),
+    // falls back to 'level' (seed / library_push / Foundry-pull). Mirrors
+    // AdvantageCard's reader, so display and edit start from the same value.
+    const f = a.properties.find(p => (p.name === 'dot_cost_per_level' || p.name === 'level') && p.type === 'number');
+    if (!f) return 0;
     const v = Array.isArray(f.value) ? f.value[0] ?? 0 : f.value;
     return Number(v) || 0;
   }
@@ -52,7 +52,10 @@
       kind: draftKind,
       description: draftDescription,
       tags: [...draftTags],
-      properties: [{ name: 'dot_cost_per_level', type: 'number', value: draftLevel }],
+      properties: [
+        ...advantage.properties.filter(p => p.name !== 'dot_cost_per_level' && p.name !== 'level'),
+        { name: 'dot_cost_per_level', type: 'number', value: draftLevel },
+      ],
       effects: [...advantage.effects.map(e => ({ ...e, paths: [...e.paths] }))],
       wip: asWip,
       confirmedFields: advantage.confirmedFields,
@@ -64,13 +67,17 @@
     busy = true;
     try {
       const wip = draftName.trim() === '';
-      await updateAdvantage(advantage.id, buildInput(wip));
+      const input = buildInput(wip);
+      await updateAdvantage(advantage.id, input);
       onSaved?.({
         ...advantage,
         name: draftName,
         description: draftDescription,
         tags: [...draftTags],
         kind: draftKind,
+        properties: input.properties,
+        wip: input.wip ?? false,
+        effects: input.effects,
       });
       editing = false;
     } finally {
