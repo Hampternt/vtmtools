@@ -34,18 +34,20 @@
     onClick?: (target: HTMLElement) => void;
   }
 
-  // `onedit` retained in the Props interface for caller compatibility but
-  // not surfaced as a ✎ affordance in v1 — spec §"Hover-reveal edit
-  // affordance" scopes the inline edit icon to AdvantageCard only. The
-  // callers (StatusPaletteDock) still pass it, but we no longer render
-  // an edit affordance; click-the-template-to-edit was never a thing on
-  // saved rows either, so dropping the wire-up is a no-op visually.
+  // `onedit` is intentionally NOT surfaced as a ✎ icon — spec §"Hover-reveal
+  // edit affordance" scopes the inline edit icon to AdvantageCard only.
+  // Click-the-card-to-edit IS supported in saved mode (the spec only forbids
+  // the icon, not the click affordance), and matches AdvantageCard's read-
+  // mode behavior of opening its editor on click. The saved-mode <article>
+  // below wires its onclick / onkeydown to fire onedit when the click
+  // target isn't an inner interactive element (delete icon, apply button).
   let {
     input,
     summary = '',
     onapply,
     applyDisabled = false,
     applyTitle = '',
+    onedit,
     onDelete,
     onClick,
   }: Props = $props();
@@ -65,14 +67,49 @@
     const ok = confirm(`Delete ${name}?`);
     if (ok) onDelete?.();
   }
+
+  function onApplyClick(e: Event) {
+    e.stopPropagation();
+    onapply?.();
+  }
+
+  function onArticleClick(e: MouseEvent) {
+    if (isPreview) {
+      if (onClick) onClick(e.target as HTMLElement);
+      return;
+    }
+    // Saved mode: card-body click → onedit, unless the click originated from
+    // an inner interactive element (delete icon, apply button).
+    if (!onedit) return;
+    const t = e.target;
+    if (t instanceof HTMLElement && t.closest('button')) return;
+    onedit();
+  }
+
+  function onArticleKeydown(e: KeyboardEvent) {
+    if (isPreview) return;
+    if (!onedit) return;
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    // Only the article itself activates — inner buttons handle their own keys.
+    if (e.target !== e.currentTarget) return;
+    e.preventDefault();
+    onedit();
+  }
+
+  const isSavedEditable = $derived(input.kind === 'saved' && !!onedit);
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <article
   class="vamp-card status-template"
   class:preview={isPreview}
   class:wip={isWip}
+  class:editable={isSavedEditable}
   data-source={isImported ? 'fvtt' : 'native'}
-  onclick={isPreview && onClick ? (e) => onClick(e.target as HTMLElement) : undefined}
+  role={isSavedEditable ? 'button' : undefined}
+  tabindex={isSavedEditable ? 0 : undefined}
+  onclick={onArticleClick}
+  onkeydown={isSavedEditable ? onArticleKeydown : undefined}
 >
   {#if input.kind === 'saved' && onDelete}
     <button
@@ -121,7 +158,7 @@
       <button
         type="button"
         class="apply"
-        onclick={onapply}
+        onclick={onApplyClick}
         disabled={applyDisabled}
         title={applyTitle}
       >Apply</button>
@@ -233,6 +270,13 @@
   .vamp-card.preview .frame {
     border-color: var(--accent-amber);
     box-shadow: 0 0 16px rgba(217, 165, 96, 0.22);
+  }
+  /* Saved-mode click-to-edit affordance. Cursor + focus ring on the
+     article when it's role=button. */
+  .vamp-card.editable { cursor: pointer; }
+  .vamp-card.editable:focus-visible {
+    outline: 1px solid var(--accent-amber);
+    outline-offset: 2px;
   }
   /* WIP draft indicator — subtle dimming. */
   .vamp-card.wip {
