@@ -11,7 +11,7 @@ This spec is the result of a fresh brainstorm session (`.superpowers/brainstorm/
 2. **Form #2 runs as a route, not a dialog modal** — the user explicitly wants it to be its own page during alpha for testing simplicity.
 3. **Card visual identity inspired by the Witcher bestiary card** (CodePen `aditigaur/JjJgyrp`) — three-zone vertical layout, outline+offset frame, Spartan-thin uppercase titles, Oswald-light body, three-box footer with letter-spaced labels.
 4. **No hero zone** on the card (the user removed it during brainstorm) — title sits at the top of the outlined frame; per-kind theming lives in the Type detail box.
-5. **Required-field shape changed**: name is the only hard-required field. `kind` defaults to `'merit'`. `level` defaults to `0`. The bonus (`effects[0]`) is optional.
+5. **Required-field shape changed**: `name` is the only required field. `kind` defaults to `'merit'`, `level` defaults to `0`, and the bonus (`effects[0]`) is optional. The Save button label flips from "Save WIP" to "Save" the instant the name field is non-empty.
 6. **Best practices applied** from 2026 form-UX research (NN/g, W3C WAI-ARIA APG, IxDF, PatternFly, Eleken, Anve, Venture Harbour). The original spec's behavioral guarantees gain explicit affordances: visible focus rings, inline-on-blur validation, autofocus on stage change, kbd-styled key hints, custom-widget keyboard maps per the W3C APG patterns.
 
 The data-model additions from the original spec (`auto_success` ModifierKind, `wip` + `confirmed_fields` columns, `bonus_name` per `ModifierEffect`, `effects[]` on Advantage) stay as-is. No backend changes in this remediation.
@@ -91,6 +91,8 @@ Authoring shape: `effects[]` + `tags`. Identity comes from the bound character. 
 
 ### Form #1 — Inline-edit card
 
+**Scope (v1):** Advantage cards only. The ✎ icon, click-to-enter-edit-mode behavior, and inline field transformations apply to `AdvantageCard` exclusively. StatusTemplate and ModifierEffect editing remains in Form #2 in v1 — StatusTemplate's `effects[]` is required (no clean field-by-field shape) and ModifierEffect needs a character-context binding to author against. Deferred to v2.
+
 **Entry point:** click anywhere on an existing card in the library list. A hover-reveal ✎ icon at the top-right of the card communicates editability without cluttering the read view.
 
 **Read mode → edit mode transition:** outline shifts from solid gray (`--outline-color: #83868a`) to dashed amber (`--accent-amber: #d9a560`). A top-of-card hint strip appears with kbd-styled key references ("click any field · `Tab` walks · `Esc` cancels · `Ctrl+S` saves"). Each display element becomes its corresponding input:
@@ -114,7 +116,7 @@ Authoring shape: `effects[]` + `tags`. Identity comes from the bound character. 
 
 **Validation:** inline on blur. If the user empties the name and tabs away, an orange warning line appears below the input ("⚠ name is empty — won't save as complete"). Save WIP still works; just informs the user.
 
-**Hand-off to Form #2:** the "edit →" button on the bonus footer box closes Form #1's edit mode and routes to Form #2 with the bonus stage active. After Form #2's Save, the user returns to the library list (not back to Form #1 edit mode — Form #2's save is authoritative).
+**Hand-off to Form #2:** the "edit →" button on the bonus footer box auto-saves any pending Form #1 edits as a WIP draft (leveraging Goal 7's "Save WIP always succeeds" guarantee) and then routes to Form #2 with the bonus stage active. The auto-save uses the same `updateAdvantage` call Form #1's Save button would. In-flight edits — including in-progress typing — land as part of the WIP draft, so nothing in Form #1's edit state is lost on hand-off. After Form #2's Save, the user returns to the library list (not back to Form #1 edit mode — Form #2's save is authoritative for the persisted record).
 
 ### Form #2 — Builder page
 
@@ -204,11 +206,19 @@ Footer container: `margin: 0 0.55rem 0.6rem`, `padding: 0 0.4rem`, `display: fle
 
 **Bonus magnitude treatment:** the numeric value (e.g. `+5`) renders in glowing crimson (`color: var(--blood-10)`, `text-shadow: 0 0 4px rgba(224, 86, 58, 0.4)`, `font-weight: 600`, `font-size: 0.95rem`). The scope (e.g. `Social`) renders in `--accent-blue`. When no bonus: the value cell shows `—` at `opacity: 0.45`.
 
-**Tier dots** in the Level detail box: `0.48rem × 0.48rem` circles, `gap: 0.18rem`, filled dot uses `--accent-amber` with `0 0 3px rgba(217, 165, 96, 0.55)` glow.
+**Tier dots** in the Level detail box: `0.48rem × 0.48rem` circles, `gap: 0.18rem`, filled dot uses `--accent-amber` with `0 0 3px rgba(217, 165, 96, 0.55)` glow. The range `0–5` represents the V5 dot cost / rating of the advantage: `0` indicates a trait with no dot-cost mechanic (flavor-only or narrative), `1–5` are standard merit/flaw ratings.
 
 ### Hover-reveal edit affordance (read mode)
 
-A small `✎` icon at the top-right corner of the card (`position: absolute; top: 0.5rem; right: 0.5rem`). `opacity: 0` by default; transitions to `0.7` on `.vamp-card:hover`. Click target is the entire card, not just the icon — the icon is a discoverability cue only.
+A small `✎` icon at the **top-right** corner of the card (`position: absolute; top: 0.5rem; right: 0.5rem`). `opacity: 0` by default; transitions to `0.7` on `.vamp-card:hover`. Click target is the entire card, not just the icon — the icon is a discoverability cue only. Applies to `AdvantageCard` only in v1 (per Form #1 scope above); StatusTemplate and ModifierEffect cards do not show the ✎ icon.
+
+### Hover-reveal delete affordance (read mode)
+
+A trash glyph (`🗑` or asset-library equivalent when one ships) at the **bottom-right** corner of the card (`position: absolute; bottom: 0.5rem; right: 0.5rem`). Intentionally a *different corner* from the ✎ icon to prevent mis-clicks between edit and delete — same-corner pairing of two destructive-looking icons is a known Fitts's Law hazard. `opacity: 0` by default; transitions to `0.6` on `.vamp-card:hover`. The click target is the icon itself only (not the card body — clicking elsewhere on the card enters edit mode, when applicable).
+
+Clicking the trash glyph opens a confirmation dialog: `"Delete <name>?"` with `[Cancel]` and `[Delete]` buttons. The Delete button uses `--accent-red`. On confirm, the card is removed via the existing delete IPC (e.g. `deleteAdvantage(id)`, `deleteStatusTemplate(id)`).
+
+Unlike the ✎ icon, the trash affordance applies to **all three card types** (Advantage, StatusTemplate, ModifierEffect) — deletion is a universal need; inline editing is not.
 
 ### Typography stack (locked)
 
@@ -370,17 +380,18 @@ The queue is always present when the form is not yet complete. When all required
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ [● 1 stage remaining]   [Cancel]   [Save WIP]       │
+│ [Delete]      [● 1 stage remaining]   [Cancel] [Save]│
 └─────────────────────────────────────────────────────┘
 ```
 
-`padding: 0.5rem 0.75rem`, `background: rgba(0, 0, 0, 0.25)`, `display: flex`, `gap: 0.4rem`.
+`padding: 0.5rem 0.75rem`, `background: rgba(0, 0, 0, 0.25)`, `display: flex`, `gap: 0.4rem`, `justify-content: space-between`.
 
-**WIP strip** (left, when invalid): amber pill with a small dot prefix and a concise missing-fields message. Examples: `"name still empty · saveable as draft"`, `"1 stage remaining · saveable as draft"`. The body computes the missing-fields message via `$effect` driven by `machine.confirmed` and exposes it via `$bindable wipMessage`.
+**WIP strip** (center, when invalid): amber pill with a small dot prefix and a concise missing-fields message. Examples: `"name still empty · saveable as draft"`, `"1 stage remaining · saveable as draft"`. The body computes the missing-fields message via `$effect` driven by `machine.confirmed` and exposes it via `$bindable wipMessage`.
 
-**Buttons** (right):
-- `Cancel` — closes the builder with confirmation prompt if there's unsaved work.
-- `Save WIP` (when invalid) or `Save` (when all required confirmed). Label flips automatically. Color: muted button when WIP, accent-red when Save.
+**Buttons:**
+- `Delete` (**left**, edit mode only) — opens the same confirmation dialog the card's hover trash glyph uses (`"Delete <name>?"` → Cancel / Delete). Hidden entirely when creating a new item (no `id` to delete). Visually de-emphasized (muted button styling) so it doesn't draw the eye away from Save.
+- `Cancel` (right) — closes the builder with confirmation prompt if there's unsaved work.
+- `Save WIP` (right, when invalid) or `Save` (when all required confirmed). Label flips automatically. Color: muted button when WIP, `--accent-red` when Save.
 
 ---
 
@@ -460,6 +471,16 @@ Browsers do NOT provide keyboard support for custom widgets. Each widget below e
 
 All widgets must implement `role`, `aria-label` / `aria-labelledby`, and the relevant `aria-*` state attributes from their APG entry. Focus management on group entry uses the roving-tabindex technique where appropriate.
 
+### Latin placeholder commit semantics (name stage)
+
+The name input pre-fills with a Latin placeholder (from `latin-placeholders.ts`) styled as ghost text so the user sees a complete-looking name even before typing.
+
+- `Tab` or `Enter` with no user-typed characters present **commits the currently-displayed Latin placeholder as the name value** — the placeholder behaves as an accepted suggestion. The placeholder text becomes the persisted `name`.
+- `Esc` rejects the placeholder and clears the field (so the input becomes empty rather than holding placeholder text).
+- Once any character is typed, the placeholder is replaced by user text. `Tab` / `Enter` then commits the typed text. `Backspace`-ing back to an empty field re-shows the placeholder.
+
+This behavior applies in both Form #1's inline edit mode and Form #2's name stage spotlight. The visual treatment (italic, `opacity: 0.55`) makes the placeholder-as-suggestion state distinguishable from typed text.
+
 ---
 
 ## Responsive design
@@ -525,6 +546,11 @@ src/lib/components/
   InlineEditCard.svelte             — NEW; wraps AdvantageCard with edit-mode transformation
   AdvantageCard.svelte              — refactored; no hero, three-zone, hover-reveal ✎ icon
   StatusTemplateCard.svelte         — refactored; same three-zone treatment
+```
+
+**Component relationship — InlineEditCard ↔ AdvantageCard.** `InlineEditCard` is a thin wrapper that takes an `editing: boolean` prop: when `false`, it renders `AdvantageCard` in read mode; when `true`, it renders the inline edit form (input/textarea/chip-input/select/pip-group equivalents of each slot) using the same outer outlined frame so the read↔edit transition feels in-place. `AdvantageCard` itself stays display-only and is **re-used as the card preview inside Form #2** (zone 2) — the spec's card-preview slot grid is `AdvantageCard` rendered with `wip` data instead of `saved` data. This keeps a single source of truth for card visuals and means visual changes to `AdvantageCard` propagate to both Form #1's read mode AND Form #2's preview automatically.
+
+```text
 
 src/lib/builder/
   stage-machine.svelte.ts           — kept (reactive); required-set changes per body
@@ -558,16 +584,12 @@ Per the user's explicit choice in the brainstorm, these safeguards apply ONLY to
 
 ## Open questions (calibration, not blocking)
 
-1. **Stage-machine `required` set for AdvantageBody — `['name']` vs `['name', 'type']`.** The user's exact wording during brainstorm was: _"the inputs that would need to be filled would be name, type and level, but level can be 0 so defaulting it to zero making it always have data unless otherwise changed. effect is not required."_ Level is explicitly defaulted-to-have-data. Effect is explicitly not required. Name is required. Type has a default of `'merit'` but the user listed it alongside name and level as an "input that needs to be filled." Two reasonable readings:
-   - **(a)** `required: ['name']` — name is the only field the user must actively touch. Type and level pass through with defaults. Most permissive, fastest path to a saveable item.
-   - **(b)** `required: ['name', 'type']` — the user must walk past the type stage even if they accept the default 'merit'. More deliberate.
-
-   Spec currently defaults to **(a)** because it best matches the brainstorm's permissiveness. If you want (b), flip the constant — single-line change.
-2. **Hover-reveal ✎ icon position.** Top-right of the card is the standard pattern. If a future asset library brings actual SVG edit icons, swap the Unicode glyph for the asset; behavior stays the same.
-3. **Form #2 route shape.** `/builder/advantage/new` vs `/advantages/new` vs `/library/advantage/new`. Plan picks the routing convention based on existing project routing patterns (it's a minor naming detail).
-4. **Latin placeholder pool expansion** from 12 → ~50 entries. Stated as a follow-up in the original spec; still a follow-up here.
-5. **Cancel confirmation threshold.** Cancel always asks for confirmation if there's unsaved work? Or only if a non-default value was entered? Default: always ask if `confirmed` set is non-empty or any input has user-entered text different from initial.
-6. **`scope` legacy field** on ModifierEffect (free-text predating `paths`). No UI in this redesign. Keep for round-tripping or drop entirely? Default: keep for round-tripping.
+1. **Hover-reveal ✎ icon position.** Top-right of the card is the standard pattern. If a future asset library brings actual SVG edit icons, swap the Unicode glyph for the asset; behavior stays the same.
+2. **Form #2 route shape.** `/builder/advantage/new` vs `/advantages/new` vs `/library/advantage/new`. Plan picks the routing convention based on existing project routing patterns (it's a minor naming detail).
+3. **Latin placeholder pool expansion** from 12 → ~50 entries. Stated as a follow-up in the original spec; still a follow-up here.
+4. **Cancel confirmation threshold.** Cancel always asks for confirmation if there's unsaved work? Or only if a non-default value was entered? Default: always ask if `confirmed` set is non-empty or any input has user-entered text different from initial.
+5. **`scope` legacy field** on ModifierEffect (free-text predating `paths`). No UI in this redesign. Keep for round-tripping or drop entirely? Default: keep for round-tripping.
+6. **v1.x polish: edit→ hand-off toast.** When Form #1's "edit →" auto-saves pending edits and routes to Form #2 (per the Hand-off paragraph), the silent persistence could surprise a user who didn't intend to save in-progress typing. A one-line toast (`"Saved your edits — opening bonus editor"`) on the hand-off would close that feedback loop. Defer to v1.x — non-blocking; Form #1's existing Cancel button + the auto-save being a WIP (not a final save) keep destructive risk low.
 
 ---
 
