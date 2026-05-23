@@ -4,12 +4,14 @@
     onChange: (v: number) => void;
     min?: number;
     max?: number;
+    ariaLabel?: string;
   }
 
-  let { value, onChange, min = 0, max = 100 }: Props = $props();
+  let { value, onChange, min = 0, max = 100, ariaLabel }: Props = $props();
   let numpadOpen = $state(false);
   let numpadDraft = $state('');
   let inputEl: HTMLInputElement;
+  let sliderEl: HTMLDivElement;
 
   function setValue(v: number) {
     const clamped = Math.max(min, Math.min(max, Math.round(v)));
@@ -32,6 +34,41 @@
   function onArrow(e: KeyboardEvent) {
     if (e.key === 'ArrowUp')   { e.preventDefault(); setValue(value + 1); }
     if (e.key === 'ArrowDown') { e.preventDefault(); setValue(value - 1); }
+  }
+
+  function onSliderKeydown(e: KeyboardEvent) {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      setValue(value - 1);
+      e.preventDefault();
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      setValue(value + 1);
+      e.preventDefault();
+    } else if (e.key === 'PageDown') {
+      setValue(value - 10);
+      e.preventDefault();
+    } else if (e.key === 'PageUp') {
+      setValue(value + 10);
+      e.preventDefault();
+    } else if (e.key === 'Home') {
+      setValue(min);
+      e.preventDefault();
+    } else if (e.key === 'End') {
+      setValue(max);
+      e.preventDefault();
+    } else if (/^[0-9]$/.test(e.key)) {
+      const n = Number(e.key);
+      if (n >= min && n <= max) {
+        setValue(n);
+        e.preventDefault();
+      }
+    }
+  }
+
+  function onSliderWheel(e: WheelEvent) {
+    if (document.activeElement !== e.currentTarget) return;
+    if (e.deltaY < 0) setValue(value + 1);
+    else setValue(value - 1);
+    e.preventDefault();
   }
 
   function commitNumpad() {
@@ -57,7 +94,18 @@
     onwheel={onWheel}
     onkeydown={onArrow}
   />
-  <div class="dot-row">
+  <div
+    bind:this={sliderEl}
+    class="dot-row"
+    role="slider"
+    aria-valuemin={min}
+    aria-valuemax={max}
+    aria-valuenow={value}
+    aria-label={ariaLabel ?? 'Value'}
+    tabindex="0"
+    onkeydown={onSliderKeydown}
+    onwheel={onSliderWheel}
+  >
     {#each [1,2,3,4,5,6,7,8,9,10] as n}
       <button
         type="button"
@@ -65,6 +113,7 @@
         class:filled={value >= n}
         onclick={() => setValue(n)}
         aria-label="Set value to {n}"
+        tabindex="-1"
       ></button>
     {/each}
     <button
@@ -72,6 +121,7 @@
       class="custom-trigger"
       onclick={() => { numpadOpen = !numpadOpen; numpadDraft = String(value); }}
       aria-label="Open custom value numpad"
+      tabindex="-1"
     >…</button>
   </div>
 
@@ -106,7 +156,13 @@
     outline: none;
   }
   .value-input:focus { border-color: var(--accent); }
-  .dot-row { display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; }
+  .dot-row {
+    display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap;
+    padding: 0.15rem 0.25rem;
+    border-radius: 0.3rem;
+    outline: none;
+  }
+  .dot-row:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
   .blood-dot {
     width: 1.55rem; height: 1.55rem; border-radius: 50%;
     border: 1px solid var(--border-surface);
