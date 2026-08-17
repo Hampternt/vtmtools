@@ -67,6 +67,33 @@ cargo test --manifest-path src-tauri/Cargo.toml
 backed by a green run. Expected (non-regression) warnings are documented
 in `ARCHITECTURE.md` §10 — do not "fix" them.
 
+**This repo runs one gate, not two — a deliberate override of the global
+workflow.** `~/.claude/CLAUDE.md` splits gates in two: a fast item gate
+after every item, the full suite once per pack. Here `verify.sh` is
+*both*. It runs before every commit, per the rule in Claude-specific
+rules below, and no lighter substitute counts.
+
+Why this repo opts out, so nobody re-derives it:
+
+- **It costs 57 seconds warm** (measured 2026-08-18: `npm run check` +
+  `cargo test` + `npm run build`, all green). The two-tier split exists
+  to keep slow suites off the per-item path; at under a minute there is
+  not enough to save for a second gate concept to pay for itself.
+- **There is no `scripts/check.sh` here**, so adopting the split would
+  mean inventing one and maintaining it.
+- **Most items here touch logic** — dice mechanics, V5 rules, bridge
+  protocol decoding, character transforms. The global item gate already
+  requires the targeted test module for exactly that kind of work, and
+  `cargo test` for this crate *is* that module. The lighter gate would
+  save almost nothing on the items where it matters.
+
+**Nothing enforces this.** A commit-time hook used to flag violations
+(one was caught on 2026-04-26, when a plan step specified only
+`cargo check`); it is gone, and `.claude/settings.json` no longer carries
+anything that checks. The rule now depends on being read. When writing a
+manifest for this repo, put the `verify.sh` step in each item's steps
+explicitly rather than leaving it implied.
+
 ## Claude-specific rules
 
 - Never run `git status -uall` on this repo — can cause memory issues
